@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.agent_types import (
+from src.contract_types import (
+    OneTurnResponse,
     AgentPermissions,
     AgentRunResult,
     AgentRuntimeConfig,
@@ -149,6 +150,41 @@ class ToolContractsTests(unittest.TestCase):
         )
         restored = ToolExecutionResult.from_dict(result.to_dict())
         self.assertEqual(restored, result)
+
+
+class OneTurnResponseTests(unittest.TestCase):
+    """验证模型单轮响应契约。"""
+
+    def test_one_turn_response_round_trip(self) -> None:
+        turn = OneTurnResponse(
+            content='done',
+            tool_calls=(
+                ToolCall(id='call_1', name='read_file', arguments={'path': 'README.md'}),
+            ),
+            finish_reason='tool_calls',
+            usage=TokenUsage(input_tokens=21, output_tokens=9),
+        )
+
+        restored = OneTurnResponse.from_dict(turn.to_dict())
+        self.assertEqual(restored.content, 'done')
+        self.assertEqual(len(restored.tool_calls), 1)
+        self.assertEqual(restored.tool_calls[0].name, 'read_file')
+        self.assertEqual(restored.finish_reason, 'tool_calls')
+        self.assertEqual(restored.usage.input_tokens, 21)
+
+    def test_one_turn_response_handles_invalid_payload(self) -> None:
+        restored = OneTurnResponse.from_dict(
+            {
+                'content': None,
+                'toolCalls': 'bad',
+                'finishReason': 123,
+                'usage': 'bad',
+            }
+        )
+        self.assertEqual(restored.content, '')
+        self.assertEqual(restored.tool_calls, ())
+        self.assertEqual(restored.finish_reason, '123')
+        self.assertEqual(restored.usage, TokenUsage())
 
 
 class AgentRunResultTests(unittest.TestCase):

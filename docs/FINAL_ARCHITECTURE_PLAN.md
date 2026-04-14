@@ -373,7 +373,7 @@
 
 验收标准（DoD）：
 
-1. 能返回完整 AssistantTurn。
+1. 能返回完整 OneTurnResponse。
 2. tool_calls 参数可正确解析为对象。
 3. 错误时返回统一异常类型。
 

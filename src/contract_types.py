@@ -601,7 +601,48 @@ class ToolCall:
             name=_as_str(data.get('name'), 'unknown_tool'),
             arguments=_as_dict(data.get('arguments')),
         )
-    
+
+
+@dataclass(frozen=True)
+class OneTurnResponse:
+    """一次模型响应的标准化结果。"""
+
+    content: str  # 本轮回复的最终文本内容。
+    tool_calls: tuple[ToolCall, ...] = ()  # 本轮要求执行的工具调用列表。
+    finish_reason: str | None = None  # 本轮停止原因，例如 stop 或 tool_calls。
+    usage: TokenUsage = field(default_factory=TokenUsage)  # 本轮 token 使用统计。
+
+    def to_dict(self) -> JSONDict:
+        return {
+            'content': self.content,
+            'tool_calls': [item.to_dict() for item in self.tool_calls],
+            'finish_reason': self.finish_reason,
+            'usage': self.usage.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: JSONDict | None) -> 'OneTurnResponse':
+        data = _as_dict(payload)
+        tool_calls_raw = data.get('tool_calls', data.get('toolCalls', []))
+        if not isinstance(tool_calls_raw, list):
+            tool_calls_raw = []
+
+        finish_reason_raw = _first_present(data, 'finish_reason', 'finishReason')
+        finish_reason = (
+            _as_str(finish_reason_raw) if finish_reason_raw is not None else None
+        )
+
+        return cls(
+            content=_as_str(data.get('content'), ''),
+            tool_calls=tuple(
+                ToolCall.from_dict(item)
+                for item in tool_calls_raw
+                if isinstance(item, dict)
+            ),
+            finish_reason=finish_reason,
+            usage=TokenUsage.from_dict(data.get('usage')),
+        )
+
 
 @dataclass(frozen=True)
 class ToolExecutionResult:
