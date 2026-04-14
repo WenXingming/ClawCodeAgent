@@ -102,6 +102,13 @@ def _as_str(value: Any, default: str = '') -> str:
     return str(value)
 
 
+def _as_optional_str(value: Any) -> str | None:
+    """将值转换为 str 或 None。"""
+    if value is None:
+        return None
+    return _as_str(value)
+
+
 def _as_dict(value: Any) -> JSONDict:
     """将值转换为 dict，遇到异常或不适合的类型时返回空 dict。"""
     if isinstance(value, dict):
@@ -223,18 +230,17 @@ class ModelPricing:
     cache_read_input_cost_per_million_tokens_usd: float = 0.0  # 每百万缓存读取输入 tokens 单价（USD）。
 
     def estimate_cost_usd(self, usage: TokenUsage) -> float:
-        return (
-            (usage.input_tokens / 1_000_000.0) * self.input_cost_per_million_tokens_usd
-            + (usage.output_tokens / 1_000_000.0) * self.output_cost_per_million_tokens_usd
-            + (
-                (usage.cache_creation_input_tokens / 1_000_000.0)
-                * self.cache_creation_input_cost_per_million_tokens_usd
-            )
-            + (
-                (usage.cache_read_input_tokens / 1_000_000.0)
-                * self.cache_read_input_cost_per_million_tokens_usd
-            )
+        input_cost = (usage.input_tokens / 1_000_000.0) * self.input_cost_per_million_tokens_usd
+        output_cost = (usage.output_tokens / 1_000_000.0) * self.output_cost_per_million_tokens_usd
+        cache_write_cost = (
+            (usage.cache_creation_input_tokens / 1_000_000.0)
+            * self.cache_creation_input_cost_per_million_tokens_usd
         )
+        cache_read_cost = (
+            (usage.cache_read_input_tokens / 1_000_000.0)
+            * self.cache_read_input_cost_per_million_tokens_usd
+        )
+        return input_cost + output_cost + cache_write_cost + cache_read_cost
 
     def to_dict(self) -> JSONDict:
         return {
@@ -641,6 +647,56 @@ class OneTurnResponse:
             ),
             finish_reason=finish_reason,
             usage=TokenUsage.from_dict(data.get('usage')),
+        )
+
+
+@dataclass(frozen=True)
+class StreamEvent:
+    """流式返回中的标准化事件。"""
+
+    type: str  # 事件类型：message_start/content_delta/tool_call_delta/message_stop/usage。
+    delta: str = ''  # 文本增量。
+    tool_call_index: int | None = None  # 工具调用的序号。
+    tool_call_id: str | None = None  # 工具调用 ID。
+    tool_name: str | None = None  # 工具名称增量。
+    arguments_delta: str = ''  # 工具参数 JSON 片段增量。
+    finish_reason: str | None = None  # 停止原因。
+    usage: TokenUsage = field(default_factory=TokenUsage)  # 当前事件携带的 usage 统计。
+    raw_event: JSONDict = field(default_factory=dict)  # 原始事件，便于调试和回放。
+
+    def to_dict(self) -> JSONDict:
+        return {
+            'type': self.type,
+            'delta': self.delta,
+            'tool_call_index': self.tool_call_index,
+            'tool_call_id': self.tool_call_id,
+            'tool_name': self.tool_name,
+            'arguments_delta': self.arguments_delta,
+            'finish_reason': self.finish_reason,
+            'usage': self.usage.to_dict(),
+            'raw_event': dict(self.raw_event),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: JSONDict | None) -> 'StreamEvent':
+        data = _as_dict(payload)
+        finish_reason_raw = _first_present(data, 'finish_reason', 'finishReason')
+        return cls(
+            type=_as_str(data.get('type'), 'unknown'),
+            delta=_as_str(data.get('delta'), ''),
+            tool_call_index=_as_optional_int(
+                _first_present(data, 'tool_call_index', 'toolCallIndex')
+            ),
+            tool_call_id=_as_optional_str(
+                _first_present(data, 'tool_call_id', 'toolCallId')
+            ),
+            tool_name=_as_optional_str(_first_present(data, 'tool_name', 'toolName')),
+            arguments_delta=_as_str(
+                _first_present(data, 'arguments_delta', 'argumentsDelta', default='')
+            ),
+            finish_reason=_as_optional_str(finish_reason_raw),
+            usage=TokenUsage.from_dict(data.get('usage')),
+            raw_event=_as_dict(data.get('raw_event', data.get('rawEvent'))),
         )
 
 

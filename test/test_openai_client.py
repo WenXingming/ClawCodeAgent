@@ -157,6 +157,32 @@ class OpenAIClientTests(unittest.TestCase):
         self.assertEqual(result.tool_calls[0].arguments, {'path': 'README.md'})
 
     @patch('src.openai_client.request.urlopen')
+    def test_complete_uses_first_choice_only(self, mock_urlopen: object) -> None:
+        self._mock_json_response(
+            mock_urlopen,
+            {
+                'choices': [
+                    {
+                        'message': {'content': 'first answer'},
+                        'finish_reason': 'stop',
+                    },
+                    {
+                        'message': {'content': 'second answer'},
+                        'finish_reason': 'stop',
+                    },
+                ],
+                'usage': {'prompt_tokens': 5, 'completion_tokens': 2},
+            },
+        )
+
+        result = self.client.complete(
+            messages=[{'role': 'user', 'content': 'pick first'}],
+            tools=[],
+        )
+
+        self.assertEqual(result.content, 'first answer')
+
+    @patch('src.openai_client.request.urlopen')
     def test_complete_usage_variant_fields(self, mock_urlopen: object) -> None:
         self._mock_json_response(
             mock_urlopen,
@@ -238,6 +264,16 @@ class OpenAIClientTests(unittest.TestCase):
     @patch('src.openai_client.request.urlopen')
     def test_complete_invalid_response_raises_response_error(self, mock_urlopen: object) -> None:
         self._mock_json_response(mock_urlopen, {'choices': []})
+
+        with self.assertRaises(OpenAIResponseError):
+            self.client.complete(
+                messages=[{'role': 'user', 'content': 'hi'}],
+                tools=[],
+            )
+
+    @patch('src.openai_client.request.urlopen')
+    def test_complete_malformed_choices_type_raises_response_error(self, mock_urlopen: object) -> None:
+        self._mock_json_response(mock_urlopen, {'choices': 'bad'})
 
         with self.assertRaises(OpenAIResponseError):
             self.client.complete(

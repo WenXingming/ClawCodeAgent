@@ -1,1 +1,53 @@
-"""根目录实现的核心代码包。"""
+"""根目录核心代码包导出。
+
+这个入口只导出最常用的客户端与契约类型，
+方便调用侧直接 `import src` 后按需引用。
+"""
+
+from .contract_types import (
+	JSONDict,
+	ModelConfig,
+	OneTurnResponse,
+	OutputSchemaConfig,
+	StreamEvent,
+	TokenUsage,
+	ToolCall,
+)
+from .agent_tools import (
+	AgentTool,
+	ToolExecutionContext,
+	ToolExecutionError,
+	ToolPermissionError,
+	build_tool_context,
+	default_tool_registry,
+	execute_tool,
+)
+from .openai_client import (
+	OpenAIClient,
+	OpenAIClientError,
+	OpenAIConnectionError,
+	OpenAIResponseError,
+	OpenAITimeoutError,
+)
+
+__all__ = [
+	'AgentTool',
+	'build_tool_context',
+	'default_tool_registry',
+	'execute_tool',
+	'JSONDict',
+	'ModelConfig',
+	'OneTurnResponse',
+	'OpenAIClient',
+	'OpenAIClientError',
+	'OpenAIConnectionError',
+	'OpenAIResponseError',
+	'OpenAITimeoutError',
+	'OutputSchemaConfig',
+	'StreamEvent',
+	'TokenUsage',
+	'ToolCall',
+	'ToolExecutionContext',
+	'ToolExecutionError',
+	'ToolPermissionError',
+]

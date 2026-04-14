@@ -20,6 +20,7 @@ from src.contract_types import (
     BudgetConfig,
     ModelConfig,
     ModelPricing,
+    StreamEvent,
     TokenUsage,
     ToolCall,
     ToolExecutionResult,
@@ -78,6 +79,27 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(restored.model, 'unknown-model')
         self.assertEqual(restored.temperature, 0.0)
         self.assertEqual(restored.timeout_seconds, 120.0)
+
+
+class ModelPricingTests(unittest.TestCase):
+    """验证成本估算公式是否符合预期。"""
+
+    def test_estimate_cost_usd(self) -> None:
+        pricing = ModelPricing(
+            input_cost_per_million_tokens_usd=1.0,
+            output_cost_per_million_tokens_usd=2.0,
+            cache_creation_input_cost_per_million_tokens_usd=0.5,
+            cache_read_input_cost_per_million_tokens_usd=0.25,
+        )
+        usage = TokenUsage(
+            input_tokens=1_000_000,
+            output_tokens=500_000,
+            cache_creation_input_tokens=200_000,
+            cache_read_input_tokens=100_000,
+        )
+
+        # 1.0 + 1.0 + 0.1 + 0.025
+        self.assertAlmostEqual(pricing.estimate_cost_usd(usage), 2.125)
 
 
 class BudgetConfigTests(unittest.TestCase):
@@ -185,6 +207,45 @@ class OneTurnResponseTests(unittest.TestCase):
         self.assertEqual(restored.tool_calls, ())
         self.assertEqual(restored.finish_reason, '123')
         self.assertEqual(restored.usage, TokenUsage())
+
+
+class StreamEventTests(unittest.TestCase):
+    """验证流式事件契约。"""
+
+    def test_stream_event_round_trip(self) -> None:
+        event = StreamEvent(
+            type='tool_call_delta',
+            tool_call_index=0,
+            tool_call_id='call_1',
+            tool_name='read_file',
+            arguments_delta='{"path":"README.md"}',
+            usage=TokenUsage(input_tokens=2, output_tokens=1),
+            raw_event={'source': 'unit_test'},
+        )
+
+        restored = StreamEvent.from_dict(event.to_dict())
+        self.assertEqual(restored.type, 'tool_call_delta')
+        self.assertEqual(restored.tool_call_id, 'call_1')
+        self.assertEqual(restored.tool_name, 'read_file')
+        self.assertEqual(restored.arguments_delta, '{"path":"README.md"}')
+        self.assertEqual(restored.usage.input_tokens, 2)
+        self.assertEqual(restored.raw_event['source'], 'unit_test')
+
+    def test_stream_event_handles_invalid_payload(self) -> None:
+        restored = StreamEvent.from_dict(
+            {
+                'type': None,
+                'toolCallIndex': 'bad',
+                'toolCallId': 123,
+                'usage': 'bad',
+                'rawEvent': 'bad',
+            }
+        )
+        self.assertEqual(restored.type, 'unknown')
+        self.assertIsNone(restored.tool_call_index)
+        self.assertEqual(restored.tool_call_id, '123')
+        self.assertEqual(restored.usage, TokenUsage())
+        self.assertEqual(restored.raw_event, {})
 
 
 class AgentRunResultTests(unittest.TestCase):
