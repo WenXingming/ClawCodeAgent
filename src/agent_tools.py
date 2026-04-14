@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
+from .bash_security import check_shell_security
 from .contract_types import (
     AgentPermissions,
     AgentRuntimeConfig,
@@ -39,6 +41,16 @@ class ToolExecutionContext:
     max_output_chars: int  # 工具文本输出最大长度。
     permissions: AgentPermissions  # 当前会话权限开关。
     tool_registry: dict[str, 'AgentTool'] | None = None  # 当前可用工具映射（可选）。
+
+
+@dataclass(frozen=True)
+class ToolStreamUpdate:
+    """工具流式执行更新。"""
+
+    kind: str  # 更新类型：stdout/stderr/result。
+    chunk: str = ''  # 增量文本片段。
+    result: ToolExecutionResult | None = None  # 最终结果事件携带的结果对象。
+    metadata: JSONDict = field(default_factory=dict)  # 可选元数据。
 
 
 ToolHandler = Callable[
@@ -148,6 +160,54 @@ def execute_tool(
     return tool.execute(arguments, context)
 
 
+def execute_tool_streaming(
+    tool_registry: dict[str, AgentTool],
+    name: str,
+    arguments: JSONDict,
+    context: ToolExecutionContext,
+) -> Iterator[ToolStreamUpdate]:
+    """按工具名执行一次工具调用，并输出流式更新。"""
+    tool = tool_registry.get(name)
+    if tool is None:
+        yield ToolStreamUpdate(
+            kind='result',
+            result=ToolExecutionResult(
+                name=name,
+                ok=False,
+                content=f'Unknown tool: {name}',
+                metadata={'error_kind': 'unknown_tool'},
+            ),
+        )
+        return
+
+    if name != 'bash':
+        yield ToolStreamUpdate(kind='result', result=tool.execute(arguments, context))
+        return
+
+    try:
+        yield from _run_bash_stream(arguments, context)
+    except ToolPermissionError as exc:
+        yield ToolStreamUpdate(
+            kind='result',
+            result=ToolExecutionResult(
+                name='bash',
+                ok=False,
+                content=str(exc),
+                metadata={'error_kind': 'permission_denied'},
+            ),
+        )
+    except (ToolExecutionError, OSError, UnicodeError) as exc:
+        yield ToolStreamUpdate(
+            kind='result',
+            result=ToolExecutionResult(
+                name='bash',
+                ok=False,
+                content=str(exc),
+                metadata={'error_kind': 'tool_execution_error'},
+            ),
+        )
+
+
 def default_tool_registry() -> dict[str, AgentTool]:
     """返回 ISSUE-004 的最小工具注册表。"""
     tools = [
@@ -204,6 +264,18 @@ def default_tool_registry() -> dict[str, AgentTool]:
                 'required': ['path', 'old_text', 'new_text'],
             },
             handler=_edit_file,
+        ),
+        AgentTool(
+            name='bash',
+            description='在当前工作区执行 shell 命令（受权限和安全策略约束）。',
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'command': {'type': 'string'},
+                },
+                'required': ['command'],
+            },
+            handler=_run_bash,
         ),
     ]
     return {tool.name: tool for tool in tools}
@@ -359,11 +431,120 @@ def _edit_file(arguments: JSONDict, context: ToolExecutionContext) -> str | tupl
     )
 
 
+def _run_bash(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
+    """执行 shell 命令并返回结构化结果。"""
+    command = _require_string(arguments, 'command')
+    _ensure_shell_allowed(command, context)
+
+    stdout, stderr, exit_code = _execute_shell_command(command, context)
+    rendered = _render_shell_output(stdout, stderr, exit_code)
+    output = _truncate_output(rendered, context.max_output_chars)
+
+    return (
+        output,
+        {
+            'action': 'bash',
+            'command': command,
+            'exit_code': exit_code,
+            'stdout_chars': len(stdout),
+            'stderr_chars': len(stderr),
+            'truncated_by_output_limit': len(rendered) > len(output),
+        },
+    )
+
+
+def _run_bash_stream(
+    arguments: JSONDict,
+    context: ToolExecutionContext,
+) -> Iterator[ToolStreamUpdate]:
+    """执行 shell 命令并输出 stdout/stderr 增量与最终结果。"""
+    command = _require_string(arguments, 'command')
+    _ensure_shell_allowed(command, context)
+
+    stdout, stderr, exit_code = _execute_shell_command(command, context)
+
+    for chunk in _iter_output_chunks(stdout):
+        yield ToolStreamUpdate(kind='stdout', chunk=chunk)
+    for chunk in _iter_output_chunks(stderr):
+        yield ToolStreamUpdate(kind='stderr', chunk=chunk)
+
+    rendered = _render_shell_output(stdout, stderr, exit_code)
+    output = _truncate_output(rendered, context.max_output_chars)
+    yield ToolStreamUpdate(
+        kind='result',
+        result=ToolExecutionResult(
+            name='bash',
+            ok=True,
+            content=output,
+            metadata={
+                'action': 'bash',
+                'command': command,
+                'exit_code': exit_code,
+                'stdout_chars': len(stdout),
+                'stderr_chars': len(stderr),
+                'truncated_by_output_limit': len(rendered) > len(output),
+            },
+        ),
+    )
+
+
+def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple[str, str, int]:
+    """执行 shell 命令并返回 stdout/stderr/exit_code。"""
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=context.root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=context.command_timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        try:
+            process.communicate(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            # 进程被 kill 后仍未及时回收时，直接进入统一超时错误返回。
+            pass
+        raise ToolExecutionError(
+            f'Shell command timed out after {context.command_timeout_seconds} seconds'
+        ) from exc
+
+    return stdout or '', stderr or '', int(process.returncode)
+
+
+def _render_shell_output(stdout: str, stderr: str, exit_code: int) -> str:
+    """统一 shell 输出文本格式。"""
+    lines = [
+        f'exit_code={exit_code}',
+        '[stdout]',
+        stdout.rstrip(),
+        '[stderr]',
+        stderr.rstrip(),
+    ]
+    return '\n'.join(lines).strip()
+
+
 def _ensure_write_allowed(context: ToolExecutionContext) -> None:
     """统一写权限检查。"""
     if context.permissions.allow_file_write:
         return
     raise ToolPermissionError('File write permission denied: allow_file_write=false')
+
+
+def _ensure_shell_allowed(command: str, context: ToolExecutionContext) -> None:
+    """统一 shell 权限与安全策略检查。"""
+    allowed, reason = check_shell_security(
+        command,
+        allow_shell=context.permissions.allow_shell_commands,
+        allow_destructive=context.permissions.allow_destructive_shell_commands,
+    )
+    if allowed:
+        return
+    raise ToolPermissionError(f'Shell command blocked: {reason}')
 
 
 def _parse_edit_request(arguments: JSONDict) -> _FileEditRequest:
@@ -453,6 +634,14 @@ def _to_relative_display(path: Path, root: Path) -> str:
         return str(path)
     text = str(relative)
     return text if text else '.'
+
+
+def _iter_output_chunks(text: str, chunk_size: int = 512) -> Iterator[str]:
+    """把输出按固定大小切成可回放片段。"""
+    if not text:
+        return
+    for start in range(0, len(text), chunk_size):
+        yield text[start : start + chunk_size]
 
 
 def _require_string(arguments: JSONDict, key: str) -> str:

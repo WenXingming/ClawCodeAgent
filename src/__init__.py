@@ -15,12 +15,14 @@ from .contract_types import (
 )
 from .agent_tools import (
 	AgentTool,
+	ToolStreamUpdate,
 	ToolExecutionContext,
 	ToolExecutionError,
 	ToolPermissionError,
 	build_tool_context,
 	default_tool_registry,
 	execute_tool,
+	execute_tool_streaming,
 )
 from .openai_client import (
 	OpenAIClient,
@@ -35,6 +37,7 @@ __all__ = [
 	'build_tool_context',
 	'default_tool_registry',
 	'execute_tool',
+	'execute_tool_streaming',
 	'JSONDict',
 	'ModelConfig',
 	'OneTurnResponse',
@@ -47,6 +50,7 @@ __all__ = [
 	'StreamEvent',
 	'TokenUsage',
 	'ToolCall',
+	'ToolStreamUpdate',
 	'ToolExecutionContext',
 	'ToolExecutionError',
 	'ToolPermissionError',
