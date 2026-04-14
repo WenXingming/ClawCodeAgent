@@ -94,7 +94,7 @@
 1. `ModelConfig`
 2. `AgentRuntimeConfig`
 3. `BudgetConfig`
-4. `UsageStats`
+4. `TokenUsage`
 5. `ToolCall`
 6. `ToolExecutionResult`
 7. `AgentRunResult`
@@ -309,7 +309,7 @@
 
 背景：保证后续模块实现围绕稳定数据契约推进，避免反复改 schema。
 
-目标：冻结 `ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`、`UsageStats`、`ToolExecutionResult`、`AgentRunResult`。
+目标：冻结 `ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`、`TokenUsage`、`ToolExecutionResult`、`AgentRunResult`。
 
 范围：
 

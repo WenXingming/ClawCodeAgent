@@ -1,3 +1,5 @@
 claw-code-agent/
 
 __pycache__/
+
+.vscode/
