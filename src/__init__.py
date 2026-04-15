@@ -24,6 +24,8 @@ from .agent_tools import (
 	execute_tool,
 	execute_tool_streaming,
 )
+from .agent_runtime import LocalCodingAgent
+from .agent_session import AgentSessionState
 from .openai_client import (
 	OpenAIClient,
 	OpenAIClientError,
@@ -38,6 +40,8 @@ __all__ = [
 	'default_tool_registry',
 	'execute_tool',
 	'execute_tool_streaming',
+	'AgentSessionState',
+	'LocalCodingAgent',
 	'JSONDict',
 	'ModelConfig',
 	'OneTurnResponse',
