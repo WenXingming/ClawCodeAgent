@@ -3,3 +3,9 @@ claw-code-agent/
 __pycache__/
 
 .vscode/
+
+# Local verification artifacts
+.tmp-test/
+.probe-write/
+probe_py.txt
+test/.tmp/

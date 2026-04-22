@@ -44,12 +44,14 @@ graph TD
     subgraph Core [逻辑核心]
         n_runtime(["⚙️ agent_runtime.py"])
         n_session(["💾 agent_session.py"])
+        n_session_store(["🗃️ session_store.py"])
         n_tools(["🛠️ agent_tools.py"])
         style Core fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
     %% 业务逻辑依赖 (实线)
     n_runtime --> n_session
+    n_runtime --> n_session_store
     n_runtime --> n_tools
     n_runtime --> n_openai
     
@@ -57,6 +59,7 @@ graph TD
     
     %% 数据协议依赖 (虚线，避免视觉干扰)
     n_session -.-> n_contract
+    n_session_store -.-> n_contract
     n_tools -.-> n_contract
     n_openai -.-> n_contract
     n_runtime -.-> n_contract
@@ -71,5 +74,6 @@ graph TD
 
 - 先看 `contract_types.py`：它是核心契约层，被多个模块依赖。
 - 再看 `openai_client.py` 与 `agent_tools.py`：分别是模型调用层和工具执行层。
-- 最后看 `agent_session.py` 与 `agent_runtime.py`：它们把契约、模型与工具串成最小闭环。
+- 然后看 `agent_session.py` 与 `session_store.py`：前者维护内存态消息，后者负责 session 落盘与恢复。
+- 最后看 `agent_runtime.py`：它把契约、模型、工具与持久化串成最小闭环。
 - `__init__.py` 主要负责对外导出，不承载业务逻辑。

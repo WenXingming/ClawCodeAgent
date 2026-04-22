@@ -11,11 +11,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from .agent_session import AgentSessionState
 from .agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
-from .contract_types import AgentRunResult, AgentRuntimeConfig, JSONDict, TokenUsage
+from .contract_types import (
+    AgentRunResult,
+    AgentRuntimeConfig,
+    JSONDict,
+    StoredAgentSession,
+    TokenUsage,
+)
 from .openai_client import OpenAIClient, OpenAIClientError
+from .session_store import save_agent_session
 
 
 @dataclass
@@ -29,6 +37,7 @@ class LocalCodingAgent:
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务。"""
         session = AgentSessionState.create(prompt)
+        session_id = uuid4().hex
         events: list[JSONDict] = []
         usage_total = TokenUsage()
         final_output = ''
@@ -55,6 +64,7 @@ class LocalCodingAgent:
                     }
                 )
                 return self._build_run_result(
+                    session_id=session_id,
                     session=session,
                     final_output=final_output,
                     turns_executed=turns_executed,
@@ -77,10 +87,11 @@ class LocalCodingAgent:
                 }
             )
 
-            # 没有工具调用时，说明当前任务已收敛。
+            # 没有工具调用时，说明当前任务已收敛
             if not response.tool_calls:
                 stop_reason = response.finish_reason or 'completed'
                 return self._build_run_result(
+                    session_id=session_id,
                     session=session,
                     final_output=final_output,
                     turns_executed=turns_executed,
@@ -89,6 +100,7 @@ class LocalCodingAgent:
                     events=events,
                 )
 
+            # 执行工具调用并回填结果
             for tool_call in response.tool_calls:
                 tool_result = execute_tool(
                     self.tool_registry,
@@ -108,7 +120,9 @@ class LocalCodingAgent:
                     }
                 )
 
+        # 达到最大轮数限制，返回结果
         return self._build_run_result(
+            session_id=session_id,
             session=session,
             final_output=final_output,
             turns_executed=turns_executed,
@@ -121,9 +135,10 @@ class LocalCodingAgent:
         """构建发送给模型的工具定义列表。"""
         return [tool.to_openai_tool() for tool in self.tool_registry.values()]
 
-    @staticmethod
     def _build_run_result(
+        self,
         *,
+        session_id: str,
         session: AgentSessionState,
         final_output: str,
         turns_executed: int,
@@ -131,13 +146,39 @@ class LocalCodingAgent:
         stop_reason: str,
         events: list[JSONDict],
     ) -> AgentRunResult:
-        """统一构造最终运行结果。"""
+        """统一构造最终运行结果并落盘会话快照。"""
+        transcript = session.transcript()
+        events_snapshot = tuple(dict(item) for item in events)
+        total_cost_usd = self.client.config.pricing.estimate_cost_usd(usage_total)
+        stored_session = StoredAgentSession(
+            session_id=session_id,
+            model_config=self.client.config,
+            runtime_config=self.runtime_config,
+            messages=tuple(session.to_messages()),
+            transcript=transcript,
+            events=events_snapshot,
+            final_output=final_output,
+            turns=turns_executed,
+            tool_calls=session.tool_call_count,
+            usage=usage_total,
+            total_cost_usd=total_cost_usd,
+            stop_reason=stop_reason,
+        )
+        session_path = save_agent_session(
+            stored_session,
+            directory=self.runtime_config.session_directory,
+        )
         return AgentRunResult(
             final_output=final_output,
             turns=turns_executed,
             tool_calls=session.tool_call_count,
-            transcript=session.transcript(),
-            events=tuple(dict(item) for item in events),
+            transcript=transcript,
+            events=events_snapshot,
             usage=usage_total,
+            total_cost_usd=total_cost_usd,
             stop_reason=stop_reason,
+            file_history=stored_session.file_history,
+            session_id=session_id,
+            session_path=str(session_path),
+            scratchpad_directory=stored_session.scratchpad_directory,
         )
