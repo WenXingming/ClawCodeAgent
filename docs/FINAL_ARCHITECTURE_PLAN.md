@@ -12,7 +12,7 @@
 
 1. docs 目录原有四份中文架构文档。
 2. 原项目 README、PARITY_CHECKLIST、TESTING_GUIDE。
-3. 核心源码主干：main、agent_runtime、agent_tools、agent_slash_commands、query_engine、session_store、token_budget、compact。
+3. 核心源码主干：main、agent_runtime、agent_tools、agent_slash_commands、query_engine、session、token_budget、compact。
 4. 关键 runtime：plugin、hook_policy、task、plan、search、mcp、remote、worktree。
 5. 关键测试：test_agent_runtime、test_agent_tools_security、test_main 等。
 
@@ -52,7 +52,7 @@
 2. 核心编排层：`src/agent_runtime.py` 的 `LocalCodingAgent`
 3. 工具执行层：`src/agent_tools.py` + `src/permissions.py` + `src/bash_security.py`
 4. 上下文与提示层：`src/agent_context.py` + `src/agent_prompting.py` + `src/token_budget.py`
-5. 状态与持久化层：`src/agent_session.py` + `src/session_store.py` + `src/transcript.py`
+5. 状态与持久化层：`src/session/state.py` + `src/session/contracts.py` + `src/session/store.py` + `src/transcript.py`
 6. 扩展运行时层：`*_runtime.py`（search/mcp/remote/task/plan/worktree/workflow/team/account/ask/config/lsp/background）
 7. 查询与观测门面层：`src/query_engine.py`
 
@@ -529,7 +529,7 @@
 
 测试用例：保存读取一致性、缺失字段容错、损坏文件处理。
 
-交付物：session_store 实现与测试。
+交付物：session/store 实现与测试。
 
 #### ISSUE-008 Resume 连续执行与状态继承
 

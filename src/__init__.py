@@ -9,7 +9,6 @@ from .contract_types import (
 	ModelConfig,
 	OneTurnResponse,
 	OutputSchemaConfig,
-	StoredAgentSession,
 	StreamEvent,
 	TokenUsage,
 	ToolCall,
@@ -26,7 +25,6 @@ from .agent_tools import (
 	execute_tool_streaming,
 )
 from .agent_runtime import LocalCodingAgent
-from .agent_session import AgentSessionState
 from .openai_client import (
 	OpenAIClient,
 	OpenAIClientError,
@@ -34,7 +32,7 @@ from .openai_client import (
 	OpenAIResponseError,
 	OpenAITimeoutError,
 )
-from .session_store import load_agent_session, save_agent_session
+from .session import AgentSessionState, StoredAgentSession, load_agent_session, save_agent_session
 
 __all__ = [
 	'AgentTool',

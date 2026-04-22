@@ -6,7 +6,7 @@ import json
 from json import JSONDecodeError
 from pathlib import Path
 
-from .contract_types import StoredAgentSession
+from .contracts import StoredAgentSession
 
 
 DEFAULT_AGENT_SESSION_DIR = (Path('.port_sessions') / 'agent').resolve()
