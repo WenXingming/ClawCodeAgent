@@ -13,11 +13,11 @@
 
 ### 已完成
 
-1. 扩展 `src/contract_types.py`：
-   - 新增 `StoredAgentSession`
+1. 新增 `src/session/contracts.py`：
+   - 定义 `StoredAgentSession`
    - 复用现有 `ModelConfig` / `AgentRuntimeConfig` / `TokenUsage` 的 `to_dict()` / `from_dict()`
    - 支持 `schema_version` 与常见 camelCase 历史字段
-2. 新增 `src/session_store.py`：
+2. 新增 `src/session/store.py`：
    - `save_agent_session(...)`
    - `load_agent_session(...)`
    - 基础 `session_id` 校验与路径解析
@@ -32,7 +32,7 @@
    - `load_agent_session`
 5. 新增/扩展测试：
    - `test/test_session_store.py`
-   - `test/test_contract_types.py`
+   - `test/test_session_contracts.py`
    - `test/test_agent_runtime.py`
 
 ### 未实现（按计划故意延后）
@@ -52,9 +52,9 @@
 
 ## 4. 设计决策（简洁优先）
 
-1. 契约仍集中在 `contract_types.py`：
-   - `StoredAgentSession` 不下沉到 store 模块，保持当前仓库“核心模型集中定义”的风格。
-2. `session_store.py` 保持薄 IO 层：
+1. 会话契约下沉到 `src/session/contracts.py`：
+   - `StoredAgentSession` 与会话存储职责同域收拢，降低 `contract_types.py` 体积。
+2. `src/session/store.py` 保持薄 IO 层：
    - 只管路径、UTF-8 JSON 读写和基础校验。
    - 不重复实现 `serialize_*` / `deserialize_*`。
 3. runtime 统一收尾：
@@ -83,14 +83,16 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-python -m unittest test.test_contract_types test.test_agent_runtime test.test_session_store -v
+python -m unittest test.test_session_contracts test.test_contract_types test.test_agent_runtime test.test_session_store -v
 python -m unittest test.test_openai_client test.test_openai_client_streaming -v
+python -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test.test_contract_types + test.test_agent_runtime + test.test_session_store`：32/32 通过。
+1. `test.test_session_contracts + test.test_contract_types + test.test_agent_runtime + test.test_session_store`：32/32 通过。
 2. `test.test_openai_client + test.test_openai_client_streaming`：22/22 通过。
+3. 全量 `discover`：79/79 通过。
 
 ## 7. 对后续 ISSUE-008 的交接建议
 

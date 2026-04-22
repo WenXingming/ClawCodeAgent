@@ -13,7 +13,7 @@
 
 ### 已完成
 
-1. 新增 `src/agent_session.py`：
+1. 新增 `src/session/state.py`（由原 `src/agent_session.py` 迁移）：
    - `AgentSessionState`
    - `create(...)`
    - `append_user(...)`

@@ -16,7 +16,7 @@ from src.contract_types import (
     ToolCall,
 )
 from src.openai_client import OpenAIClient, OpenAIConnectionError
-from src.session_store import load_agent_session
+from src.session import load_agent_session
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
