@@ -9,3 +9,6 @@ __pycache__/
 .probe-write/
 probe_py.txt
 test/.tmp/
+
+# session cache
+.port_sessions/

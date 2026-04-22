@@ -13,11 +13,11 @@
 
 ### 已完成
 
-1. 新增 `src/session/contracts.py`：
+1. 新增 `src/session/session_contracts.py`：
    - 定义 `StoredAgentSession`
    - 复用现有 `ModelConfig` / `AgentRuntimeConfig` / `TokenUsage` 的 `to_dict()` / `from_dict()`
    - 支持 `schema_version` 与常见 camelCase 历史字段
-2. 新增 `src/session/store.py`：
+2. 新增 `src/session/session_store.py`：
    - `save_agent_session(...)`
    - `load_agent_session(...)`
    - 基础 `session_id` 校验与路径解析
@@ -52,9 +52,9 @@
 
 ## 4. 设计决策（简洁优先）
 
-1. 会话契约下沉到 `src/session/contracts.py`：
+1. 会话契约下沉到 `src/session/session_contracts.py`：
    - `StoredAgentSession` 与会话存储职责同域收拢，降低 `contract_types.py` 体积。
-2. `src/session/store.py` 保持薄 IO 层：
+2. `src/session/session_store.py` 保持薄 IO 层：
    - 只管路径、UTF-8 JSON 读写和基础校验。
    - 不重复实现 `serialize_*` / `deserialize_*`。
 3. runtime 统一收尾：

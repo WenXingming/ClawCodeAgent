@@ -52,7 +52,7 @@
 2. 核心编排层：`src/agent_runtime.py` 的 `LocalCodingAgent`
 3. 工具执行层：`src/agent_tools.py` + `src/permissions.py` + `src/bash_security.py`
 4. 上下文与提示层：`src/agent_context.py` + `src/agent_prompting.py` + `src/token_budget.py`
-5. 状态与持久化层：`src/session/state.py` + `src/session/contracts.py` + `src/session/store.py` + `src/transcript.py`
+5. 状态与持久化层：`src/session/session_state.py` + `src/session/session_contracts.py` + `src/session/session_store.py` + `src/transcript.py`
 6. 扩展运行时层：`*_runtime.py`（search/mcp/remote/task/plan/worktree/workflow/team/account/ask/config/lsp/background）
 7. 查询与观测门面层：`src/query_engine.py`
 
