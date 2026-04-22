@@ -596,6 +596,20 @@
 
 交付物：token_budget 实现与测试。
 
+**实施决策（已落地）**
+
+- 新建 `src/context/` 子包，导出 `TokenBudgetSnapshot, check_token_budget`，与 `src/session/` 包风格一致；ISSUE-010/011 的 snip/compact 公共接口也将在此导出。
+- token 估算使用 **char/4 启发式**（1 token ≈ 4 chars），每条消息加 4 token 结构开销，工具 schema 序列化后按 char/4 计；如需精确计数可替换内部实现，公共接口不变。
+- 常量：`OUTPUT_RESERVE_TOKENS=4096`（输出预留），`SOFT_BUFFER_TOKENS=13000`（auto-compact 触发缓冲）。
+- 硬超限 `is_hard_over`：`projected > hard_limit - output_reserve` → `stop_reason='token_limit'`。
+- 软超限 `is_soft_over`：`projected > hard_limit - output_reserve - soft_buffer` → 供 ISSUE-010/011 的 snip/compact 读取。
+- **ISSUE-009 同时实现全部 BudgetConfig 维度的闸门**（用户决策）：除 token 外还包括 cost / tool_calls / model_calls / session_turns，均在 `_execute_loop` 的各预定位置插入，每次触发都追加 `budget_stop` event。
+- token_budget 预检始终追加 `token_budget` event（含 `projected / is_hard_over / is_soft_over`），即使未超限也记录，供后续模块观测上下文压力。
+- cost 闸门在模型调用前检查累计成本（`cost_baseline + estimate_cost_usd(usage_delta) >= max_total_cost_usd`）；`max_total_cost_usd=0.0` 时首轮即触发。
+- tool_calls 闸门在每次 `append_tool_result` 后检查，多工具 response 中触发时后续工具不再执行。
+- model_calls 闸门在每轮最前（session_turns 之后）检查，首轮成功 +1 后第 2 轮开始前拦截。
+- session_turns 闸门在每轮最前检查 `turns_offset + turns_this_run > max_session_turns`，resume 场景下 offset 已满时第一轮即触发。
+
 #### ISSUE-010 Snip 上下文剪裁机制
 
 类型：feature

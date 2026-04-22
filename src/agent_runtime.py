@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from .agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
+from .context import TokenBudgetSnapshot, check_token_budget
 from .contract_types import (
     AgentRunResult,
     AgentRuntimeConfig,
@@ -88,15 +89,83 @@ class LocalCodingAgent:
         final_output = ''
         turns_this_run = 0
         stop_reason = 'max_turns'
+        model_call_count = 0
 
+        budget = self.runtime_config.budget_config
         tool_context = build_tool_context(self.runtime_config, tool_registry=self.tool_registry)
 
         for turn_index in range(1, self.runtime_config.max_turns + 1):
             turns_this_run = turn_index
+
+            # ── session_turns 闸门 ─────────────────────────────────────────
+            if (
+                budget.max_session_turns is not None
+                and turns_offset + turns_this_run > budget.max_session_turns
+            ):
+                stop_reason = 'session_turns_limit'
+                events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
+                return self._build_run_result(
+                    session_id=session_id, session=session, final_output=final_output,
+                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
+                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
+                    stop_reason=stop_reason, events=events,
+                )
+
+            # ── model_calls 闸门 ───────────────────────────────────────────
+            if budget.max_model_calls is not None and model_call_count >= budget.max_model_calls:
+                stop_reason = 'model_call_limit'
+                events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
+                return self._build_run_result(
+                    session_id=session_id, session=session, final_output=final_output,
+                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
+                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
+                    stop_reason=stop_reason, events=events,
+                )
+
+            # ── token preflight 闸门 ───────────────────────────────────────
+            openai_tools = self._build_openai_tools()
+            budget_snapshot = check_token_budget(
+                messages=session.to_messages(),
+                tools=openai_tools,
+                max_input_tokens=budget.max_input_tokens,
+            )
+            events.append({
+                'type': 'token_budget',
+                'turn': turn_index,
+                'projected': budget_snapshot.projected_input_tokens,
+                'is_hard_over': budget_snapshot.is_hard_over,
+                'is_soft_over': budget_snapshot.is_soft_over,
+            })
+            if budget_snapshot.is_hard_over:
+                stop_reason = 'token_limit'
+                events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
+                return self._build_run_result(
+                    session_id=session_id, session=session, final_output=final_output,
+                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
+                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
+                    stop_reason=stop_reason, events=events,
+                )
+
+            # ── cost 闸门 ──────────────────────────────────────────────────
+            if budget.max_total_cost_usd is not None:
+                current_cost = (
+                    cost_baseline
+                    + self.client.config.pricing.estimate_cost_usd(usage_delta)
+                )
+                if current_cost >= budget.max_total_cost_usd:
+                    stop_reason = 'cost_limit'
+                    events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
+                    return self._build_run_result(
+                        session_id=session_id, session=session, final_output=final_output,
+                        turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
+                        usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
+                        stop_reason=stop_reason, events=events,
+                    )
+
             try:
                 response = self.client.complete(
                     messages=session.to_messages(),
-                    tools=self._build_openai_tools(),
+                    tools=openai_tools,
                     output_schema=self.runtime_config.output_schema,
                 )
             except OpenAIClientError as exc:
@@ -114,6 +183,7 @@ class LocalCodingAgent:
                     events=events,
                 )
 
+            model_call_count += 1
             usage_delta = usage_delta + response.usage
             session.append_assistant_turn(response)
             if response.content:
@@ -158,6 +228,20 @@ class LocalCodingAgent:
                     'ok': tool_result.ok,
                     'error_kind': tool_result.metadata.get('error_kind'),
                 })
+
+                # ── tool_calls 闸门（每次工具执行后检查）─────────────────
+                if (
+                    budget.max_tool_calls is not None
+                    and session.tool_call_count >= budget.max_tool_calls
+                ):
+                    stop_reason = 'tool_call_limit'
+                    events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
+                    return self._build_run_result(
+                        session_id=session_id, session=session, final_output=final_output,
+                        turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
+                        usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
+                        stop_reason=stop_reason, events=events,
+                    )
 
         # 达到最大轮数限制，返回结果
         return self._build_run_result(

@@ -10,6 +10,7 @@ from src.agent_runtime import LocalCodingAgent
 from src.contract_types import (
     AgentPermissions,
     AgentRuntimeConfig,
+    BudgetConfig,
     ModelConfig,
     OneTurnResponse,
     TokenUsage,
@@ -351,6 +352,129 @@ class LocalCodingAgentTests(unittest.TestCase):
         restored2 = load_agent_session(second.session_id or '', directory=workspace / 'sessions')
         self.assertEqual(restored2.session_id, first.session_id)
         self.assertEqual(restored2.stop_reason, 'backend_error')
+
+    # ------------------------------------------------------------------
+    # ISSUE-009 预算闸门集成测试
+    # ------------------------------------------------------------------
+
+    def _build_budget_config(self, workspace: Path, budget: BudgetConfig) -> AgentRuntimeConfig:
+        """构造带自定义预算的运行配置。"""
+        return AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=6,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            budget_config=budget,
+        )
+
+    def test_run_stops_on_token_limit(self) -> None:
+        """max_input_tokens=1 时，第一轮 token preflight 应触发 token_limit。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(content='ok', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        agent = LocalCodingAgent(
+            fake_client,
+            self._build_budget_config(workspace, BudgetConfig(max_input_tokens=1)),
+        )
+        result = agent.run('任务')
+        self.assertEqual(result.stop_reason, 'token_limit')
+        # token 硬超限时不应进行模型调用
+        self.assertEqual(len(fake_client.calls), 0)
+
+    def test_run_stops_on_cost_limit(self) -> None:
+        """max_total_cost_usd=0.0 时，成本检查（0.0 >= 0.0）应触发 cost_limit。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(content='ok', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        agent = LocalCodingAgent(
+            fake_client,
+            self._build_budget_config(workspace, BudgetConfig(max_total_cost_usd=0.0)),
+        )
+        result = agent.run('任务')
+        self.assertEqual(result.stop_reason, 'cost_limit')
+        # 成本超限应在模型调用前触发
+        self.assertEqual(len(fake_client.calls), 0)
+
+    def test_run_stops_on_tool_call_limit(self) -> None:
+        """max_tool_calls=1 时，第一个工具执行后应触发 tool_call_limit。"""
+        workspace = _make_test_dir()
+        (workspace / 'f.txt').write_text('hello', encoding='utf-8')
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='',
+                tool_calls=(
+                    ToolCall(id='t1', name='read_file', arguments={'path': 'f.txt'}),
+                    ToolCall(id='t2', name='read_file', arguments={'path': 'f.txt'}),
+                ),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=3, output_tokens=1),
+            ),
+            OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        agent = LocalCodingAgent(
+            fake_client,
+            self._build_budget_config(workspace, BudgetConfig(max_tool_calls=1)),
+        )
+        result = agent.run('读文件')
+        self.assertEqual(result.stop_reason, 'tool_call_limit')
+        # 执行 1 个工具后触发，tool_calls 计数应为 1
+        self.assertEqual(result.tool_calls, 1)
+        # 只发生了 1 次模型调用（第 2 个工具没执行，不需要第 2 次模型调用）
+        self.assertEqual(len(fake_client.calls), 1)
+
+    def test_run_stops_on_model_call_limit(self) -> None:
+        """max_model_calls=1 时，第 2 轮开始前应触发 model_call_limit。"""
+        workspace = _make_test_dir()
+        (workspace / 'f.txt').write_text('data', encoding='utf-8')
+        fake_client = _FakeOpenAIClient([
+            # 第 1 次模型调用：返回工具请求，迫使进入第 2 轮
+            OneTurnResponse(
+                content='',
+                tool_calls=(ToolCall(id='t1', name='read_file', arguments={'path': 'f.txt'}),),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=3, output_tokens=1),
+            ),
+            # 第 2 次模型调用永远不应被触发
+            OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        agent = LocalCodingAgent(
+            fake_client,
+            self._build_budget_config(workspace, BudgetConfig(max_model_calls=1)),
+        )
+        result = agent.run('任务')
+        self.assertEqual(result.stop_reason, 'model_call_limit')
+        # 只应发生 1 次模型调用
+        self.assertEqual(len(fake_client.calls), 1)
+
+    def test_run_stops_on_session_turns_limit_with_offset(self) -> None:
+        """resume 场景：turns_offset=3, max_session_turns=3，第一轮就应触发 session_turns_limit。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(content='ok', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=6,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            budget_config=BudgetConfig(max_session_turns=3),
+        )
+        agent = LocalCodingAgent(fake_client, config)
+        # 伪造一个已经用了 3 轮的历史会话
+        from src.session import StoredAgentSession
+        stored = StoredAgentSession(
+            session_id='test-session-999',
+            model_config=fake_client.config,
+            runtime_config=config,
+            messages=({'role': 'user', 'content': '历史消息'},),
+            turns=3,
+        )
+        result = agent.resume('继续', stored)
+        self.assertEqual(result.stop_reason, 'session_turns_limit')
+        # turns_limit 应在模型调用前触发
+        self.assertEqual(len(fake_client.calls), 0)
 
 
 if __name__ == '__main__':
