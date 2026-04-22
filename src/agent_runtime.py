@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from .agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
-from .context import TokenBudgetSnapshot, check_token_budget
+from .context import BudgetGuard, check_token_budget
 from .contract_types import (
     AgentRunResult,
     AgentRuntimeConfig,
@@ -91,76 +91,46 @@ class LocalCodingAgent:
         stop_reason = 'max_turns'
         model_call_count = 0
 
-        budget = self.runtime_config.budget_config
+        guard = BudgetGuard(
+            budget=self.runtime_config.budget_config,
+            pricing=self.client.config.pricing,
+            cost_baseline=cost_baseline,
+        )
         tool_context = build_tool_context(self.runtime_config, tool_registry=self.tool_registry)
 
         for turn_index in range(1, self.runtime_config.max_turns + 1):
             turns_this_run = turn_index
 
-            # ── session_turns 闸门 ─────────────────────────────────────────
-            if (
-                budget.max_session_turns is not None
-                and turns_offset + turns_this_run > budget.max_session_turns
-            ):
-                stop_reason = 'session_turns_limit'
-                events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
-                return self._build_run_result(
-                    session_id=session_id, session=session, final_output=final_output,
-                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
-                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                    stop_reason=stop_reason, events=events,
-                )
-
-            # ── model_calls 闸门 ───────────────────────────────────────────
-            if budget.max_model_calls is not None and model_call_count >= budget.max_model_calls:
-                stop_reason = 'model_call_limit'
-                events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
-                return self._build_run_result(
-                    session_id=session_id, session=session, final_output=final_output,
-                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
-                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                    stop_reason=stop_reason, events=events,
-                )
-
-            # ── token preflight 闸门 ───────────────────────────────────────
+            # token preflight（event 始终记录，供 ISSUE-010/011 soft_over 观测）
             openai_tools = self._build_openai_tools()
-            budget_snapshot = check_token_budget(
+            snapshot = check_token_budget(
                 messages=session.to_messages(),
                 tools=openai_tools,
-                max_input_tokens=budget.max_input_tokens,
+                max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
             )
             events.append({
                 'type': 'token_budget',
                 'turn': turn_index,
-                'projected': budget_snapshot.projected_input_tokens,
-                'is_hard_over': budget_snapshot.is_hard_over,
-                'is_soft_over': budget_snapshot.is_soft_over,
+                'projected': snapshot.projected_input_tokens,
+                'is_hard_over': snapshot.is_hard_over,
+                'is_soft_over': snapshot.is_soft_over,
             })
-            if budget_snapshot.is_hard_over:
-                stop_reason = 'token_limit'
-                events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
-                return self._build_run_result(
+
+            # 模型调用前四维预算检查（session_turns / model_calls / token / cost）
+            if stop := guard.check_pre_model(
+                turns_offset=turns_offset,
+                turns_this_run=turns_this_run,
+                model_call_count=model_call_count,
+                snapshot=snapshot,
+                usage_delta=usage_delta,
+            ):
+                return self._early_stop(
+                    stop,
                     session_id=session_id, session=session, final_output=final_output,
                     turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
                     usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                    stop_reason=stop_reason, events=events,
+                    turn_index=turn_index, events=events,
                 )
-
-            # ── cost 闸门 ──────────────────────────────────────────────────
-            if budget.max_total_cost_usd is not None:
-                current_cost = (
-                    cost_baseline
-                    + self.client.config.pricing.estimate_cost_usd(usage_delta)
-                )
-                if current_cost >= budget.max_total_cost_usd:
-                    stop_reason = 'cost_limit'
-                    events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
-                    return self._build_run_result(
-                        session_id=session_id, session=session, final_output=final_output,
-                        turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
-                        usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                        stop_reason=stop_reason, events=events,
-                    )
 
             try:
                 response = self.client.complete(
@@ -229,18 +199,14 @@ class LocalCodingAgent:
                     'error_kind': tool_result.metadata.get('error_kind'),
                 })
 
-                # ── tool_calls 闸门（每次工具执行后检查）─────────────────
-                if (
-                    budget.max_tool_calls is not None
-                    and session.tool_call_count >= budget.max_tool_calls
-                ):
-                    stop_reason = 'tool_call_limit'
-                    events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
-                    return self._build_run_result(
+                # 工具执行后预算检查
+                if stop := guard.check_post_tool(session.tool_call_count):
+                    return self._early_stop(
+                        stop,
                         session_id=session_id, session=session, final_output=final_output,
                         turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
                         usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                        stop_reason=stop_reason, events=events,
+                        turn_index=turn_index, events=events,
                     )
 
         # 达到最大轮数限制，返回结果
@@ -251,6 +217,38 @@ class LocalCodingAgent:
             turns_total=turns_offset + turns_this_run,
             usage_delta=usage_delta,
             usage_total=usage_baseline + usage_delta,
+            cost_baseline=cost_baseline,
+            stop_reason=stop_reason,
+            events=events,
+        )
+
+    def _early_stop(
+        self,
+        stop_reason: str,
+        *,
+        session_id: str,
+        session: AgentSessionState,
+        final_output: str,
+        turns_total: int,
+        usage_delta: TokenUsage,
+        usage_total: TokenUsage,
+        cost_baseline: float,
+        turn_index: int,
+        events: list[JSONDict],
+    ) -> AgentRunResult:
+        """预算闸门触发时的统一提前退出路径。
+
+        统一追加 budget_stop 事件并调用 _build_run_result，
+        消除六处重复的事件追加 + 结果构建模式。
+        """
+        events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
+        return self._build_run_result(
+            session_id=session_id,
+            session=session,
+            final_output=final_output,
+            turns_total=turns_total,
+            usage_delta=usage_delta,
+            usage_total=usage_total,
             cost_baseline=cost_baseline,
             stop_reason=stop_reason,
             events=events,

@@ -7,9 +7,11 @@
 后续 ISSUE-010 (snip) / ISSUE-011 (compact) 的公共接口也将在此导出。
 """
 
+from .budget_guard import BudgetGuard
 from .token_budget import TokenBudgetSnapshot, check_token_budget
 
 __all__ = [
+    'BudgetGuard',
     'TokenBudgetSnapshot',
     'check_token_budget',
 ]
