@@ -5,7 +5,11 @@
 2) 执行工具并回填。
 3) 达到停止条件后返回 AgentRunResult。
 
-设计原则：简单优先，不引入 resume、压缩、预算闸门等后续能力。
+ISSUE-008 扩展：
+4) resume(prompt, stored_session) 从持久化会话恢复并继续执行。
+   - 严格继承 stored_session 的 model/runtime 配置。
+   - usage/cost/turns/tool_calls 从历史基线累计。
+   - session_id 保持不变。
 """
 
 from __future__ import annotations
@@ -33,19 +37,62 @@ class LocalCodingAgent:
     tool_registry: dict[str, AgentTool] = field(default_factory=default_tool_registry)  # 可用工具集合。
 
     def run(self, prompt: str) -> AgentRunResult:
-        """执行一轮端到端任务。"""
-        session = AgentSessionState.create(prompt)
-        session_id = uuid4().hex
+        """执行一轮端到端任务（新会话）。"""
+        return self._execute_loop(
+            session=AgentSessionState.create(prompt),
+            session_id=uuid4().hex,
+            turns_offset=0,
+            usage_baseline=TokenUsage(),
+            cost_baseline=0.0,
+        )
+
+    def resume(self, prompt: str, stored_session: StoredAgentSession) -> AgentRunResult:
+        """从已保存的会话恢复并继续执行新 prompt。
+
+        严格继承 stored_session 的 model/runtime 配置；
+        usage、turns、tool_calls 从历史基线累计；
+        cost = 历史成本 + 本次 delta 成本；
+        session_id 保持不变。
+        """
+        session = AgentSessionState.from_persisted(
+            messages=list(stored_session.messages),
+            transcript=list(stored_session.transcript),
+            tool_call_count=stored_session.tool_calls,
+        )
+        session.append_user(prompt)
+        return self._execute_loop(
+            session=session,
+            session_id=stored_session.session_id,
+            turns_offset=stored_session.turns,
+            usage_baseline=stored_session.usage,
+            cost_baseline=stored_session.total_cost_usd,
+        )
+
+    def _execute_loop(
+        self,
+        *,
+        session: AgentSessionState,
+        session_id: str,
+        turns_offset: int,
+        usage_baseline: TokenUsage,
+        cost_baseline: float,
+    ) -> AgentRunResult:
+        """run / resume 共用的 turn loop。
+
+        usage_delta  只统计本次执行的增量。
+        usage_total  = usage_baseline + usage_delta。
+        cost         = cost_baseline + estimate_cost_usd(usage_delta)。
+        """
         events: list[JSONDict] = []
-        usage_total = TokenUsage()
+        usage_delta = TokenUsage()
         final_output = ''
-        turns_executed = 0
+        turns_this_run = 0
         stop_reason = 'max_turns'
 
         tool_context = build_tool_context(self.runtime_config, tool_registry=self.tool_registry)
 
         for turn_index in range(1, self.runtime_config.max_turns + 1):
-            turns_executed = turn_index
+            turns_this_run = turn_index
             try:
                 response = self.client.complete(
                     messages=session.to_messages(),
@@ -54,36 +101,30 @@ class LocalCodingAgent:
                 )
             except OpenAIClientError as exc:
                 stop_reason = 'backend_error'
-                events.append(
-                    {
-                        'type': 'backend_error',
-                        'turn': turn_index,
-                        'error': str(exc),
-                    }
-                )
+                events.append({'type': 'backend_error', 'turn': turn_index, 'error': str(exc)})
                 return self._build_run_result(
                     session_id=session_id,
                     session=session,
                     final_output=final_output,
-                    turns_executed=turns_executed,
-                    usage_total=usage_total,
+                    turns_total=turns_offset + turns_this_run,
+                    usage_delta=usage_delta,
+                    usage_total=usage_baseline + usage_delta,
+                    cost_baseline=cost_baseline,
                     stop_reason=stop_reason,
                     events=events,
                 )
 
-            usage_total = usage_total + response.usage
+            usage_delta = usage_delta + response.usage
             session.append_assistant_turn(response)
             if response.content:
                 final_output = response.content
 
-            events.append(
-                {
-                    'type': 'model_turn',
-                    'turn': turn_index,
-                    'finish_reason': response.finish_reason,
-                    'tool_calls': len(response.tool_calls),
-                }
-            )
+            events.append({
+                'type': 'model_turn',
+                'turn': turn_index,
+                'finish_reason': response.finish_reason,
+                'tool_calls': len(response.tool_calls),
+            })
 
             # 没有工具调用时，说明当前任务已收敛
             if not response.tool_calls:
@@ -92,8 +133,10 @@ class LocalCodingAgent:
                     session_id=session_id,
                     session=session,
                     final_output=final_output,
-                    turns_executed=turns_executed,
-                    usage_total=usage_total,
+                    turns_total=turns_offset + turns_this_run,
+                    usage_delta=usage_delta,
+                    usage_total=usage_baseline + usage_delta,
+                    cost_baseline=cost_baseline,
                     stop_reason=stop_reason,
                     events=events,
                 )
@@ -107,24 +150,24 @@ class LocalCodingAgent:
                     tool_context,
                 )
                 session.append_tool_result(tool_call, tool_result)
-                events.append(
-                    {
-                        'type': 'tool_result',
-                        'turn': turn_index,
-                        'tool_call_id': tool_call.id,
-                        'tool_name': tool_call.name,
-                        'ok': tool_result.ok,
-                        'error_kind': tool_result.metadata.get('error_kind'),
-                    }
-                )
+                events.append({
+                    'type': 'tool_result',
+                    'turn': turn_index,
+                    'tool_call_id': tool_call.id,
+                    'tool_name': tool_call.name,
+                    'ok': tool_result.ok,
+                    'error_kind': tool_result.metadata.get('error_kind'),
+                })
 
         # 达到最大轮数限制，返回结果
         return self._build_run_result(
             session_id=session_id,
             session=session,
             final_output=final_output,
-            turns_executed=turns_executed,
-            usage_total=usage_total,
+            turns_total=turns_offset + turns_this_run,
+            usage_delta=usage_delta,
+            usage_total=usage_baseline + usage_delta,
+            cost_baseline=cost_baseline,
             stop_reason=stop_reason,
             events=events,
         )
@@ -139,15 +182,22 @@ class LocalCodingAgent:
         session_id: str,
         session: AgentSessionState,
         final_output: str,
-        turns_executed: int,
+        turns_total: int,
+        usage_delta: TokenUsage,
         usage_total: TokenUsage,
+        cost_baseline: float,
         stop_reason: str,
         events: list[JSONDict],
     ) -> AgentRunResult:
-        """统一构造最终运行结果并落盘会话快照。"""
+        """统一构造最终运行结果并落盘会话快照。
+
+        total_cost_usd = cost_baseline + estimate_cost_usd(usage_delta)，
+        避免因历史计费策略变化导致重算偏差。
+        """
         transcript = session.transcript()
         events_snapshot = tuple(dict(item) for item in events)
-        total_cost_usd = self.client.config.pricing.estimate_cost_usd(usage_total)
+        delta_cost = self.client.config.pricing.estimate_cost_usd(usage_delta)
+        total_cost_usd = cost_baseline + delta_cost
         stored_session = StoredAgentSession(
             session_id=session_id,
             model_config=self.client.config,
@@ -156,7 +206,7 @@ class LocalCodingAgent:
             transcript=transcript,
             events=events_snapshot,
             final_output=final_output,
-            turns=turns_executed,
+            turns=turns_total,
             tool_calls=session.tool_call_count,
             usage=usage_total,
             total_cost_usd=total_cost_usd,
@@ -168,7 +218,7 @@ class LocalCodingAgent:
         )
         return AgentRunResult(
             final_output=final_output,
-            turns=turns_executed,
+            turns=turns_total,
             tool_calls=session.tool_call_count,
             transcript=transcript,
             events=events_snapshot,

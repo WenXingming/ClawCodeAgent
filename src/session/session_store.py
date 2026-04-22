@@ -34,6 +34,8 @@ def load_agent_session(
     path = _session_file_path(session_id, directory=directory)
     try:
         payload = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError as exc:
+        raise ValueError(f'Session not found: {path}') from exc
     except JSONDecodeError as exc:
         raise ValueError(f'Corrupted session file: {path}') from exc
 

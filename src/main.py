@@ -16,6 +16,7 @@ from pathlib import Path
 from .agent_runtime import LocalCodingAgent
 from .contract_types import AgentPermissions, AgentRuntimeConfig, ModelConfig
 from .openai_client import OpenAIClient, OpenAIClientError
+from .session import load_agent_session
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -29,10 +30,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--temperature', type=float, default=0.0, help='Model temperature.')
     parser.add_argument('--allow-file-write', action='store_true', help='Allow write_file/edit_file tools.')
     parser.add_argument('--allow-shell', action='store_true', help='Allow bash tool.')
-    parser.add_argument(
-        '--allow-destructive-shell',
+    parser.add_argument('--allow-destructive-shell',
         action='store_true',
         help='Allow destructive shell commands (requires --allow-shell).',
+    )
+    parser.add_argument(
+        '--session-id',
+        default='',
+        help='Resume an existing session by ID instead of starting a new one.',
     )
     return parser
 
@@ -52,29 +57,44 @@ def main(argv: list[str] | None = None) -> int:
         if args.allow_destructive_shell and not args.allow_shell:
             raise ValueError('allow_destructive_shell requires --allow-shell')
 
-        model = _required_value(args.model, 'OPENAI_MODEL', 'model')
-        api_key = _required_value(args.api_key, 'OPENAI_API_KEY', 'api_key')
-        base_url = args.base_url.strip() or os.getenv('OPENAI_BASE_URL', '').strip() or 'http://127.0.0.1:8000/v1'
+        prompt = ' '.join(args.prompt)
+        session_id = args.session_id.strip()
 
-        model_config = ModelConfig(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            temperature=args.temperature,
-        )
-        runtime_config = AgentRuntimeConfig(
-            cwd=Path(args.cwd).resolve(),
-            max_turns=args.max_turns,
-            permissions=AgentPermissions(
-                allow_file_write=args.allow_file_write,
-                allow_shell_commands=args.allow_shell,
-                allow_destructive_shell_commands=args.allow_destructive_shell,
-            ),
-        )
+        if session_id:
+            # Resume 模式：从已保存 session 恢复，严格继承存档的 model/runtime 配置
+            stored_session = load_agent_session(session_id)
+            client = OpenAIClient(stored_session.model_config)
+            agent = LocalCodingAgent(client, stored_session.runtime_config)
+            result = agent.resume(prompt, stored_session)
+        else:
+            # 新会话模式：从命令行 / 环境变量读取配置
+            model = _required_value(args.model, 'OPENAI_MODEL', 'model')
+            api_key = _required_value(args.api_key, 'OPENAI_API_KEY', 'api_key')
+            base_url = (
+                args.base_url.strip()
+                or os.getenv('OPENAI_BASE_URL', '').strip()
+                or 'http://127.0.0.1:8000/v1'
+            )
 
-        client = OpenAIClient(model_config)
-        agent = LocalCodingAgent(client, runtime_config)
-        result = agent.run(' '.join(args.prompt))
+            model_config = ModelConfig(
+                model=model,
+                base_url=base_url,
+                api_key=api_key,
+                temperature=args.temperature,
+            )
+            runtime_config = AgentRuntimeConfig(
+                cwd=Path(args.cwd).resolve(),
+                max_turns=args.max_turns,
+                permissions=AgentPermissions(
+                    allow_file_write=args.allow_file_write,
+                    allow_shell_commands=args.allow_shell,
+                    allow_destructive_shell_commands=args.allow_destructive_shell,
+                ),
+            )
+
+            client = OpenAIClient(model_config)
+            agent = LocalCodingAgent(client, runtime_config)
+            result = agent.run(prompt)
 
         print(result.final_output)
         return 0

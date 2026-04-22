@@ -222,6 +222,136 @@ class LocalCodingAgentTests(unittest.TestCase):
         self.assertEqual(stored.transcript, ({'role': 'user', 'content': '测试后端异常'},))
         self.assertTrue(any(item.get('type') == 'backend_error' for item in result.events))
 
+    # ------------------------------------------------------------------
+    # ISSUE-008 Resume 连续执行与状态继承
+    # ------------------------------------------------------------------
+
+    def test_resume_session_id_does_not_drift(self) -> None:
+        """resume 后 session_id 必须与第一次 run 的保持一致。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='第一轮回答',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=3, output_tokens=2),
+            ),
+            OneTurnResponse(
+                content='第二轮回答',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=4, output_tokens=3),
+            ),
+        ])
+        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+
+        first = agent.run('第一个问题')
+        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        second = agent.resume('第二个问题', stored)
+
+        self.assertEqual(second.session_id, first.session_id)
+        self.assertEqual(second.final_output, '第二轮回答')
+
+    def test_resume_accumulates_usage_turns_and_tool_calls(self) -> None:
+        """resume 后 usage / turns / tool_calls 应为两次执行的累计值。"""
+        workspace = _make_test_dir()
+        (workspace / 'note.txt').write_text('data', encoding='utf-8')
+        fake_client = _FakeOpenAIClient([
+            # 第一次 run：直接返回，usage 10+5
+            OneTurnResponse(
+                content='第一轮',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=10, output_tokens=5),
+            ),
+            # 第二次 resume：调用一次工具后返回，usage 4+1 + 3+4
+            OneTurnResponse(
+                content='',
+                tool_calls=(ToolCall(id='c1', name='read_file', arguments={'path': 'note.txt'}),),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=4, output_tokens=1),
+            ),
+            OneTurnResponse(
+                content='第二轮',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=3, output_tokens=4),
+            ),
+        ])
+        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+
+        first = agent.run('任务一')
+        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        second = agent.resume('任务二', stored)
+
+        self.assertEqual(second.turns, 3)          # 1 + 2
+        self.assertEqual(second.tool_calls, 1)     # 0 + 1
+        self.assertEqual(second.usage.input_tokens, 17)   # 10+4+3
+        self.assertEqual(second.usage.output_tokens, 10)  # 5+1+4
+
+        # 落盘后的累计值同样一致
+        restored2 = load_agent_session(second.session_id or '', directory=workspace / 'sessions')
+        self.assertEqual(restored2.turns, 3)
+        self.assertEqual(restored2.usage.input_tokens, 17)
+
+    def test_resume_model_sees_history_context(self) -> None:
+        """resume 时模型请求应包含第一轮的历史消息（上下文连续）。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='历史回答',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=2, output_tokens=1),
+            ),
+            OneTurnResponse(
+                content='续跑回答',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=3, output_tokens=2),
+            ),
+        ])
+        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+
+        first = agent.run('历史问题')
+        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        agent.resume('续跑问题', stored)
+
+        # fake_client.calls[1] 是 resume 时发出的请求消息列表
+        self.assertEqual(len(fake_client.calls), 2)
+        resume_messages = fake_client.calls[1]
+        contents = [m.get('content', '') for m in resume_messages]
+
+        # 历史回答与续跑问题都要出现在第二次调用的消息里
+        self.assertIn('历史回答', contents)
+        self.assertIn('续跑问题', contents)
+
+    def test_resume_backend_error_preserves_session_id_and_saves(self) -> None:
+        """resume 发生 backend_error 时 session_id 不变，且仍落盘。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='成功回答',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=5, output_tokens=2),
+            ),
+            OpenAIConnectionError('network down'),
+        ])
+        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+
+        first = agent.run('任务一')
+        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        second = agent.resume('任务二', stored)
+
+        self.assertEqual(second.session_id, first.session_id)
+        self.assertEqual(second.stop_reason, 'backend_error')
+
+        # 落盘文件应仍可读取且 session_id 一致
+        restored2 = load_agent_session(second.session_id or '', directory=workspace / 'sessions')
+        self.assertEqual(restored2.session_id, first.session_id)
+        self.assertEqual(restored2.stop_reason, 'backend_error')
+
 
 if __name__ == '__main__':
     unittest.main()

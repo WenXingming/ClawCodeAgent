@@ -559,6 +559,15 @@
 
 交付物：resume 路径与测试。
 
+**实施决策（已落地）**
+
+- `AgentSessionState.from_persisted(messages, transcript, tool_call_count)` 负责恢复运行态；transcript 为空时从 messages 生成最小回退。
+- `LocalCodingAgent.resume(prompt, stored_session)` 严格继承 `stored_session.model_config` 与 `runtime_config`；usage/turns/tool_calls 从历史基线累计；cost = 历史成本 + 本次 delta，避免历史计费策略变化造成偏差。
+- run/resume 共用 `_execute_loop` 私有方法，stop_reason 行为一致。
+- CLI 新增 `--session-id` 参数；有 session_id 时走 load + resume，无时走原有 run 路径。
+- `load_agent_session` 现在对 FileNotFoundError 也抛 ValueError，main 统一 except 即可。
+- **本期不实现 plugin state 恢复**，延后至 ISSUE-014/016 插件 runtime 一并处理。
+
 #### ISSUE-009 Token Budget 预检
 
 类型：feature

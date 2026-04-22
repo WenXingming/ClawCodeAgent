@@ -31,6 +31,32 @@ class AgentSessionState:
         session.append_user(prompt)
         return session
 
+    @classmethod
+    def from_persisted(
+        cls,
+        messages: list[JSONDict],
+        transcript: list[JSONDict],
+        tool_call_count: int,
+    ) -> 'AgentSessionState':
+        """从持久化的消息列表恢复会话运行态。
+
+        若历史 transcript 为空，则从 messages 生成最小可审计条目作为回退，
+        保证 transcript 连续性不中断。
+        """
+        if transcript:
+            effective_transcript: list[JSONDict] = [dict(item) for item in transcript]
+        else:
+            effective_transcript = [
+                {'role': item['role'], 'content': item.get('content', '')}
+                for item in messages
+                if isinstance(item, dict) and 'role' in item
+            ]
+        return cls(
+            messages=[dict(item) for item in messages],
+            transcript_entries=effective_transcript,
+            tool_call_count=tool_call_count,
+        )
+
     def append_user(self, prompt: str) -> None:
         """追加用户消息。"""
         message = {
