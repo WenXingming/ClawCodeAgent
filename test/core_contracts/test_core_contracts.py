@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from src.contract_types import (
+from src.core_contracts import (
     OneTurnResponse,
     AgentPermissions,
     AgentRunResult,

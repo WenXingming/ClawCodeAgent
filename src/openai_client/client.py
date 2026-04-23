@@ -15,7 +15,7 @@ import json
 from typing import Any, Iterator
 from urllib import error, request
 
-from .core_contracts import (
+from ..core_contracts import (
     OneTurnResponse,
     StreamEvent,
     JSONDict,

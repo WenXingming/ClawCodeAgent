@@ -1,0 +1,1 @@
+"""core_contracts 相关测试。"""

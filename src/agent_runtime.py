@@ -27,7 +27,7 @@ from .context import (
     should_auto_compact,
     snip_session,
 )
-from .contract_types import (
+from .core_contracts import (
     AgentRunResult,
     AgentRuntimeConfig,
     JSONDict,

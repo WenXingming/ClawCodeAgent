@@ -4,7 +4,7 @@
 方便调用侧直接 `import src` 后按需引用。
 """
 
-from .contract_types import (
+from .core_contracts import (
 	JSONDict,
 	ModelConfig,
 	OneTurnResponse,

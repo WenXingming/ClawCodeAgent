@@ -4,11 +4,14 @@ __pycache__/
 
 .vscode/
 
+# Unittest cache
+.tmp/
+
 # Local verification artifacts
 .tmp-test/
 .probe-write/
 probe_py.txt
 test/.tmp/
 
-# session cache
+# Session cache
 .port_sessions/

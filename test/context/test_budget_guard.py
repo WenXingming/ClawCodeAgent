@@ -10,7 +10,7 @@ import unittest
 
 from src.context.budget_guard import BudgetGuard
 from src.context.token_budget import TokenBudgetSnapshot
-from src.contract_types import BudgetConfig, ModelPricing, TokenUsage
+from src.core_contracts import BudgetConfig, ModelPricing, TokenUsage
 
 
 # ---------------------------------------------------------------------------

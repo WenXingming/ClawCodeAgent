@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 from src.agent_tools import build_tool_context, default_tool_registry, execute_tool
-from src.contract_types import AgentPermissions, AgentRuntimeConfig
+from src.core_contracts import AgentPermissions, AgentRuntimeConfig
 
 
 class AgentToolsTests(unittest.TestCase):

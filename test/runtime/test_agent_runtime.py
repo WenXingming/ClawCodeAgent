@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from src.agent_runtime import LocalCodingAgent
-from src.contract_types import (
+from src.core_contracts import (
     AgentPermissions,
     AgentRuntimeConfig,
     BudgetConfig,

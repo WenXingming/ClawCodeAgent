@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from .bash_security import check_shell_security
-from .contract_types import (
+from .core_contracts import (
     AgentPermissions,
     AgentRuntimeConfig,
     JSONDict,

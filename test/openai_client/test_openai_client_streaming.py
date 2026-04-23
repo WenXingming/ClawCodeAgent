@@ -14,7 +14,7 @@ from io import BytesIO
 from unittest.mock import patch
 from urllib import error
 
-from src.contract_types import ModelConfig, OutputSchemaConfig, TokenUsage
+from src.core_contracts import ModelConfig, OutputSchemaConfig, TokenUsage
 from src.openai_client import (
     OpenAIClient,
     OpenAIConnectionError,

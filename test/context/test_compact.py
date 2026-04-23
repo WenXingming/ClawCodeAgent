@@ -12,7 +12,7 @@ from src.context.compact import (
     is_context_length_error,
     should_auto_compact,
 )
-from src.contract_types import ModelConfig, OneTurnResponse, TokenUsage
+from src.core_contracts import ModelConfig, OneTurnResponse, TokenUsage
 from src.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 
 

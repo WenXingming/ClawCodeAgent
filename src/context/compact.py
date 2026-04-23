@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from ..contract_types import JSONDict, TokenUsage
+from ..core_contracts import JSONDict, TokenUsage
 from ..openai_client import OpenAIClient, OpenAIClientError, OpenAIResponseError
 from .token_budget import estimate_messages_tokens
 

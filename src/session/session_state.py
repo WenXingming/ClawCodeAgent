@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from ..contract_types import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
+from ..core_contracts import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 
 
 @dataclass

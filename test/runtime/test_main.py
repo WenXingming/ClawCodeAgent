@@ -8,7 +8,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import MagicMock, patch
 
-from src.contract_types import AgentRunResult, AgentRuntimeConfig, ModelConfig, TokenUsage
+from src.core_contracts import AgentRunResult, AgentRuntimeConfig, ModelConfig, TokenUsage
 from src.main import main
 from src.session import StoredAgentSession
 

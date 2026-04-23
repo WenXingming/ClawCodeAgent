@@ -14,7 +14,7 @@ from src.agent_tools import (
     execute_tool,
     execute_tool_streaming,
 )
-from src.contract_types import AgentPermissions, AgentRuntimeConfig
+from src.core_contracts import AgentPermissions, AgentRuntimeConfig
 
 
 class AgentToolsShellTests(unittest.TestCase):
