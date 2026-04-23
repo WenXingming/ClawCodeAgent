@@ -638,6 +638,15 @@
 
 交付物：snip 逻辑与测试。
 
+**实施决策（已落地）**
+
+- `src/context/snip.py` 提供 `SnipResult` 与 `snip_session(messages, *)`；接口直接接收裸 `list[JSONDict]` 并就地修改，不依赖 `AgentSessionState` 容器。
+- 触发条件固定为 `check_token_budget(...).is_soft_over`；snip 发生在 turn loop 每轮 token preflight 之后、`token_budget` event 记录之前。
+- 保留区间固定为“前缀连续 `system` 消息 + 尾部 `compact_preserve_messages` 条最近消息”；仅中间段候选允许被替换。
+- 可 snip 候选限定为：`role='tool'`、带 `tool_calls` 的 assistant 消息、或 `content` 长度超过 300 字符的 assistant 消息；已是 tombstone 的消息通过 `<system-reminder>\nOlder ` 前缀识别并跳过。
+- tombstone 内容统一写成 `<system-reminder>` 摘要块，仅替换 `content`；同时保留 `role / tool_call_id / name / tool_calls` 等协议字段，避免工具调用链断裂。
+- snip 成功时追加 `snip_boundary` event，记录 `snipped_count` 与 `tokens_removed`；随后重新计算 token snapshot，使同轮 `token_budget` event 反映 snip 后状态。
+
 #### ISSUE-011 Compact 与 Reactive Compact
 
 类型：feature
