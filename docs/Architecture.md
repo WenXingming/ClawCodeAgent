@@ -56,6 +56,7 @@ graph TD
             direction TB
             n_token_budget(["🔢 token_budget.py"])
             n_budget_guard(["🛡️ budget_guard.py"])
+            n_snip(["✂️ snip.py"])
         end
 
         style Core fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
@@ -69,7 +70,9 @@ graph TD
     n_runtime --> n_openai
     n_runtime --> n_budget_guard
     n_runtime --> n_token_budget
+    n_runtime --> n_snip
     n_budget_guard --> n_token_budget
+    n_snip --> n_token_budget
     
     n_tools --> n_bash_security
     
@@ -92,6 +95,7 @@ graph TD
     style ContextPkg fill:#ffffff,stroke:#666,stroke-dasharray: 5 5
     style n_token_budget fill:#28a745,color:#fff,stroke:#1e7e34
     style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34
+    style n_snip fill:#28a745,color:#fff,stroke:#1e7e34
 ```
 
 ## 快速阅读建议

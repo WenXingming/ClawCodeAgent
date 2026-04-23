@@ -476,6 +476,55 @@ class LocalCodingAgentTests(unittest.TestCase):
         # turns_limit 应在模型调用前触发
         self.assertEqual(len(fake_client.calls), 0)
 
+    def test_snip_triggered_on_soft_over(self) -> None:
+        """max_input_tokens 极小时 is_soft_over=True，应触发 snip_boundary 事件。"""
+        workspace = _make_test_dir()
+        (workspace / 'f.txt').write_text('data', encoding='utf-8')
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='',
+                tool_calls=(ToolCall(id='t1', name='read_file', arguments={'path': 'f.txt'}),),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=5, output_tokens=1),
+            ),
+            OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        # max_input_tokens=5000：soft_limit=0（任意 projected>0 → soft_over=True）
+        # 同时 hard_limit=904，几条消息的投影 token << 904，不触发 hard_over
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=5,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            budget_config=BudgetConfig(max_input_tokens=5000),
+            compact_preserve_messages=1,   # 确保消息不全在尾部，snip 有候选目标
+        )
+        agent = LocalCodingAgent(fake_client, config)
+        result = agent.run('任务')
+        snip_events = [e for e in result.events if e.get('type') == 'snip_boundary']
+        # 至少发生一次 snip（第 2 轮或更晚的轮次，消息已有工具结果可剪）
+        self.assertGreater(len(snip_events), 0)
+        self.assertIn('snipped_count', snip_events[0])
+        self.assertIn('tokens_removed', snip_events[0])
+
+    def test_no_snip_when_not_soft_over(self) -> None:
+        """max_input_tokens 不设置时 is_soft_over 永远为 False，不应有 snip_boundary。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=5,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            # 不设置 max_input_tokens → soft_over 永远 False
+        )
+        agent = LocalCodingAgent(fake_client, config)
+        result = agent.run('任务')
+        snip_events = [e for e in result.events if e.get('type') == 'snip_boundary']
+        self.assertEqual(len(snip_events), 0)
+
 
 if __name__ == '__main__':
     unittest.main()

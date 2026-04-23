@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from .agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
-from .context import BudgetGuard, check_token_budget
+from .context import BudgetGuard, SnipResult, check_token_budget, snip_session
 from .contract_types import (
     AgentRunResult,
     AgentRuntimeConfig,
@@ -101,13 +101,37 @@ class LocalCodingAgent:
         for turn_index in range(1, self.runtime_config.max_turns + 1):
             turns_this_run = turn_index
 
-            # token preflight（event 始终记录，供 ISSUE-010/011 soft_over 观测）
+            # token preflight
             openai_tools = self._build_openai_tools()
             snapshot = check_token_budget(
                 messages=session.to_messages(),
                 tools=openai_tools,
                 max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
             )
+
+            # ISSUE-010 snip：soft_over 时就地剪裁旧消息，降低 prompt 压力
+            if snapshot.is_soft_over:
+                snip_result = snip_session(
+                    session.messages,
+                    preserve_messages=self.runtime_config.compact_preserve_messages,
+                    tools=openai_tools,
+                    max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
+                )
+                if snip_result.snipped_count > 0:
+                    events.append({
+                        'type': 'snip_boundary',
+                        'turn': turn_index,
+                        'snipped_count': snip_result.snipped_count,
+                        'tokens_removed': snip_result.tokens_removed,
+                    })
+                    # 重新计算，token_budget event 反映 snip 后的状态
+                    snapshot = check_token_budget(
+                        messages=session.to_messages(),
+                        tools=openai_tools,
+                        max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
+                    )
+
+            # token_budget event 始终记录（snip 后状态，供观测）
             events.append({
                 'type': 'token_budget',
                 'turn': turn_index,
