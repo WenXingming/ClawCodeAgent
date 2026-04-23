@@ -1,13 +1,12 @@
 """OpenAI-compatible 客户端包入口。"""
 
-from urllib import request
-
-from .client import (
+from .openai_client import (
     OpenAIClient,
     OpenAIClientError,
     OpenAIConnectionError,
     OpenAIResponseError,
     OpenAITimeoutError,
+    request,
 )
 
 __all__ = [

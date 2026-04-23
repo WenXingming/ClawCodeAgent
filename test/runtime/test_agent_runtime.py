@@ -16,7 +16,7 @@ from src.core_contracts import (
     TokenUsage,
     ToolCall,
 )
-from src.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from src.openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from src.session import load_agent_session
 
 

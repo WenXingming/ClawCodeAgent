@@ -13,7 +13,7 @@ from src.context.compact import (
     should_auto_compact,
 )
 from src.core_contracts import ModelConfig, OneTurnResponse, TokenUsage
-from src.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from src.openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 
 
 class _FakeCompactClient(OpenAIClient):

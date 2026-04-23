@@ -16,7 +16,7 @@
 1. 在 `src/contract_types.py` 新增 `StreamEvent` 契约对象：
    - 字段：`type`、`delta`、`tool_call_index`、`tool_call_id`、`tool_name`、`arguments_delta`、`finish_reason`、`usage`、`raw_event`
    - 方法：`to_dict` / `from_dict`
-2. 在 `src/openai_client.py` 新增流式能力：
+2. 在 `src/openai_client/openai_client.py` 新增流式能力：
    - `OpenAIClient.stream(...) -> Iterator[StreamEvent]`
    - `OpenAIClient.complete_stream(...) -> OneTurnResponse`
    - `_iter_sse_payloads(...)` / `_decode_sse_payload(...)` / `_parse_stream_payload(...)`

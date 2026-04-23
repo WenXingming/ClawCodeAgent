@@ -6,7 +6,7 @@
 |------|----------|------|
 | `src/context/compact.py` | 新建 | `CompactResult`、auto/reactive compact 判定与摘要压缩逻辑 |
 | `src/context/__init__.py` | 修改 | 导出 compact 公共接口 |
-| `src/openai_client.py` | 修改 | `OpenAIResponseError` 增加结构化 `status_code/detail` |
+| `src/openai_client/openai_client.py` | 修改 | `OpenAIResponseError` 增加结构化 `status_code/detail` |
 | `src/agent_runtime.py` | 修改 | 接入 auto compact 与 reactive compact retry |
 | `test/test_compact.py` | 新建 | compact 单元测试 |
 | `test/test_agent_runtime.py` | 追加 | auto compact / reactive compact 集成测试 |

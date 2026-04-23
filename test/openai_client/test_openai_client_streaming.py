@@ -15,7 +15,7 @@ from unittest.mock import patch
 from urllib import error
 
 from src.core_contracts import ModelConfig, OutputSchemaConfig, TokenUsage
-from src.openai_client import (
+from src.openai_client.openai_client import (
     OpenAIClient,
     OpenAIConnectionError,
     OpenAIResponseError,
@@ -69,7 +69,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
     # 正常路径
     # ------------------------------------------------------------------
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_text_and_usage(self, mock_urlopen: object) -> None:
         self._mock_sse_payloads(
             mock_urlopen,
@@ -109,7 +109,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
         self.assertEqual(usage_events[0].usage.input_tokens, 3)
         self.assertEqual(usage_events[0].usage.output_tokens, 2)
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_complete_stream_restores_tool_call_arguments(self, mock_urlopen: object) -> None:
         self._mock_sse_payloads(
             mock_urlopen,
@@ -168,7 +168,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
         self.assertEqual(result.tool_calls[0].name, 'read_file')
         self.assertEqual(result.tool_calls[0].arguments, {'path': 'README.md'})
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_supports_output_schema(self, mock_urlopen: object) -> None:
         self._mock_sse_payloads(
             mock_urlopen,
@@ -196,7 +196,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
         self.assertEqual(body['response_format']['json_schema']['name'], 'result_schema')
         self.assertEqual(body['response_format']['json_schema']['strict'], True)
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_complete_stream_without_usage_returns_default_usage(self, mock_urlopen: object) -> None:
         self._mock_sse_payloads(
             mock_urlopen,
@@ -215,7 +215,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
         self.assertEqual(result.finish_reason, 'stop')
         self.assertEqual(result.usage, TokenUsage())
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_done_only_returns_start_event(self, mock_urlopen: object) -> None:
         self._mock_sse_raw_lines(
             mock_urlopen,
@@ -235,7 +235,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].type, 'message_start')
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_complete_stream_accepts_tool_name_from_later_delta(self, mock_urlopen: object) -> None:
         self._mock_sse_payloads(
             mock_urlopen,
@@ -293,7 +293,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
     # 异常路径
     # ------------------------------------------------------------------
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_invalid_sse_json_raises_response_error(self, mock_urlopen: object) -> None:
         self._mock_sse_raw_lines(
             mock_urlopen,
@@ -311,7 +311,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
                 )
             )
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_malformed_choices_raises_response_error(self, mock_urlopen: object) -> None:
         self._mock_sse_payloads(
             mock_urlopen,
@@ -328,7 +328,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
                 )
             )
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_http_error_raises_response_error(self, mock_urlopen: object) -> None:
         mock_urlopen.side_effect = error.HTTPError(
             url='http://127.0.0.1:8000/v1/chat/completions',
@@ -348,7 +348,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
 
         self.assertIn('HTTP 500', str(context.exception))
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_timeout_raises_timeout_error(self, mock_urlopen: object) -> None:
         mock_urlopen.side_effect = error.URLError(TimeoutError('timed out'))
 
@@ -360,7 +360,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
                 )
             )
 
-    @patch('src.openai_client.request.urlopen')
+    @patch('src.openai_client.openai_client.request.urlopen')
     def test_stream_connection_error_raises_connection_error(self, mock_urlopen: object) -> None:
         mock_urlopen.side_effect = error.URLError('connection refused')
 

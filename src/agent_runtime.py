@@ -34,7 +34,7 @@ from .core_contracts import (
     OneTurnResponse,
     TokenUsage,
 )
-from .openai_client import OpenAIClient, OpenAIClientError
+from .openai_client.openai_client import OpenAIClient, OpenAIClientError
 from .session import AgentSessionState, StoredAgentSession, save_agent_session
 
 

@@ -25,7 +25,7 @@ from .agent_tools import (
 	execute_tool_streaming,
 )
 from .agent_runtime import LocalCodingAgent
-from .openai_client import (
+from .openai_client.openai_client import (
 	OpenAIClient,
 	OpenAIClientError,
 	OpenAIConnectionError,

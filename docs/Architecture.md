@@ -41,7 +41,7 @@ graph TB
     %% ================= Core Infra（关键：上移） =================
     subgraph External [模型接入]
         direction TB
-        n_openai_client(["☁️ openai_client/client.py"])
+        n_openai_client(["☁️ openai_client/openai_client.py"])
         style External fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -133,12 +133,12 @@ graph TB
 这张图把模块分组和关键依赖放在一起：分组框表示模块归属，实线保留主控制流和关键调用链，虚线只表示对 `core_contracts/` 这个共享底座的契约依赖。当前最重要的三个事实是：
 
 - `core_contracts/` 已经成为共享底座，跨模块 dataclass、JSON 协议和配置解析都从这里下沉出去。
-- `openai_client/` 现在是一个包，`__init__.py` 只保留入口职责，具体 HTTP 与 SSE 解析都放在 `client.py`。
+- `openai_client/` 现在是一个包，`__init__.py` 只保留入口职责，具体 HTTP 与 SSE 解析都放在 `openai_client.py`。
 - `context/compact.py` 是少数刻意允许跨层调用客户端的模块，因为它需要主动发起摘要压缩模型请求。
 
 ## 推荐阅读顺序
 
 1. 先看 `core_contracts/`，建立共享契约层与配置/协议对象的边界感。
-2. 再看 `openai_client/client.py` 与 `agent_tools.py`，理解模型侧和工具侧两个外部交互面。
+2. 再看 `openai_client/openai_client.py` 与 `agent_tools.py`，理解模型侧和工具侧两个外部交互面。
 3. 再看 `session/` 与 `context/`，理解状态恢复、预算治理、snip、compact 的局部职责。
 4. 最后看 `agent_runtime.py` 与 `main.py`，把编排主循环和 CLI 入口串起来。

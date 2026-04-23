@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .agent_runtime import LocalCodingAgent
 from .core_contracts import AgentPermissions, AgentRuntimeConfig, ModelConfig
-from .openai_client import OpenAIClient, OpenAIClientError
+from .openai_client.openai_client import OpenAIClient, OpenAIClientError
 from .session import load_agent_session
 
 

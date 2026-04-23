@@ -16,7 +16,7 @@
 1. 在 `src/contract_types.py` 新增 `OneTurnResponse` 契约对象：
    - 字段：`content`、`tool_calls`、`finish_reason`、`usage`
    - 方法：`to_dict` / `from_dict`
-2. 在 `src/openai_client.py` 新增非流式客户端：
+2. 在 `src/openai_client/openai_client.py` 新增非流式客户端：
    - `OpenAIClient.complete(...)`
    - 请求构造与响应解析
    - `tool_calls` 标准化解析（含 `function_call` 兼容）
@@ -44,7 +44,7 @@
 
 1. 客户端层与契约层分文件管理：
    - 契约集中在 `src/contract_types.py`
-   - 调用逻辑集中在 `src/openai_client.py`
+   - 调用逻辑集中在 `src/openai_client/openai_client.py`
 2. 本轮只实现非流式 `complete`，避免跨 ISSUE 扩散。
 3. 统一异常语义，调用方只需处理客户端异常家族。
 4. 保持 ISSUE-001 的温和容错风格：
@@ -75,7 +75,7 @@ python -m unittest discover -s test -v
 
 ## 6. 对后续（ISSUE-003）的交接点
 
-1. `src/openai_client.py` 已具备可复用的解析助手：
+1. `src/openai_client/openai_client.py` 已具备可复用的解析助手：
    - `_normalize_content`
    - `_parse_tool_arguments`
    - `_parse_usage`
@@ -86,9 +86,9 @@ python -m unittest discover -s test -v
 
 为满足“先理解再扩展”的节奏，本次对 ISSUE-002 做了不改变行为的可读性维护：
 
-1. 在 `src/openai_client.py` 增加文件级注释，明确模块职责与边界。
+1. 在 `src/openai_client/openai_client.py` 增加文件级注释，明确模块职责与边界。
 2. 在 `test/test_openai_client.py` 增加文件级注释，说明测试覆盖目标。
-3. 在 `src/openai_client.py` 增加分区注释（异常、解析助手、客户端实现）。
+3. 在 `src/openai_client/openai_client.py` 增加分区注释（异常、解析助手、客户端实现）。
 4. 抽取小型辅助方法以降低主流程阅读负担：
    - `_build_request(...)`
    - `_extract_choice_and_message(...)`
@@ -119,7 +119,7 @@ python -m unittest discover -s test -v
 1. 类型与文件重命名：
    - `AssistantTurn` -> `OneTurnResponse`
    - `src/agent_types.py` -> `src/contract_types.py`
-   - `src/openai_compat.py` -> `src/openai_client.py`
+   - `src/openai_compat.py` -> `src/openai_client/openai_client.py`
 2. OpenAI 客户端命名族重命名：
    - `OpenAICompatClient` -> `OpenAIClient`
    - `OpenAICompatError` -> `OpenAIClientError`
