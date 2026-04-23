@@ -7,9 +7,9 @@
 | `src/context/__init__.py` | 新建 | 建立 context 子包统一导出入口 |
 | `src/context/token_budget.py` | 新建 | `TokenBudgetSnapshot` + token 预检与估算函数 |
 | `src/context/budget_guard.py` | 新建 | `BudgetGuard` 五维预算闸门与私有 `_check_*` 子方法 |
-| `src/agent_runtime.py` | 修改 | `_execute_loop` 接入 token / cost / tool_calls / model_calls / session_turns 闸门 |
-| `test/test_token_budget.py` | 新建 | 15 个 token 估算与预算快照单测 |
-| `test/test_agent_runtime.py` | 追加 | 5 个预算闸门集成测试 |
+| `src/runtime/agent_runtime.py` | 修改 | `_execute_loop` 接入 token / cost / tool_calls / model_calls / session_turns 闸门 |
+| `test/context/test_token_budget.py` | 新建 | 15 个 token 估算与预算快照单测 |
+| `test/runtime/test_agent_runtime.py` | 追加 | 5 个预算闸门集成测试 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-009 实施决策归档 |
 
 ## 关键设计决策

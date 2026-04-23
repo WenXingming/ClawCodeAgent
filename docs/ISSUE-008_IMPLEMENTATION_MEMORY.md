@@ -6,11 +6,11 @@
 |------|----------|------|
 | `src/session/session_state.py` | 新增方法 | `from_persisted(messages, transcript, tool_call_count)` |
 | `src/session/session_store.py` | 修改 | `FileNotFoundError` → `ValueError`，与损坏文件语义统一 |
-| `src/agent_runtime.py` | 重构 | `run` 瘦身 + 新增 `resume` + 提取 `_execute_loop` |
+| `src/runtime/agent_runtime.py` | 重构 | `run` 瘦身 + 新增 `resume` + 提取 `_execute_loop` |
 | `src/main.py` | 修改 | `--session-id` 参数 + resume 执行分支 |
-| `test/test_session_state.py` | 新建 | 4 个 from_persisted 单测 |
-| `test/test_agent_runtime.py` | 追加 | 4 个 resume 集成测试 |
-| `test/test_main.py` | 追加 | 3 个 CLI resume 路径测试 |
+| `test/session/test_session_state.py` | 新建 | 4 个 from_persisted 单测 |
+| `test/runtime/test_agent_runtime.py` | 追加 | 4 个 resume 集成测试 |
+| `test/runtime/test_main.py` | 追加 | 3 个 CLI resume 路径测试 |
 | `docs/QUICK_START.md` | 追加 | Resume 使用示例与常见错误 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-008 实施决策 |
 

@@ -21,7 +21,7 @@
    - `append_tool_result(...)`
    - `to_messages(...)`
    - `transcript(...)`
-2. 新增 `src/agent_runtime.py`：
+2. 新增 `src/runtime/agent_runtime.py`：
    - `LocalCodingAgent`
    - `run(...)`
    - `_build_openai_tools(...)`
@@ -29,7 +29,7 @@
 3. 更新 `src/__init__.py` 导出：
    - `LocalCodingAgent`
    - `AgentSessionState`
-4. 新增测试 `test/test_agent_runtime.py`，覆盖 ISSUE-006 主场景与边界场景。
+4. 新增测试 `test/runtime/test_agent_runtime.py`，覆盖 ISSUE-006 主场景与边界场景。
 
 ### 未实现（按计划故意延后）
 
@@ -70,13 +70,13 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe -m unittest test/test_agent_runtime.py -v
+C:/ProgramData/anaconda3/python.exe -m unittest test.runtime.test_agent_runtime -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test/test_agent_runtime.py`：5/5 通过。
+1. `test/runtime/test_agent_runtime.py`：5/5 通过。
 2. 全量 `discover`：69/69 通过。
 
 ## 7. 对后续 ISSUE-007/008 的交接建议

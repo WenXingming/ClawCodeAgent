@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.context.token_budget import (
+from context.token_budget import (
     OUTPUT_RESERVE_TOKENS,
     SOFT_BUFFER_TOKENS,
     TokenBudgetSnapshot,
@@ -58,7 +58,7 @@ class EstimateMessagesTokensTests(unittest.TestCase):
 
     def test_empty_list_returns_base_overhead(self) -> None:
         """空列表只有基础 _CHAT_BASE 开销。"""
-        from src.context.token_budget import _CHAT_BASE
+        from context.token_budget import _CHAT_BASE
         tokens = estimate_messages_tokens([])
         self.assertEqual(tokens, _CHAT_BASE)
 
@@ -164,7 +164,7 @@ class CheckTokenBudgetTests(unittest.TestCase):
 
     def test_projected_tokens_included_in_snapshot(self) -> None:
         """projected_input_tokens 应大于 0 且等于消息估算与工具估算之和。"""
-        from src.context.token_budget import estimate_messages_tokens, estimate_tools_tokens
+        from context.token_budget import estimate_messages_tokens, estimate_tools_tokens
         messages = self._simple_messages()
         tools = [{'name': 'read_file', 'description': 'read', 'parameters': {}}]
         snapshot = check_token_budget(messages, tools=tools, max_input_tokens=None)

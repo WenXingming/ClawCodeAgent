@@ -13,11 +13,11 @@
 ### 已完成
 
 1. 在根目录 `src` 新建契约模块：
-   - `src/contract_types.py`
+   - `src/core_contracts/`
 2. 新建包初始化文件：
    - `src/__init__.py`
 3. 在根目录 `test` 新建测试：
-   - `test/test_contract_types.py`
+   - `test/core_contracts/test_core_contracts.py`
    - `test/__init__.py`
 
 ### 未实现（按计划故意延后）
@@ -28,7 +28,7 @@
 
 ## 3. 契约对象清单
 
-本次在 `src/contract_types.py` 中实现了：
+本次在 `src/core_contracts/` 中实现了：
 
 1. `TokenUsage`
 2. `ModelPricing`
@@ -43,7 +43,7 @@
 
 ## 4. 设计决策（为了简单实用）
 
-1. 采用单文件契约集中管理，降低初学者理解成本。
+1. 采用 `core_contracts/` 包集中管理共享契约，降低调用侧理解成本。
 2. 所有 `from_dict` 都做温和容错，不因脏数据直接崩溃。
 3. 兼容常见 camelCase / snake_case 字段，减少后续对接阻力。
 4. 对关键对象保留 `to_dict`，便于后续 session 落盘与 API 传输。
@@ -99,9 +99,9 @@ python -m unittest discover -s test -v
 为满足“稳扎稳打、逐步理解”的开发方式，本次对 ISSUE-001 代码做了不改变行为的可读性维护：
 
 1. 在文件开头增加了文件级注释说明：
-   - `src/contract_types.py`
-   - `test/test_contract_types.py`
-2. 在 `src/contract_types.py` 增加了分区注释（helpers / contracts）。
+   - `src/core_contracts/`
+   - `test/core_contracts/test_core_contracts.py`
+2. 在 `src/core_contracts/` 增加了分区注释（helpers / contracts）。
 3. 增加 `_first_present(...)` 以减少重复嵌套 `data.get(...)`，使兼容字段读取更直观。
 4. 为主要 dataclass 添加简短说明注释，方便快速理解每个对象职责。
 5. 在测试文件中增加了测试分组注释和测试类说明，明确每组测试意图。
@@ -121,8 +121,8 @@ python -m unittest discover -s test -v
 
 为提高阅读体验，本次已将 ISSUE-001 相关代码与测试中的英文注释/文档字符串改为中文：
 
-1. `src/contract_types.py`
-2. `test/test_contract_types.py`
+1. `src/core_contracts/`
+2. `test/core_contracts/test_core_contracts.py`
 3. `src/__init__.py`
 4. `test/__init__.py`
 
@@ -135,7 +135,7 @@ python -m unittest discover -s test -v
 
 为进一步提升可理解性，本次在不改变序列化语义的前提下完成了命名与注释收敛：
 
-1. `src/contract_types.py`
+1. `src/core_contracts/`
    - 将 token 使用统计主类统一命名为 `TokenUsage`。
    - 同步更新相关类型注解与调用点：
      - `__add__` 参数与返回类型
@@ -143,15 +143,15 @@ python -m unittest discover -s test -v
      - `ModelPricing.estimate_cost_usd(...)` 参数类型
      - `AgentRunResult.usage` 字段类型与 `default_factory`
      - `AgentRunResult.from_dict(...)` 的 usage 解析入口
-2. 对 `src/contract_types.py` 中全部 dataclass 属性增加了简洁中文注释，统一为“字段职责短句”风格。
+2. 对 `src/core_contracts/` 中全部 dataclass 属性增加了简洁中文注释，统一为“字段职责短句”风格。
 3. 同步更新测试与文档命名：
-   - `test/test_contract_types.py`
+   - `test/core_contracts/test_core_contracts.py`
    - `docs/FINAL_ARCHITECTURE_PLAN.md`
 
 回归验证：
 
 ```powershell
-python -m unittest test/test_contract_types.py -v
+python -m unittest test.core_contracts.test_core_contracts -v
 python -m unittest discover -s test -v
 ```
 

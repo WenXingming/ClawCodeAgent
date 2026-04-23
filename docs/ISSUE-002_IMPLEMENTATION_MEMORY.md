@@ -13,7 +13,7 @@
 
 ### 已完成
 
-1. 在 `src/contract_types.py` 新增 `OneTurnResponse` 契约对象：
+1. 在 `src/core_contracts/` 新增 `OneTurnResponse` 契约对象：
    - 字段：`content`、`tool_calls`、`finish_reason`、`usage`
    - 方法：`to_dict` / `from_dict`
 2. 在 `src/openai_client/openai_client.py` 新增非流式客户端：
@@ -26,13 +26,13 @@
    - `OpenAIConnectionError`
    - `OpenAITimeoutError`
    - `OpenAIResponseError`
-4. 新增测试文件 `test/test_openai_client.py`（9 条）：
+4. 新增测试文件 `test/openai_client/test_openai_client.py`（9 条）：
    - 正常文本响应
    - `tool_calls` 响应
    - `usage` 缺失与变体字段
    - 超时、连接失败、HTTP 错误
    - 响应结构非法
-5. 在 `test/test_contract_types.py` 增加 `OneTurnResponse` 契约测试（2 条）。
+5. 在 `test/core_contracts/test_core_contracts.py` 增加 `OneTurnResponse` 契约测试（2 条）。
 
 ### 未实现（按计划故意延后）
 
@@ -43,7 +43,7 @@
 ## 3. 设计决策
 
 1. 客户端层与契约层分文件管理：
-   - 契约集中在 `src/contract_types.py`
+   - 契约集中在 `src/core_contracts/`
    - 调用逻辑集中在 `src/openai_client/openai_client.py`
 2. 本轮只实现非流式 `complete`，避免跨 ISSUE 扩散。
 3. 统一异常语义，调用方只需处理客户端异常家族。
@@ -62,15 +62,15 @@
 执行命令：
 
 ```powershell
-python -m unittest test/test_openai_client.py -v
-python -m unittest test/test_contract_types.py -v
+python -m unittest test.openai_client.test_openai_client -v
+python -m unittest test.core_contracts.test_core_contracts -v
 python -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test_openai_client.py`：9/9 通过。
-2. `test_contract_types.py`：14/14 通过。
+1. `test/openai_client/test_openai_client.py`：9/9 通过。
+2. `test/core_contracts/test_core_contracts.py`：14/14 通过。
 3. 全量 `discover`：23/23 通过。
 
 ## 6. 对后续（ISSUE-003）的交接点
@@ -87,7 +87,7 @@ python -m unittest discover -s test -v
 为满足“先理解再扩展”的节奏，本次对 ISSUE-002 做了不改变行为的可读性维护：
 
 1. 在 `src/openai_client/openai_client.py` 增加文件级注释，明确模块职责与边界。
-2. 在 `test/test_openai_client.py` 增加文件级注释，说明测试覆盖目标。
+2. 在 `test/openai_client/test_openai_client.py` 增加文件级注释，说明测试覆盖目标。
 3. 在 `src/openai_client/openai_client.py` 增加分区注释（异常、解析助手、客户端实现）。
 4. 抽取小型辅助方法以降低主流程阅读负担：
    - `_build_request(...)`
@@ -95,14 +95,14 @@ python -m unittest discover -s test -v
    - `_normalize_finish_reason(...)`
    - `_parse_single_tool_call(...)`
    - `_parse_legacy_function_call(...)`
-5. 在 `test/test_openai_client.py` 新增响应构造辅助函数 `_build_single_choice_payload(...)`，减少重复样板。
+5. 在 `test/openai_client/test_openai_client.py` 新增响应构造辅助函数 `_build_single_choice_payload(...)`，减少重复样板。
 6. 细化 `OneTurnResponse` 属性注释，突出字段语义。
 
 回归结果：
 
 ```powershell
-python -m unittest test/test_openai_client.py -v
-python -m unittest test/test_contract_types.py -v
+python -m unittest test.openai_client.test_openai_client -v
+python -m unittest test.core_contracts.test_core_contracts -v
 python -m unittest discover -s test -v
 ```
 
@@ -118,7 +118,7 @@ python -m unittest discover -s test -v
 
 1. 类型与文件重命名：
    - `AssistantTurn` -> `OneTurnResponse`
-   - `src/agent_types.py` -> `src/contract_types.py`
+   - `src/agent_types.py` -> `src/core_contracts/`
    - `src/openai_compat.py` -> `src/openai_client/openai_client.py`
 2. OpenAI 客户端命名族重命名：
    - `OpenAICompatClient` -> `OpenAIClient`
@@ -127,14 +127,14 @@ python -m unittest discover -s test -v
    - `OpenAICompatTimeoutError` -> `OpenAITimeoutError`
    - `OpenAICompatResponseError` -> `OpenAIResponseError`
 3. 测试文件同步重命名：
-   - `test/test_agent_types.py` -> `test/test_contract_types.py`
-   - `test/test_openai_compat.py` -> `test/test_openai_client.py`
+   - `test/test_agent_types.py` -> `test/core_contracts/test_core_contracts.py`
+   - `test/test_openai_compat.py` -> `test/openai_client/test_openai_client.py`
 
 命名迁移后验证：
 
 ```powershell
-python -m unittest test/test_contract_types.py -v
-python -m unittest test/test_openai_client.py -v
+python -m unittest test.core_contracts.test_core_contracts -v
+python -m unittest test.openai_client.test_openai_client -v
 python -m unittest discover -s test -v
 ```
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.context.compact import (
+from context.compact import (
     apply_compact_summary,
     build_compact_request_messages,
     compact_conversation,
@@ -12,8 +12,10 @@ from src.context.compact import (
     is_context_length_error,
     should_auto_compact,
 )
-from src.core_contracts import ModelConfig, OneTurnResponse, TokenUsage
-from src.openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from core_contracts.config import ModelConfig
+from core_contracts.protocol import OneTurnResponse
+from core_contracts.usage import TokenUsage
+from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 
 
 class _FakeCompactClient(OpenAIClient):

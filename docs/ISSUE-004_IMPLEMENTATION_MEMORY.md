@@ -12,7 +12,7 @@
 
 ### 已完成
 
-1. 在 `src/agent_tools.py` 增加工具层核心结构：
+1. 在 `src/tools/agent_tools.py` 增加工具层核心结构：
    - `ToolExecutionContext`
    - `AgentTool`
    - `build_tool_context(...)`
@@ -28,7 +28,7 @@
    - `_ensure_write_allowed(...)` 负责写权限拦截
    - `ToolPermissionError` 与 `ToolExecutionError` 统一映射到 `ToolExecutionResult.metadata.error_kind`
 4. 在 `src/__init__.py` 导出 ISSUE-004 常用公开能力。
-5. 新增 `test/test_agent_tools.py`，覆盖功能路径与安全路径。
+5. 新增 `test/tools/test_agent_tools.py`，覆盖功能路径与安全路径。
 
 ### 未实现（按计划故意延后）
 
@@ -70,13 +70,13 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe -m unittest test/test_agent_tools.py -v
+C:/ProgramData/anaconda3/python.exe -m unittest test.tools.test_agent_tools -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test/test_agent_tools.py`：11/11 通过。
+1. `test/tools/test_agent_tools.py`：11/11 通过。
 2. 全量 `discover`：50/50 通过。
 
 关键覆盖：

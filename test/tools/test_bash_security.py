@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.bash_security import (
+from tools.bash_security import (
     SecurityBehavior,
     bash_command_is_safe,
     check_shell_security,

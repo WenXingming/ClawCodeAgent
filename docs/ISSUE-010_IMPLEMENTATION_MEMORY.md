@@ -6,16 +6,16 @@
 |------|----------|------|
 | `src/context/snip.py` | 新建 | `SnipResult`、`snip_session()` 与 tombstone 剪裁逻辑 |
 | `src/context/__init__.py` | 修改 | 导出 `SnipResult` 与 `snip_session` |
-| `src/agent_runtime.py` | 修改 | 在 soft_over 时接入 snip，并追加 `snip_boundary` 事件 |
+| `src/runtime/agent_runtime.py` | 修改 | 在 soft_over 时接入 snip，并追加 `snip_boundary` 事件 |
 | `docs/Architecture.md` | 修改 | ContextPkg 中补充 `snip.py` 节点与依赖关系 |
-| `test/test_snip.py` | 新建 | 20 个 snip 单测 |
-| `test/test_agent_runtime.py` | 追加 | 2 个 soft_over / non-soft_over 集成测试 |
+| `test/context/test_snip.py` | 新建 | 20 个 snip 单测 |
+| `test/runtime/test_agent_runtime.py` | 追加 | 2 个 soft_over / non-soft_over 集成测试 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-010 实施决策归档 |
 
 ## 关键设计决策
 
 ### 1. snip 只由 `is_soft_over` 触发
-`agent_runtime.py` 在每轮 token preflight 后检查 `snapshot.is_soft_over`；
+`runtime/agent_runtime.py` 在每轮 token preflight 后检查 `snapshot.is_soft_over`；
 仅当软超限时才执行 `snip_session()`，避免在正常上下文压力下过早丢弃历史内容。
 
 ### 2. 保留区间固定为“前缀 system + 尾部最近 N 条”

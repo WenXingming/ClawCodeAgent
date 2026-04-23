@@ -17,25 +17,24 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from .agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
-from .context import (
-    BudgetGuard,
+from context.budget_guard import BudgetGuard
+from context.compact import (
     CompactResult,
-    check_token_budget,
     compact_conversation,
     is_context_length_error,
     should_auto_compact,
-    snip_session,
 )
-from .core_contracts import (
-    AgentRunResult,
-    AgentRuntimeConfig,
-    JSONDict,
-    OneTurnResponse,
-    TokenUsage,
-)
-from .openai_client.openai_client import OpenAIClient, OpenAIClientError
-from .session import AgentSessionState, StoredAgentSession, save_agent_session
+from context.snip import snip_session
+from context.token_budget import check_token_budget
+from core_contracts.config import AgentRuntimeConfig
+from core_contracts.protocol import JSONDict, OneTurnResponse
+from core_contracts.result import AgentRunResult
+from core_contracts.usage import TokenUsage
+from openai_client.openai_client import OpenAIClient, OpenAIClientError
+from session.session_contracts import StoredAgentSession
+from session.session_state import AgentSessionState
+from session.session_store import save_agent_session
+from tools.agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
 
 
 _MAX_REACTIVE_COMPACT_RETRIES = 2

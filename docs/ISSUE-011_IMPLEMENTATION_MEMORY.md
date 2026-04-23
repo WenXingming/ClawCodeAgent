@@ -7,10 +7,10 @@
 | `src/context/compact.py` | 新建 | `CompactResult`、auto/reactive compact 判定与摘要压缩逻辑 |
 | `src/context/__init__.py` | 修改 | 导出 compact 公共接口 |
 | `src/openai_client/openai_client.py` | 修改 | `OpenAIResponseError` 增加结构化 `status_code/detail` |
-| `src/agent_runtime.py` | 修改 | 接入 auto compact 与 reactive compact retry |
-| `test/test_compact.py` | 新建 | compact 单元测试 |
-| `test/test_agent_runtime.py` | 追加 | auto compact / reactive compact 集成测试 |
-| `test/test_openai_client.py` | 追加断言 | 校验 HTTP 响应异常保留结构化信息 |
+| `src/runtime/agent_runtime.py` | 修改 | 接入 auto compact 与 reactive compact retry |
+| `test/context/test_compact.py` | 新建 | compact 单元测试 |
+| `test/runtime/test_agent_runtime.py` | 追加 | auto compact / reactive compact 集成测试 |
+| `test/openai_client/test_openai_client.py` | 追加断言 | 校验 HTTP 响应异常保留结构化信息 |
 | `docs/Architecture.md` | 修改 | ContextPkg 追加 `compact.py` 节点与依赖 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-011 实施决策归档 |
 
@@ -71,8 +71,8 @@ auto compact 和 reactive compact 本质上都在调用模型，因此：
 
 补文档前已运行：
 
-- `python -m unittest test.test_compact test.test_openai_client -v` → 全部 OK
-- `python -m unittest test.test_agent_runtime -v` → 全部 OK
+- `python -m unittest test.context.test_compact test.openai_client.test_openai_client -v` → 全部 OK
+- `python -m unittest test.runtime.test_agent_runtime -v` → 全部 OK
 
 补文档后再次运行 `python -m unittest discover -s test -v`：
 

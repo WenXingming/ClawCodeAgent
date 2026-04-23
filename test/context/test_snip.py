@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.context.snip import (
+from context.snip import (
     SnipResult,
     _count_prefix,
     _is_snippable,

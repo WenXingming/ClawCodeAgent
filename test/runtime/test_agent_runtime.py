@@ -6,18 +6,12 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from src.agent_runtime import LocalCodingAgent
-from src.core_contracts import (
-    AgentPermissions,
-    AgentRuntimeConfig,
-    BudgetConfig,
-    ModelConfig,
-    OneTurnResponse,
-    TokenUsage,
-    ToolCall,
-)
-from src.openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
-from src.session import load_agent_session
+from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
+from core_contracts.protocol import OneTurnResponse, ToolCall
+from core_contracts.usage import TokenUsage
+from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from runtime.agent_runtime import LocalCodingAgent
+from session.session_store import load_agent_session
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -463,7 +457,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         )
         agent = LocalCodingAgent(fake_client, config)
         # 伪造一个已经用了 3 轮的历史会话
-        from src.session import StoredAgentSession
+        from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='test-session-999',
             model_config=fake_client.config,
@@ -550,7 +544,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             compact_preserve_messages=1,
         )
         agent = LocalCodingAgent(fake_client, config)
-        from src.session import StoredAgentSession
+        from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-001',
             model_config=fake_client.config,
@@ -593,7 +587,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             compact_preserve_messages=1,
         )
         agent = LocalCodingAgent(fake_client, config)
-        from src.session import StoredAgentSession
+        from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-002',
             model_config=fake_client.config,
@@ -642,7 +636,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             compact_preserve_messages=1,
         )
         agent = LocalCodingAgent(fake_client, config)
-        from src.session import StoredAgentSession
+        from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-003',
             model_config=fake_client.config,
@@ -688,7 +682,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             compact_preserve_messages=1,
         )
         agent = LocalCodingAgent(fake_client, config)
-        from src.session import StoredAgentSession
+        from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-004',
             model_config=fake_client.config,

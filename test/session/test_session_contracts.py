@@ -6,8 +6,9 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from src.core_contracts import AgentRuntimeConfig, ModelConfig, TokenUsage
-from src.session import StoredAgentSession
+from core_contracts.config import AgentRuntimeConfig, ModelConfig
+from core_contracts.usage import TokenUsage
+from session.session_contracts import StoredAgentSession
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()

@@ -13,7 +13,7 @@
 
 ### 已完成
 
-1. 在 `src/contract_types.py` 新增 `StreamEvent` 契约对象：
+1. 在 `src/core_contracts/` 新增 `StreamEvent` 契约对象：
    - 字段：`type`、`delta`、`tool_call_index`、`tool_call_id`、`tool_name`、`arguments_delta`、`finish_reason`、`usage`、`raw_event`
    - 方法：`to_dict` / `from_dict`
 2. 在 `src/openai_client/openai_client.py` 新增流式能力：
@@ -27,9 +27,9 @@
    - 复用 `OpenAIClientError` 异常族。
    - 新增 `_raise_request_error(...)` 做网络异常统一映射。
 5. 测试增强：
-   - 新增 `test/test_openai_client_streaming.py`。
-   - 补充 `test/test_openai_client.py` 边界测试（多 choice、非法 choices 类型）。
-   - 补充 `test/test_contract_types.py` 的 `ModelPricing` 与 `StreamEvent` 测试。
+   - 新增 `test/openai_client/test_openai_client_streaming.py`。
+   - 补充 `test/openai_client/test_openai_client.py` 边界测试（多 choice、非法 choices 类型）。
+   - 补充 `test/core_contracts/test_core_contracts.py` 的 `ModelPricing` 与 `StreamEvent` 测试。
 
 ### 未实现（按计划故意延后）
 
@@ -61,17 +61,17 @@
 执行命令：
 
 ```powershell
-python -m unittest test/test_openai_client_streaming.py -v
-python -m unittest test/test_openai_client.py -v
-python -m unittest test/test_contract_types.py -v
+python -m unittest test.openai_client.test_openai_client_streaming -v
+python -m unittest test.openai_client.test_openai_client -v
+python -m unittest test.core_contracts.test_core_contracts -v
 python -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test_openai_client_streaming.py`：11/11 通过。
-2. `test_openai_client.py`：11/11 通过。
-3. `test_contract_types.py`：17/17 通过。
+1. `test/openai_client/test_openai_client_streaming.py`：11/11 通过。
+2. `test/openai_client/test_openai_client.py`：11/11 通过。
+3. `test/core_contracts/test_core_contracts.py`：17/17 通过。
 4. 全量 `discover`：39/39 通过。
 
 ## 6. 关键场景覆盖

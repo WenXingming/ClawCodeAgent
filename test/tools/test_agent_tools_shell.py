@@ -8,13 +8,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.agent_tools import (
+from core_contracts.config import AgentPermissions, AgentRuntimeConfig
+from tools.agent_tools import (
     build_tool_context,
     default_tool_registry,
     execute_tool,
     execute_tool_streaming,
 )
-from src.core_contracts import AgentPermissions, AgentRuntimeConfig
 
 
 class AgentToolsShellTests(unittest.TestCase):
@@ -114,7 +114,7 @@ class AgentToolsShellTests(unittest.TestCase):
         self.assertTrue(result_updates[0].result.ok)
         self.assertIn('exit_code=', result_updates[0].result.content)
 
-    @patch('src.agent_tools.subprocess.Popen')
+    @patch('tools.agent_tools.subprocess.Popen')
     def test_bash_timeout_returns_structured_error(self, mock_popen: object) -> None:
         process = mock_popen.return_value
         process.communicate.side_effect = subprocess.TimeoutExpired(cmd='sleep', timeout=0.01)

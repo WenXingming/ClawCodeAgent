@@ -13,10 +13,10 @@ import os
 import sys
 from pathlib import Path
 
-from .agent_runtime import LocalCodingAgent
-from .core_contracts import AgentPermissions, AgentRuntimeConfig, ModelConfig
-from .openai_client.openai_client import OpenAIClient, OpenAIClientError
-from .session import load_agent_session
+from core_contracts.config import AgentPermissions, AgentRuntimeConfig, ModelConfig
+from openai_client.openai_client import OpenAIClient, OpenAIClientError
+from runtime.agent_runtime import LocalCodingAgent
+from session.session_store import load_agent_session
 
 
 def _build_parser() -> argparse.ArgumentParser:

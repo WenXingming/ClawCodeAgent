@@ -49,19 +49,19 @@
 ### 4.1 分层视图
 
 1. 入口层：`src/main.py`
-2. 核心编排层：`src/agent_runtime.py` 的 `LocalCodingAgent`
-3. 工具执行层：`src/agent_tools.py` + `src/permissions.py` + `src/bash_security.py`
-4. 上下文与提示层：`src/agent_context.py` + `src/agent_prompting.py` + `src/token_budget.py`
-5. 状态与持久化层：`src/session/session_state.py` + `src/session/session_contracts.py` + `src/session/session_store.py` + `src/transcript.py`
-6. 扩展运行时层：`*_runtime.py`（search/mcp/remote/task/plan/worktree/workflow/team/account/ask/config/lsp/background）
-7. 查询与观测门面层：`src/query_engine.py`
+2. 核心编排层：`src/runtime/agent_runtime.py` 的 `LocalCodingAgent`
+3. 工具执行层：`src/tools/agent_tools.py` + `src/tools/bash_security.py`
+4. 上下文治理层：`src/context/`（`token_budget.py` / `budget_guard.py` / `snip.py` / `compact.py`）
+5. 状态与持久化层：`src/session/session_state.py` + `src/session/session_contracts.py` + `src/session/session_store.py`
+6. 模型接入层：`src/openai_client/openai_client.py`
+7. 共享契约层：`src/core_contracts/`
 
 ### 4.2 当前核心执行链
 
 1. 解析 CLI 参数并构造 `ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`。
-2. `LocalCodingAgent` 初始化并注入 runtime、插件、策略与工具注册表。
-3. 处理 slash 预处理，必要时本地返回。
-4. 进入 turn loop：snip -> compact -> prompt preflight -> model call。
+2. 构建 `OpenAIClient` 与 `LocalCodingAgent`，并注入运行配置与工具注册表。
+3. 依据是否提供 `--session-id`，选择新会话 run 或 resume 路径。
+4. 进入 turn loop：prompt preflight -> snip/compact -> model call。
 5. 解析 tool calls，执行工具并写回 transcript。
 6. 多处预算检查与 stop_reason 约束。
 7. 结束后持久化 session，并支持后续 resume。

@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import unittest
 
-from src.context.budget_guard import BudgetGuard
-from src.context.token_budget import TokenBudgetSnapshot
-from src.core_contracts import BudgetConfig, ModelPricing, TokenUsage
+from context.budget_guard import BudgetGuard
+from context.token_budget import TokenBudgetSnapshot
+from core_contracts.config import BudgetConfig
+from core_contracts.usage import ModelPricing, TokenUsage
 
 
 # ---------------------------------------------------------------------------

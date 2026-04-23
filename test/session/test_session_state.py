@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.session.session_state import AgentSessionState
+from session.session_state import AgentSessionState
 
 
 class SessionStateFromPersistedTests(unittest.TestCase):

@@ -16,12 +16,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from .bash_security import check_shell_security
-from .core_contracts import (
-    AgentPermissions,
-    AgentRuntimeConfig,
-    JSONDict,
-    ToolExecutionResult,
-)
+from core_contracts.config import AgentPermissions, AgentRuntimeConfig
+from core_contracts.protocol import JSONDict, ToolExecutionResult
 
 
 class ToolPermissionError(RuntimeError):

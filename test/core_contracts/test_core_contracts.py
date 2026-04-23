@@ -12,19 +12,10 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from src.core_contracts import (
-    OneTurnResponse,
-    AgentPermissions,
-    AgentRunResult,
-    AgentRuntimeConfig,
-    BudgetConfig,
-    ModelConfig,
-    ModelPricing,
-    StreamEvent,
-    TokenUsage,
-    ToolCall,
-    ToolExecutionResult,
-)
+from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
+from core_contracts.protocol import OneTurnResponse, StreamEvent, ToolCall, ToolExecutionResult
+from core_contracts.result import AgentRunResult
+from core_contracts.usage import ModelPricing, TokenUsage
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()

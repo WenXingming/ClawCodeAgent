@@ -8,9 +8,11 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import MagicMock, patch
 
-from src.core_contracts import AgentRunResult, AgentRuntimeConfig, ModelConfig, TokenUsage
-from src.main import main
-from src.session import StoredAgentSession
+from core_contracts.config import AgentRuntimeConfig, ModelConfig
+from core_contracts.result import AgentRunResult
+from core_contracts.usage import TokenUsage
+from main import main
+from session.session_contracts import StoredAgentSession
 
 
 class _FakeAgent:
@@ -63,7 +65,7 @@ class MainEntryTests(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch('src.main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalCodingAgent', _FakeAgent),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -94,7 +96,7 @@ class MainEntryTests(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch('src.main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalCodingAgent', _FakeAgent),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -142,8 +144,8 @@ class MainEntryTests(unittest.TestCase):
         """--session-id 应触发 load_agent_session + agent.resume，而非 agent.run。"""
         stored = self._make_stored_session()
         with (
-            patch('src.main.load_agent_session', return_value=stored),
-            patch('src.main.LocalCodingAgent', _FakeAgent),
+            patch('main.load_agent_session', return_value=stored),
+            patch('main.LocalCodingAgent', _FakeAgent),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -156,7 +158,7 @@ class MainEntryTests(unittest.TestCase):
 
     def test_main_resume_missing_session_returns_error(self) -> None:
         """session 文件不存在时应返回退出码 2 并输出可读错误。"""
-        with patch('src.main.load_agent_session', side_effect=ValueError('Session not found: xyz')):
+        with patch('main.load_agent_session', side_effect=ValueError('Session not found: xyz')):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 code = main(['--session-id', 'xyz', '续跑'])
@@ -172,7 +174,7 @@ class MainEntryTests(unittest.TestCase):
                 {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'},
                 clear=False,
             ),
-            patch('src.main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalCodingAgent', _FakeAgent),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):

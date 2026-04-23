@@ -21,7 +21,7 @@
    - `save_agent_session(...)`
    - `load_agent_session(...)`
    - 基础 `session_id` 校验与路径解析
-3. 扩展 `src/agent_runtime.py`：
+3. 扩展 `src/runtime/agent_runtime.py`：
    - `run()` 开始生成稳定 `session_id`
    - 所有终止路径统一走 `_build_run_result(...)`
    - 自动计算 `total_cost_usd`
@@ -31,9 +31,9 @@
    - `save_agent_session`
    - `load_agent_session`
 5. 新增/扩展测试：
-   - `test/test_session_store.py`
-   - `test/test_session_contracts.py`
-   - `test/test_agent_runtime.py`
+   - `test/session/test_session_store.py`
+   - `test/session/test_session_contracts.py`
+   - `test/runtime/test_agent_runtime.py`
 
 ### 未实现（按计划故意延后）
 
@@ -83,15 +83,15 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-python -m unittest test.test_session_contracts test.test_contract_types test.test_agent_runtime test.test_session_store -v
-python -m unittest test.test_openai_client test.test_openai_client_streaming -v
+python -m unittest test.session.test_session_contracts test.core_contracts.test_core_contracts test.runtime.test_agent_runtime test.session.test_session_store -v
+python -m unittest test.openai_client.test_openai_client test.openai_client.test_openai_client_streaming -v
 python -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test.test_session_contracts + test.test_contract_types + test.test_agent_runtime + test.test_session_store`：32/32 通过。
-2. `test.test_openai_client + test.test_openai_client_streaming`：22/22 通过。
+1. `test.session.test_session_contracts + test.core_contracts.test_core_contracts + test.runtime.test_agent_runtime + test.session.test_session_store`：32/32 通过。
+2. `test.openai_client.test_openai_client + test.openai_client.test_openai_client_streaming`：22/22 通过。
 3. 全量 `discover`：79/79 通过。
 
 ## 7. 对后续 ISSUE-008 的交接建议

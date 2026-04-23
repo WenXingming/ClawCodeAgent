@@ -15,15 +15,9 @@ import json
 from typing import Any, Iterator
 from urllib import error, request
 
-from ..core_contracts import (
-    OneTurnResponse,
-    StreamEvent,
-    JSONDict,
-    ModelConfig,
-    OutputSchemaConfig,
-    TokenUsage,
-    ToolCall,
-)
+from core_contracts.config import ModelConfig, OutputSchemaConfig
+from core_contracts.protocol import JSONDict, OneTurnResponse, StreamEvent, ToolCall
+from core_contracts.usage import TokenUsage
 
 
 # ---------------------------------------------------------------------------

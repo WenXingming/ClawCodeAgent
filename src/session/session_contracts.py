@@ -11,7 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..core_contracts import AgentRuntimeConfig, JSONDict, ModelConfig, TokenUsage
+from core_contracts.config import AgentRuntimeConfig, ModelConfig
+from core_contracts.protocol import JSONDict
+from core_contracts.usage import TokenUsage
 
 
 def _first_present(data: JSONDict, *keys: str, default: Any = None) -> Any:

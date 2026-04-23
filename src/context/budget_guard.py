@@ -26,7 +26,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..core_contracts import BudgetConfig, ModelPricing, TokenUsage
+from core_contracts.config import BudgetConfig
+from core_contracts.usage import ModelPricing, TokenUsage
 from .token_budget import TokenBudgetSnapshot
 
 
