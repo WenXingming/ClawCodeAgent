@@ -675,6 +675,16 @@
 
 交付物：compact 子系统与测试。
 
+**实施决策（已落地）**
+
+- 新建 `src/context/compact.py`，导出 `CompactResult / compact_conversation / is_context_length_error / should_auto_compact`；与 `snip.py` 并列作为 context 子包的第二层治理能力。
+- auto compact 触发条件采用 `AgentRuntimeConfig.auto_compact_threshold_tokens`，**不复用** `is_soft_over`；`is_soft_over` 继续仅作为 ISSUE-010 snip 的信号。
+- compact 的消息布局复用 snip 的保留规则：前缀连续 `system` 消息不参与压缩，尾部 `compact_preserve_messages` 条最近消息保留，仅中间段被替换为 `compact boundary + compact summary` 两条 system reminder。
+- compact 摘要调用显式禁用工具（`tools=[]`），只要求模型输出纯文本摘要；compact 写回消息只保留标准 OpenAI message 字段，不向模型发送自定义 metadata。
+- reactive compact 仅在 `OpenAIResponseError` 呈现 prompt-too-long / context-length 类语义时触发；首版每轮最多重试 2 次，每次将 `preserve_messages` 逐步收紧到 1。
+- compact 产生的模型调用也计入 `usage_delta` 与 `model_call_count`，因此可能影响同轮后续的 cost/model_calls 预算检查；预算耗尽时仍走既有 `budget_stop` / `backend_error` 语义，不新增 stop_reason。
+- 运行事件新增 `compact_boundary`、`reactive_compact_retry` 与 `compact_failed`，用于观察 auto compact、reactive compact 及失败退化路径。
+
 #### ISSUE-012 Slash 命令框架与高频命令
 
 类型：feature

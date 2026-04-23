@@ -240,6 +240,8 @@ class OpenAIClientTests(unittest.TestCase):
             )
 
         self.assertIn('HTTP 500', str(context.exception))
+        self.assertEqual(context.exception.status_code, 500)
+        self.assertEqual(context.exception.detail, 'backend failed')
 
     @patch('src.openai_client.request.urlopen')
     def test_complete_timeout_raises_timeout_error(self, mock_urlopen: object) -> None:

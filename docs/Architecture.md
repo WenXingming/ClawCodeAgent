@@ -57,6 +57,7 @@ graph TD
             n_token_budget(["🔢 token_budget.py"])
             n_budget_guard(["🛡️ budget_guard.py"])
             n_snip(["✂️ snip.py"])
+            n_compact(["🗜️ compact.py"])
         end
 
         style Core fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
@@ -71,8 +72,11 @@ graph TD
     n_runtime --> n_budget_guard
     n_runtime --> n_token_budget
     n_runtime --> n_snip
+    n_runtime --> n_compact
     n_budget_guard --> n_token_budget
     n_snip --> n_token_budget
+    n_compact --> n_token_budget
+    n_compact --> n_openai
     
     n_tools --> n_bash_security
     
@@ -83,6 +87,7 @@ graph TD
     n_openai -.-> n_contract
     n_runtime -.-> n_contract
     n_budget_guard -.-> n_contract
+    n_compact -.-> n_contract
 
     %% 自定义节点颜色 (继承你原有的配色)
     style n_runtime fill:#007bff,color:#fff,stroke:#0056b3
@@ -96,6 +101,7 @@ graph TD
     style n_token_budget fill:#28a745,color:#fff,stroke:#1e7e34
     style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34
     style n_snip fill:#28a745,color:#fff,stroke:#1e7e34
+    style n_compact fill:#28a745,color:#fff,stroke:#1e7e34
 ```
 
 ## 快速阅读建议
@@ -103,6 +109,6 @@ graph TD
 - 先看 `contract_types.py`：它是核心契约层，被多个模块依赖。
 - 再看 `openai_client.py` 与 `agent_tools.py`：分别是模型调用层和工具执行层。
 - 然后看 `session/` 子包：`session_state.py` 维护内存态消息，`session_contracts.py` 定义落盘契约，`session_store.py` 负责 session 落盘与恢复。
-- 然后看 `context/` 子包：`token_budget.py` 负责 token 投影与预算快照，`budget_guard.py` 集中管理模型调用前/后的全维度预算闸门（session_turns / model_calls / token / cost / tool_calls）。
-- 最后看 `agent_runtime.py`：它把契约、模型、工具与持久化串成最小闭环；通过 `BudgetGuard` 与 `check_token_budget` 接入预算治理。
+- 然后看 `context/` 子包：`token_budget.py` 负责 token 投影与预算快照，`budget_guard.py` 集中管理模型调用前/后的全维度预算闸门（session_turns / model_calls / token / cost / tool_calls），`snip.py` 负责轻量 tombstone 剪裁，`compact.py` 负责摘要压缩与 context-length 异常恢复。
+- 最后看 `agent_runtime.py`：它把契约、模型、工具与持久化串成最小闭环；通过 `BudgetGuard`、`check_token_budget`、`snip_session` 与 `compact_conversation` 接入预算治理与上下文治理。
 - `__init__.py` 主要负责对外导出，不承载业务逻辑。

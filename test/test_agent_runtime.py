@@ -16,7 +16,7 @@ from src.contract_types import (
     TokenUsage,
     ToolCall,
 )
-from src.openai_client import OpenAIClient, OpenAIConnectionError
+from src.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from src.session import load_agent_session
 
 
@@ -524,6 +524,190 @@ class LocalCodingAgentTests(unittest.TestCase):
         result = agent.run('任务')
         snip_events = [e for e in result.events if e.get('type') == 'snip_boundary']
         self.assertEqual(len(snip_events), 0)
+
+    def test_auto_compact_triggered_at_explicit_threshold(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='用户目标：继续当前任务\n下一步：回答最新请求',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=2, output_tokens=1),
+            ),
+            OneTurnResponse(
+                content='done',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=3, output_tokens=4),
+            ),
+        ])
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=5,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            auto_compact_threshold_tokens=1,
+            compact_preserve_messages=1,
+        )
+        agent = LocalCodingAgent(fake_client, config)
+        from src.session import StoredAgentSession
+        stored = StoredAgentSession(
+            session_id='compact-session-001',
+            model_config=fake_client.config,
+            runtime_config=config,
+            messages=(
+                {'role': 'user', 'content': '旧需求 ' * 80},
+                {'role': 'assistant', 'content': '旧回答 ' * 80},
+                {'role': 'tool', 'tool_call_id': 't1', 'name': 'read_file', 'content': '旧工具输出 ' * 80},
+            ),
+            turns=1,
+        )
+
+        result = agent.resume('继续处理当前任务', stored)
+
+        compact_events = [
+            e for e in result.events
+            if e.get('type') == 'compact_boundary' and e.get('trigger') == 'auto'
+        ]
+        self.assertGreater(len(compact_events), 0)
+        self.assertEqual(result.stop_reason, 'stop')
+        self.assertEqual(len(fake_client.calls), 2)
+        self.assertEqual(result.usage.input_tokens, 5)
+        self.assertEqual(result.usage.output_tokens, 5)
+        self.assertTrue(any(
+            'Compact summary of earlier conversation' in item.get('content', '')
+            for item in fake_client.calls[1]
+        ))
+
+    def test_auto_compact_not_triggered_when_threshold_not_met(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
+        ])
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=5,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            auto_compact_threshold_tokens=10_000,
+            compact_preserve_messages=1,
+        )
+        agent = LocalCodingAgent(fake_client, config)
+        from src.session import StoredAgentSession
+        stored = StoredAgentSession(
+            session_id='compact-session-002',
+            model_config=fake_client.config,
+            runtime_config=config,
+            messages=(
+                {'role': 'user', 'content': '旧需求'},
+                {'role': 'assistant', 'content': '旧回答'},
+                {'role': 'tool', 'tool_call_id': 't1', 'name': 'read_file', 'content': '旧工具输出'},
+            ),
+            turns=1,
+        )
+
+        result = agent.resume('继续处理当前任务', stored)
+
+        compact_events = [e for e in result.events if e.get('type') == 'compact_boundary']
+        self.assertEqual(len(compact_events), 0)
+        self.assertEqual(len(fake_client.calls), 1)
+        self.assertEqual(result.stop_reason, 'stop')
+
+    def test_reactive_compact_retries_on_context_length_error(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OpenAIResponseError(
+                'HTTP 400 from model backend: maximum context length exceeded',
+                status_code=400,
+                detail='maximum context length exceeded',
+            ),
+            OneTurnResponse(
+                content='用户目标：继续当前任务\n下一步：回答最新请求',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=2, output_tokens=1),
+            ),
+            OneTurnResponse(
+                content='done',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=3, output_tokens=2),
+            ),
+        ])
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=5,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            compact_preserve_messages=1,
+        )
+        agent = LocalCodingAgent(fake_client, config)
+        from src.session import StoredAgentSession
+        stored = StoredAgentSession(
+            session_id='compact-session-003',
+            model_config=fake_client.config,
+            runtime_config=config,
+            messages=(
+                {'role': 'user', 'content': '旧需求 ' * 80},
+                {'role': 'assistant', 'content': '旧回答 ' * 80},
+                {'role': 'tool', 'tool_call_id': 't1', 'name': 'read_file', 'content': '旧工具输出 ' * 80},
+            ),
+            turns=1,
+        )
+
+        result = agent.resume('继续处理当前任务', stored)
+
+        retry_events = [e for e in result.events if e.get('type') == 'reactive_compact_retry']
+        self.assertEqual(len(retry_events), 1)
+        self.assertTrue(retry_events[0].get('ok'))
+        self.assertEqual(result.stop_reason, 'stop')
+        self.assertEqual(len(fake_client.calls), 3)
+        self.assertEqual(result.usage.input_tokens, 5)
+        self.assertEqual(result.usage.output_tokens, 3)
+
+    def test_reactive_compact_returns_backend_error_when_compaction_fails(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OpenAIResponseError(
+                'HTTP 400 from model backend: maximum context length exceeded',
+                status_code=400,
+                detail='maximum context length exceeded',
+            ),
+            OneTurnResponse(
+                content='   ',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=2, output_tokens=1),
+            ),
+        ])
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=5,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(allow_file_write=True),
+            compact_preserve_messages=1,
+        )
+        agent = LocalCodingAgent(fake_client, config)
+        from src.session import StoredAgentSession
+        stored = StoredAgentSession(
+            session_id='compact-session-004',
+            model_config=fake_client.config,
+            runtime_config=config,
+            messages=(
+                {'role': 'user', 'content': '旧需求 ' * 80},
+                {'role': 'assistant', 'content': '旧回答 ' * 80},
+                {'role': 'tool', 'tool_call_id': 't1', 'name': 'read_file', 'content': '旧工具输出 ' * 80},
+            ),
+            turns=1,
+        )
+
+        result = agent.resume('继续处理当前任务', stored)
+
+        retry_events = [e for e in result.events if e.get('type') == 'reactive_compact_retry']
+        self.assertEqual(len(retry_events), 1)
+        self.assertFalse(retry_events[0].get('ok'))
+        self.assertEqual(result.stop_reason, 'backend_error')
+        self.assertEqual(len(fake_client.calls), 2)
 
 
 if __name__ == '__main__':

@@ -18,15 +18,27 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from .agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
-from .context import BudgetGuard, SnipResult, check_token_budget, snip_session
+from .context import (
+    BudgetGuard,
+    CompactResult,
+    check_token_budget,
+    compact_conversation,
+    is_context_length_error,
+    should_auto_compact,
+    snip_session,
+)
 from .contract_types import (
     AgentRunResult,
     AgentRuntimeConfig,
     JSONDict,
+    OneTurnResponse,
     TokenUsage,
 )
 from .openai_client import OpenAIClient, OpenAIClientError
 from .session import AgentSessionState, StoredAgentSession, save_agent_session
+
+
+_MAX_REACTIVE_COMPACT_RETRIES = 2
 
 
 @dataclass
@@ -131,6 +143,51 @@ class LocalCodingAgent:
                         max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
                     )
 
+            pre_model_stop = guard.check_pre_model(
+                turns_offset=turns_offset,
+                turns_this_run=turns_this_run,
+                model_call_count=model_call_count,
+                snapshot=snapshot,
+                usage_delta=usage_delta,
+            )
+
+            if (
+                should_auto_compact(
+                    snapshot.projected_input_tokens,
+                    self.runtime_config.auto_compact_threshold_tokens,
+                )
+                and pre_model_stop is None
+            ):
+                compact_result = compact_conversation(
+                    self.client,
+                    session.messages,
+                    preserve_messages=self.runtime_config.compact_preserve_messages,
+                )
+                if compact_result.compacted:
+                    model_call_count += 1
+                    usage_delta = usage_delta + compact_result.usage
+                    events.append(self._make_compact_event(turn_index, 'auto', compact_result))
+                    snapshot = check_token_budget(
+                        messages=session.to_messages(),
+                        tools=openai_tools,
+                        max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
+                    )
+                    pre_model_stop = guard.check_pre_model(
+                        turns_offset=turns_offset,
+                        turns_this_run=turns_this_run,
+                        model_call_count=model_call_count,
+                        snapshot=snapshot,
+                        usage_delta=usage_delta,
+                    )
+                elif compact_result.error:
+                    events.append({
+                        'type': 'compact_failed',
+                        'turn': turn_index,
+                        'trigger': 'auto',
+                        'error': compact_result.error,
+                        'preserve_messages': self.runtime_config.compact_preserve_messages,
+                    })
+
             # token_budget event 始终记录（snip 后状态，供观测）
             events.append({
                 'type': 'token_budget',
@@ -141,30 +198,37 @@ class LocalCodingAgent:
             })
 
             # 模型调用前四维预算检查（session_turns / model_calls / token / cost）
-            if stop := guard.check_pre_model(
-                turns_offset=turns_offset,
-                turns_this_run=turns_this_run,
-                model_call_count=model_call_count,
-                snapshot=snapshot,
-                usage_delta=usage_delta,
-            ):
+            if pre_model_stop is not None:
                 return self._early_stop(
-                    stop,
+                    pre_model_stop,
                     session_id=session_id, session=session, final_output=final_output,
                     turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
                     usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
                     turn_index=turn_index, events=events,
                 )
 
-            try:
-                response = self.client.complete(
-                    messages=session.to_messages(),
-                    tools=openai_tools,
-                    output_schema=self.runtime_config.output_schema,
+            response = self._complete_with_reactive_compact(
+                session=session,
+                openai_tools=openai_tools,
+                turn_index=turn_index,
+                events=events,
+                guard=guard,
+                turns_offset=turns_offset,
+                turns_this_run=turns_this_run,
+                usage_delta=usage_delta,
+                model_call_count=model_call_count,
+            )
+            response, usage_delta, model_call_count, reactive_stop = response
+            if reactive_stop is not None:
+                return self._early_stop(
+                    reactive_stop,
+                    session_id=session_id, session=session, final_output=final_output,
+                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
+                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
+                    turn_index=turn_index, events=events,
                 )
-            except OpenAIClientError as exc:
+            if response is None:
                 stop_reason = 'backend_error'
-                events.append({'type': 'backend_error', 'turn': turn_index, 'error': str(exc)})
                 return self._build_run_result(
                     session_id=session_id,
                     session=session,
@@ -177,8 +241,6 @@ class LocalCodingAgent:
                     events=events,
                 )
 
-            model_call_count += 1
-            usage_delta = usage_delta + response.usage
             session.append_assistant_turn(response)
             if response.content:
                 final_output = response.content
@@ -277,6 +339,112 @@ class LocalCodingAgent:
             stop_reason=stop_reason,
             events=events,
         )
+
+    def _complete_with_reactive_compact(
+        self,
+        *,
+        session: AgentSessionState,
+        openai_tools: list[JSONDict],
+        turn_index: int,
+        events: list[JSONDict],
+        guard: BudgetGuard,
+        turns_offset: int,
+        turns_this_run: int,
+        usage_delta: TokenUsage,
+        model_call_count: int,
+    ) -> tuple[OneTurnResponse | None, TokenUsage, int, str | None]:
+        """执行一次模型调用；必要时在 context-length 错误后进行 reactive compact 重试。"""
+        current_usage = usage_delta
+        current_model_call_count = model_call_count
+        attempt = 0
+        current_error: OpenAIClientError | None = None
+
+        while True:
+            try:
+                response = self.client.complete(
+                    messages=session.to_messages(),
+                    tools=openai_tools,
+                    output_schema=self.runtime_config.output_schema,
+                )
+                current_model_call_count += 1
+                current_usage = current_usage + response.usage
+                return response, current_usage, current_model_call_count, None
+            except OpenAIClientError as exc:
+                current_error = exc
+                if not is_context_length_error(exc) or attempt >= _MAX_REACTIVE_COMPACT_RETRIES:
+                    break
+
+                attempt += 1
+                preserve_messages = max(
+                    1,
+                    self.runtime_config.compact_preserve_messages - (attempt - 1),
+                )
+                compact_result = compact_conversation(
+                    self.client,
+                    session.messages,
+                    preserve_messages=preserve_messages,
+                )
+
+                retry_event: JSONDict = {
+                    'type': 'reactive_compact_retry',
+                    'turn': turn_index,
+                    'attempt': attempt,
+                    'preserve_messages': preserve_messages,
+                    'context_error': str(exc),
+                }
+
+                if not compact_result.compacted:
+                    retry_event['ok'] = False
+                    retry_event['error'] = compact_result.error or 'Reactive compact made no progress'
+                    events.append(retry_event)
+                    break
+
+                current_model_call_count += 1
+                current_usage = current_usage + compact_result.usage
+                retry_event['ok'] = True
+                retry_event['tokens_removed'] = compact_result.tokens_removed
+                retry_event['messages_replaced'] = compact_result.messages_replaced
+                events.append(self._make_compact_event(turn_index, 'reactive', compact_result, attempt=attempt))
+                events.append(retry_event)
+
+                snapshot = check_token_budget(
+                    messages=session.to_messages(),
+                    tools=openai_tools,
+                    max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
+                )
+                if stop := guard.check_pre_model(
+                    turns_offset=turns_offset,
+                    turns_this_run=turns_this_run,
+                    model_call_count=current_model_call_count,
+                    snapshot=snapshot,
+                    usage_delta=current_usage,
+                ):
+                    return None, current_usage, current_model_call_count, stop
+
+        events.append({'type': 'backend_error', 'turn': turn_index, 'error': str(current_error)})
+        return None, current_usage, current_model_call_count, None
+
+    @staticmethod
+    def _make_compact_event(
+        turn_index: int,
+        trigger: str,
+        result: CompactResult,
+        *,
+        attempt: int | None = None,
+    ) -> JSONDict:
+        event: JSONDict = {
+            'type': 'compact_boundary',
+            'turn': turn_index,
+            'trigger': trigger,
+            'messages_replaced': result.messages_replaced,
+            'tokens_removed': result.tokens_removed,
+            'pre_tokens': result.pre_tokens,
+            'post_tokens': result.post_tokens,
+            'preserve_messages': result.preserve_messages_used,
+        }
+        if attempt is not None:
+            event['attempt'] = attempt
+        return event
 
     def _build_openai_tools(self) -> list[JSONDict]:
         """构建发送给模型的工具定义列表。"""

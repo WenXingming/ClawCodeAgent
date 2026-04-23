@@ -46,6 +46,17 @@ class OpenAITimeoutError(OpenAIClientError):
 class OpenAIResponseError(OpenAIClientError):
     """模型后端响应格式异常或状态异常。"""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        detail: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail if detail is not None else message
+
 
 # ---------------------------------------------------------------------------
 # 解析辅助函数
@@ -188,7 +199,9 @@ def _raise_request_error(
     if isinstance(exc, error.HTTPError):
         detail = _http_error_detail(exc)
         raise OpenAIResponseError(
-            f'HTTP {exc.code} from model backend: {detail}'
+            f'HTTP {exc.code} from model backend: {detail}',
+            status_code=exc.code,
+            detail=detail,
         ) from exc
 
     if isinstance(exc, error.URLError):
