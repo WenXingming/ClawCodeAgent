@@ -6,7 +6,8 @@ import io
 import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import patch
 
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.result import AgentRunResult
@@ -20,27 +21,33 @@ class _FakeAgent:
 
     last_client = None
     last_runtime = None
-    last_resume_prompt: str | None = None
-    last_resume_stored = None
+    run_prompts: list[str] = []
+    resume_calls: list[tuple[str, str | None]] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.last_client = None
+        cls.last_runtime = None
+        cls.run_prompts = []
+        cls.resume_calls = []
 
     def __init__(self, client, runtime_config) -> None:
         _FakeAgent.last_client = client
         _FakeAgent.last_runtime = runtime_config
-        _FakeAgent.last_resume_prompt = None
-        _FakeAgent.last_resume_stored = None
 
     def run(self, prompt: str) -> AgentRunResult:
+        _FakeAgent.run_prompts.append(prompt)
         return AgentRunResult(
             final_output=f'echo:{prompt}',
             turns=1,
             tool_calls=0,
             transcript=(),
             usage=TokenUsage(),
+            session_id='new-session-001',
         )
 
     def resume(self, prompt: str, stored_session) -> AgentRunResult:
-        _FakeAgent.last_resume_prompt = prompt
-        _FakeAgent.last_resume_stored = stored_session
+        _FakeAgent.resume_calls.append((prompt, stored_session.session_id))
         return AgentRunResult(
             final_output=f'resumed:{prompt}',
             turns=2,
@@ -53,6 +60,25 @@ class _FakeAgent:
 
 class MainEntryTests(unittest.TestCase):
     """验证 main 入口的配置解析与执行路径。"""
+
+    def setUp(self) -> None:
+        _FakeAgent.reset()
+
+    def test_main_requires_subcommand(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            code = main([])
+
+        self.assertEqual(code, 2)
+        self.assertIn('the following arguments are required: command', stderr.getvalue())
+
+    def test_main_rejects_legacy_top_level_prompt(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            code = main(['你好'])
+
+        self.assertEqual(code, 2)
+        self.assertIn('invalid choice', stderr.getvalue())
 
     def test_main_uses_env_values(self) -> None:
         with (
@@ -69,7 +95,7 @@ class MainEntryTests(unittest.TestCase):
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['你好'])
+                code = main(['agent', '你好'])
 
         self.assertEqual(code, 0)
         self.assertIn('echo:你好', stdout.getvalue())
@@ -81,7 +107,7 @@ class MainEntryTests(unittest.TestCase):
         with patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': ''}, clear=False):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
-                code = main(['你好'])
+                code = main(['agent', '你好'])
 
         self.assertEqual(code, 2)
         self.assertIn('Missing required api_key', stderr.getvalue())
@@ -100,7 +126,7 @@ class MainEntryTests(unittest.TestCase):
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['--allow-file-write', '--allow-shell', '--allow-destructive-shell', '测试'])
+                code = main(['agent', '--allow-file-write', '--allow-shell', '--allow-destructive-shell', '测试'])
 
         self.assertEqual(code, 0)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_file_write)
@@ -118,13 +144,13 @@ class MainEntryTests(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
-                code = main(['--allow-destructive-shell', '测试'])
+                code = main(['agent', '--allow-destructive-shell', '测试'])
 
         self.assertEqual(code, 2)
         self.assertIn('allow_destructive_shell requires --allow-shell', stderr.getvalue())
 
     # ------------------------------------------------------------------
-    # ISSUE-008 Resume CLI 路径
+    # ISSUE-013 agent-resume CLI 路径
     # ------------------------------------------------------------------
 
     def _make_stored_session(self) -> StoredAgentSession:
@@ -136,12 +162,12 @@ class MainEntryTests(unittest.TestCase):
                 base_url='http://127.0.0.1:9000/v1',
                 api_key='demo-key',
             ),
-            runtime_config=AgentRuntimeConfig(cwd='.'),
+            runtime_config=AgentRuntimeConfig(cwd=Path('.').resolve()),
             messages=({'role': 'user', 'content': '历史问题'},),
         )
 
-    def test_main_session_id_triggers_resume_not_run(self) -> None:
-        """--session-id 应触发 load_agent_session + agent.resume，而非 agent.run。"""
+    def test_agent_resume_triggers_resume_not_run(self) -> None:
+        """agent-resume 应触发 load_agent_session + agent.resume，而非 agent.run。"""
         stored = self._make_stored_session()
         with (
             patch('main.load_agent_session', return_value=stored),
@@ -149,25 +175,86 @@ class MainEntryTests(unittest.TestCase):
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['--session-id', 'resume-test-001', '续跑问题'])
+                code = main(['agent-resume', 'resume-test-001', '续跑问题'])
 
         self.assertEqual(code, 0)
         self.assertIn('resumed:续跑问题', stdout.getvalue())
-        self.assertEqual(_FakeAgent.last_resume_prompt, '续跑问题')
-        self.assertIs(_FakeAgent.last_resume_stored, stored)
+        self.assertEqual(_FakeAgent.resume_calls, [('续跑问题', 'resume-test-001')])
 
-    def test_main_resume_missing_session_returns_error(self) -> None:
+    def test_agent_resume_can_override_stored_config(self) -> None:
+        stored = StoredAgentSession(
+            session_id='resume-test-001',
+            model_config=ModelConfig(
+                model='stored-model',
+                base_url='http://127.0.0.1:9000/v1',
+                api_key='stored-key',
+            ),
+            runtime_config=AgentRuntimeConfig(
+                cwd=Path('.').resolve(),
+                max_turns=3,
+            ),
+            messages=({'role': 'user', 'content': '历史问题'},),
+        )
+        with (
+            patch('main.load_agent_session', return_value=stored),
+            patch('main.LocalCodingAgent', _FakeAgent),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main([
+                    'agent-resume',
+                    '--model', 'override-model',
+                    '--api-key', 'override-key',
+                    '--temperature', '0.7',
+                    '--max-turns', '9',
+                    '--allow-shell',
+                    '--no-allow-file-write',
+                    'resume-test-001',
+                    '继续任务',
+                ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(_FakeAgent.last_client.config.model, 'override-model')
+        self.assertEqual(_FakeAgent.last_client.config.api_key, 'override-key')
+        self.assertEqual(_FakeAgent.last_client.config.temperature, 0.7)
+        self.assertEqual(_FakeAgent.last_runtime.max_turns, 9)
+        self.assertTrue(_FakeAgent.last_runtime.permissions.allow_shell_commands)
+        self.assertFalse(_FakeAgent.last_runtime.permissions.allow_file_write)
+
+    def test_agent_resume_trailing_flag_after_prompt_still_applies(self) -> None:
+        stored = self._make_stored_session()
+        with (
+            patch('main.load_agent_session', return_value=stored),
+            patch('main.LocalCodingAgent', _FakeAgent),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main([
+                    'agent-resume',
+                    'resume-test-001',
+                    '请把春江花月夜全文写入文件',
+                    '--allow-file-write',
+                ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            _FakeAgent.resume_calls,
+            [('请把春江花月夜全文写入文件', 'resume-test-001')],
+        )
+        self.assertTrue(_FakeAgent.last_runtime.permissions.allow_file_write)
+
+    def test_agent_resume_missing_session_returns_error(self) -> None:
         """session 文件不存在时应返回退出码 2 并输出可读错误。"""
         with patch('main.load_agent_session', side_effect=ValueError('Session not found: xyz')):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
-                code = main(['--session-id', 'xyz', '续跑'])
+                code = main(['agent-resume', 'xyz', '续跑'])
 
         self.assertEqual(code, 2)
         self.assertIn('Session not found', stderr.getvalue())
 
-    def test_main_without_session_id_still_runs_normally(self) -> None:
-        """无 --session-id 时保持原有 run 路径不回归。"""
+    def test_agent_subcommand_still_runs_normally(self) -> None:
+        """agent 子命令应走 run 路径。"""
         with (
             patch.dict(
                 os.environ,
@@ -178,12 +265,12 @@ class MainEntryTests(unittest.TestCase):
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['普通问题'])
+                code = main(['agent', '普通问题'])
 
         self.assertEqual(code, 0)
         self.assertIn('echo:普通问题', stdout.getvalue())
-        # resume 方法不应被调用
-        self.assertIsNone(_FakeAgent.last_resume_prompt)
+        self.assertEqual(_FakeAgent.run_prompts, ['普通问题'])
+        self.assertEqual(_FakeAgent.resume_calls, [])
 
 
 if __name__ == '__main__':

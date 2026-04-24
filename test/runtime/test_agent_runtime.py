@@ -96,6 +96,83 @@ class LocalCodingAgentTests(unittest.TestCase):
         self.assertEqual(stored.messages[0]['content'], '你好')
         self.assertEqual(len(result.transcript), 2)  # user + assistant
 
+    def test_run_help_slash_bypasses_model_and_transcript(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([])
+        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+
+        result = agent.run('/help')
+        stored = load_agent_session(result.session_id or '', directory=workspace / 'sessions')
+
+        self.assertEqual(len(fake_client.calls), 0)
+        self.assertEqual(result.stop_reason, 'slash_command')
+        self.assertEqual(result.turns, 0)
+        self.assertEqual(result.tool_calls, 0)
+        self.assertEqual(result.transcript, ())
+        self.assertEqual(stored.messages, ())
+        self.assertEqual(stored.transcript, ())
+        self.assertTrue(any(item.get('type') == 'slash_command' for item in result.events))
+        self.assertIn('/help', result.final_output)
+
+    def test_resume_status_slash_bypasses_model_and_preserves_history(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='历史回答',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=2, output_tokens=1),
+            ),
+        ])
+        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+
+        first = agent.run('历史问题')
+        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        second = agent.resume('/status', stored)
+        restored = load_agent_session(second.session_id or '', directory=workspace / 'sessions')
+
+        self.assertEqual(len(fake_client.calls), 1)
+        self.assertEqual(second.session_id, first.session_id)
+        self.assertEqual(second.stop_reason, 'slash_command')
+        self.assertEqual(second.turns, 1)
+        self.assertEqual(second.transcript, stored.transcript)
+        self.assertEqual(restored.messages, stored.messages)
+        self.assertEqual(restored.transcript, stored.transcript)
+        self.assertIn('Session id:', second.final_output)
+        self.assertIn(first.session_id or '', second.final_output)
+
+    def test_resume_clear_slash_forks_new_session(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='历史回答',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=2, output_tokens=1),
+            ),
+        ])
+        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+
+        first = agent.run('历史问题')
+        original = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        cleared = agent.resume('/clear', original)
+        cleared_stored = load_agent_session(cleared.session_id or '', directory=workspace / 'sessions')
+        original_stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+
+        self.assertEqual(len(fake_client.calls), 1)
+        self.assertNotEqual(cleared.session_id, first.session_id)
+        self.assertEqual(cleared.stop_reason, 'slash_command')
+        self.assertEqual(cleared.turns, 0)
+        self.assertEqual(cleared.tool_calls, 0)
+        self.assertEqual(cleared.transcript, ())
+        self.assertEqual(cleared_stored.messages, ())
+        self.assertEqual(cleared_stored.transcript, ())
+        self.assertEqual(cleared_stored.turns, 0)
+        self.assertEqual(cleared_stored.tool_calls, 0)
+        self.assertEqual(original_stored.messages, original.messages)
+        self.assertIn('Previous session id:', cleared.final_output)
+        self.assertIn('Cleared session id:', cleared.final_output)
+
     def test_run_single_tool_call_chain(self) -> None:
         workspace = _make_test_dir()
         (workspace / 'demo.txt').write_text('hello', encoding='utf-8')

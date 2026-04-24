@@ -19,37 +19,71 @@ $env:OPENAI_API_KEY = "your-api-key"
 ## 3. 运行一次最小实验
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe ./src/main.py "请读取当前目录结构并简要总结"
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent "请读取当前目录结构并简要总结"
 ```
 
 ## 4. 常用参数示例
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe ./src/main.py \
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent \
   --cwd . \
   --max-turns 8 \
   --allow-file-write \
   "请在当前目录创建一个 demo.txt 并写入 hello"
 ```
 
-## 5. 续跑已保存会话（Resume）
+## 5. 交互式聊天（agent-chat）
+
+```powershell
+# 新会话进入交互模式
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat
+
+# 带一条初始问题进入交互模式
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat "先帮我看当前目录结构"
+```
+
+进入循环后可继续输入新问题；输入 `.exit` 或 `.quit` 退出。
+
+## 6. 续跑已保存会话（agent-resume）
 
 每次运行后会在 `.port_sessions/agent/` 目录生成一个 `<session_id>.json` 文件。  
-使用 `--session-id` 可从上次结束的上下文继续执行：
+使用 `agent-resume` 可从上次结束的上下文继续执行：
 
 ```powershell
 # 查找 session_id（从上次运行的输出或会话目录获得）
 Get-ChildItem .port_sessions\agent\
 
-# Resume（严格继承上次保存的 model/runtime 配置，只需提供新 prompt）
-C:/ProgramData/anaconda3/python.exe ./src/main.py --session-id <session_id> "继续上次任务"
+# Resume（默认继承上次保存的 model/runtime 配置，也可显式覆盖部分参数）
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id> "继续上次任务"
 ```
 
 **常见错误**
 - `Session not found`：session_id 不存在或文件已删除，请重新 run。
 - `Corrupted session file`：session 文件损坏，无法恢复，请重新 run。
 
-## 6. 预算控制（BudgetConfig）
+## 7. 本地 Slash 控制面命令
+
+以下命令通过 `agent`、`agent-resume` 或 `agent-chat` 的 prompt 入口传入，但会在本地先行分流，不触发模型调用：
+
+```powershell
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent "/help"
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id> "/status"
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <session_id>
+# 在 chat 里输入 /help、/status、/clear
+```
+
+当前支持的高频本地命令：
+
+- `/help`：列出支持的本地 slash 命令。
+- `/context`：查看当前会话上下文概览、token 投影和压缩阈值。
+- `/status`：查看当前 session_id、模型、工作目录、累计 turns/tool_calls。
+- `/permissions`：查看当前工具权限开关。
+- `/tools`：列出当前注册的本地工具。
+- `/clear`：保留旧 session 文件，生成新的 cleared session 快照。
+
+这些命令只会写入 `slash_command` event，不会写入模型 transcript。
+
+## 8. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -84,7 +118,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 7. 说明
+## 9. CLI 迁移说明
+
+- 旧用法 `python src/main.py "prompt"` 已不再支持。
+- 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
+- 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
+
+## 10. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：

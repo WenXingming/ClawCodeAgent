@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from control_plane.slash_commands import SlashCommandContext, SlashCommandResult, dispatch_slash_command
 from context.budget_guard import BudgetGuard
 from context.compact import (
     CompactResult,
@@ -50,9 +51,21 @@ class LocalCodingAgent:
 
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务（新会话）。"""
+        session = AgentSessionState()
+        session_id = uuid4().hex
+        local_result = self._prepare_prompt(
+            prompt=prompt,
+            session=session,
+            session_id=session_id,
+            turns_offset=0,
+            usage_baseline=TokenUsage(),
+            cost_baseline=0.0,
+        )
+        if local_result is not None:
+            return local_result
         return self._execute_loop(
-            session=AgentSessionState.create(prompt),
-            session_id=uuid4().hex,
+            session=session,
+            session_id=session_id,
             turns_offset=0,
             usage_baseline=TokenUsage(),
             cost_baseline=0.0,
@@ -71,7 +84,16 @@ class LocalCodingAgent:
             transcript=list(stored_session.transcript),
             tool_call_count=stored_session.tool_calls,
         )
-        session.append_user(prompt)
+        local_result = self._prepare_prompt(
+            prompt=prompt,
+            session=session,
+            session_id=stored_session.session_id,
+            turns_offset=stored_session.turns,
+            usage_baseline=stored_session.usage,
+            cost_baseline=stored_session.total_cost_usd,
+        )
+        if local_result is not None:
+            return local_result
         return self._execute_loop(
             session=session,
             session_id=stored_session.session_id,
@@ -79,6 +101,127 @@ class LocalCodingAgent:
             usage_baseline=stored_session.usage,
             cost_baseline=stored_session.total_cost_usd,
         )
+
+    def _prepare_prompt(
+        self,
+        *,
+        prompt: str,
+        session: AgentSessionState,
+        session_id: str,
+        turns_offset: int,
+        usage_baseline: TokenUsage,
+        cost_baseline: float,
+    ) -> AgentRunResult | None:
+        """在 prompt 写入 session 前执行 slash 分流。"""
+        slash_result = dispatch_slash_command(
+            SlashCommandContext(
+                session=session,
+                session_id=session_id,
+                turns_offset=turns_offset,
+                runtime_config=self.runtime_config,
+                model_config=self.client.config,
+                tool_registry=self.tool_registry,
+            ),
+            prompt,
+        )
+
+        if not slash_result.handled:
+            session.append_user(slash_result.prompt or prompt)
+            return None
+
+        if slash_result.continue_query:
+            session.append_user(slash_result.prompt or prompt)
+            return None
+
+        return self._build_slash_result(
+            slash_result,
+            session=session,
+            session_id=session_id,
+            turns_offset=turns_offset,
+            usage_baseline=usage_baseline,
+            cost_baseline=cost_baseline,
+        )
+
+    def _build_slash_result(
+        self,
+        slash_result: SlashCommandResult,
+        *,
+        session: AgentSessionState,
+        session_id: str,
+        turns_offset: int,
+        usage_baseline: TokenUsage,
+        cost_baseline: float,
+    ) -> AgentRunResult:
+        """构造本地 slash 命令结果并落盘。"""
+        effective_session = slash_result.replacement_session or session
+        effective_session_id = uuid4().hex if slash_result.fork_session else session_id
+
+        if slash_result.fork_session:
+            effective_turns = 0
+            effective_usage_total = TokenUsage()
+            effective_usage_delta = TokenUsage()
+            effective_cost_baseline = 0.0
+        else:
+            effective_turns = turns_offset
+            effective_usage_total = usage_baseline
+            effective_usage_delta = TokenUsage()
+            effective_cost_baseline = cost_baseline
+
+        event = self._make_slash_event(
+            slash_result,
+            session_id_before=session_id,
+            session_id_after=effective_session_id,
+        )
+        return self._build_run_result(
+            session_id=effective_session_id,
+            session=effective_session,
+            final_output=self._format_slash_output(
+                slash_result,
+                session_id_before=session_id,
+                session_id_after=effective_session_id,
+            ),
+            turns_total=effective_turns,
+            usage_delta=effective_usage_delta,
+            usage_total=effective_usage_total,
+            cost_baseline=effective_cost_baseline,
+            stop_reason='slash_command',
+            events=[event],
+        )
+
+    @staticmethod
+    def _make_slash_event(
+        slash_result: SlashCommandResult,
+        *,
+        session_id_before: str,
+        session_id_after: str,
+    ) -> JSONDict:
+        event: JSONDict = {
+            'type': 'slash_command',
+            'command': slash_result.command_name,
+            'continue_query': slash_result.continue_query,
+            'mode': 'mutating' if slash_result.fork_session else 'read_only',
+            'session_id_before': session_id_before,
+            'session_id_after': session_id_after,
+        }
+        for key, value in slash_result.metadata.items():
+            event[key] = value
+        return event
+
+    @staticmethod
+    def _format_slash_output(
+        slash_result: SlashCommandResult,
+        *,
+        session_id_before: str,
+        session_id_after: str,
+    ) -> str:
+        if slash_result.command_name != 'clear':
+            return slash_result.output
+
+        lines = [slash_result.output]
+        if slash_result.metadata.get('had_history'):
+            lines.append(f'Previous session id: {session_id_before}')
+        lines.append(f'Cleared session id: {session_id_after}')
+        return '\n'.join(lines)
 
     def _execute_loop(
         self,

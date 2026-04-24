@@ -713,6 +713,16 @@
 
 交付物：slash 框架与命令实现。
 
+实现落地决策（2026-04-24）：
+
+- 新增 `src/agent_slash_commands.py`，集中承载 slash parse、命令规格注册和六个高频本地命令。
+- slash 分流发生在 `LocalCodingAgent.run/resume` 把 prompt 写入 `AgentSessionState` 之前，从根上保证本地命令不污染 `messages` 与 `transcript`。
+- 本地 slash 命令统一返回 `stop_reason='slash_command'`，并写入 `slash_command` event；只记录 event，不写入 transcript。
+- `/context` 复用 `check_token_budget(messages, tools, max_input_tokens)` 做本地上下文投影，展示当前 messages、transcript、tool_calls 与 projected tokens。
+- `/clear` 采用 fork 语义：不覆盖旧 session 文件，而是生成新的 cleared `session_id` 并保存空会话快照；输出中同时提示旧 session_id 与新 session_id。
+- 首版不改 `src/main.py` 参数面；slash 命令仍通过现有 `prompt` 入口传入，ISSUE-013 再处理 CLI 子命令扩展。
+- 测试面拆为 `test/runtime/test_agent_slash_commands.py` 单测与 `test/runtime/test_agent_runtime.py` 集成测试，覆盖 `/help`、`/status`、`/clear` 的 no-model-call 路径。
+
 #### ISSUE-013 CLI 命令面（agent/chat/resume）
 
 类型：feature
@@ -740,6 +750,16 @@
 测试用例：parser 测试、chat 多轮、resume 断点续跑。
 
 交付物：CLI 子命令与测试。
+
+实现落地决策（2026-04-24）：
+
+- 新建 `src/control_plane/` 包，把 CLI 与本地 slash 控制面放入同一组织边界；`main.py` 保留为极薄入口包装层，`agent_slash_commands.py` 退化为兼容 shim。
+- CLI 采用强制子命令，固定为 `agent`、`agent-chat`、`agent-resume`，不再保留旧的顶层裸 prompt 用法；无子命令直接走 argparse 错误并返回非 0。
+- `agent-resume` 与 `agent-chat --session-id` 采用“先加载存档，再按显式 CLI 参数覆盖”的策略，覆盖实现使用 dataclass `replace()`，避免 dict merge 打破契约边界。
+- 参数面尽量对齐现有根仓库契约：模型、pricing、runtime、budget、permissions 都支持 CLI 覆盖；`output_schema` 与复杂系统提示拼装仍不纳入本期命令面。
+- `agent-chat` 的本地退出命令使用 `.exit` / `.quit`；slash 命令不在 chat loop 内被截获，而是继续交给 runtime，保持 ISSUE-012 的控制面语义一致。
+- chat loop 每轮都会追踪 `result.session_id` 与 `result.session_path`；因此 `/clear` 触发 fork 后，后续轮次会自然续接到新的 cleared session。
+- 测试面拆为 `test/runtime/test_main.py`（子命令与覆盖路径）和 `test/runtime/test_main_chat.py`（交互循环与 `/clear` 会话切换）。
 
 #### ISSUE-014 Plugin Runtime（manifest、alias、virtual）
 
