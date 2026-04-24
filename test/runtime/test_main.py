@@ -99,9 +99,9 @@ class MainEntryTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn('echo:你好', stdout.getvalue())
-        self.assertEqual(_FakeAgent.last_client.config.model, 'demo-model')
-        self.assertEqual(_FakeAgent.last_client.config.api_key, 'demo-key')
-        self.assertEqual(_FakeAgent.last_client.config.base_url, 'http://127.0.0.1:9000/v1')
+        self.assertEqual(_FakeAgent.last_client.model_config.model, 'demo-model')
+        self.assertEqual(_FakeAgent.last_client.model_config.api_key, 'demo-key')
+        self.assertEqual(_FakeAgent.last_client.model_config.base_url, 'http://127.0.0.1:9000/v1')
 
     def test_main_missing_api_key_returns_error(self) -> None:
         with patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': ''}, clear=False):
@@ -214,9 +214,9 @@ class MainEntryTests(unittest.TestCase):
                 ])
 
         self.assertEqual(code, 0)
-        self.assertEqual(_FakeAgent.last_client.config.model, 'override-model')
-        self.assertEqual(_FakeAgent.last_client.config.api_key, 'override-key')
-        self.assertEqual(_FakeAgent.last_client.config.temperature, 0.7)
+        self.assertEqual(_FakeAgent.last_client.model_config.model, 'override-model')
+        self.assertEqual(_FakeAgent.last_client.model_config.api_key, 'override-key')
+        self.assertEqual(_FakeAgent.last_client.model_config.temperature, 0.7)
         self.assertEqual(_FakeAgent.last_runtime.max_turns, 9)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_shell_commands)
         self.assertFalse(_FakeAgent.last_runtime.permissions.allow_file_write)

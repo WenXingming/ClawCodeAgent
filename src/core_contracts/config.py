@@ -85,9 +85,9 @@ class BudgetConfig:
 class OutputSchemaConfig:
     """可选的结构化输出 schema 配置。"""
 
-    name: str
-    schema: JSONDict
-    strict: bool = False
+    name: str # schema 名称，用于区分不同的输出格式规范
+    schema: JSONDict # JSON Schema 定义，描述预期的输出结构和类型
+    strict: bool = False # 是否严格验证输出，默认为 False，允许额外字段存在
 
     def to_dict(self) -> JSONDict:
         return {

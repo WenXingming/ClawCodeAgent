@@ -1,11 +1,15 @@
 """ISSUE-002/003 OpenAI-compatible 客户端实现。
 
-这个模块提供两类入口：
-1) `complete(...)`：非流式一次性返回 `OneTurnResponse`。
-2) `stream(...)`：流式返回 `StreamEvent` 事件序列。
+本模块提供与 OpenAI API 兼容的客户端实现，支持非流式和流式两种调用方式。
 
-为了保持调用简单，还提供 `complete_stream(...)` 把流事件聚合回
-`OneTurnResponse`，让调用方可以按需选择“边收边渲染”或“最终结果”。
+主要功能：
+- 非流式调用：通过 `complete()` 方法一次性返回完整的 `OneTurnResponse`
+- 流式调用：通过 `stream()` 方法流式返回 `StreamEvent` 事件序列
+- 流式聚合：提供 `complete_stream()` 方法将流事件聚合回 `OneTurnResponse`
+
+调用方可以根据需求选择：
+- "边收边渲染"：使用 `stream()` 实时处理流式事件
+- "获取最终结果"：使用 `complete()` 或 `complete_stream()` 获取完整响应
 """
 
 from __future__ import annotations
@@ -63,164 +67,19 @@ def _join_url(base_url: str, suffix: str) -> str:
     return f"{base}/{suffix.lstrip('/')}"
 
 
-def _normalize_content(content: Any) -> str:
-    """把 content 统一转换为字符串。"""
-    if content is None:
-        return ''
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-                continue
-            if isinstance(item, dict):
-                # 常见格式是 {'type': 'text', 'text': '...'}。
-                if isinstance(item.get('text'), str):
-                    parts.append(item['text'])
-                    continue
-                parts.append(json.dumps(item, ensure_ascii=True))
-                continue
-            parts.append(str(item))
-        return ''.join(parts)
-    return str(content)
-
-
-def _parse_tool_arguments(raw_arguments: Any) -> JSONDict:
-    """把工具 arguments 解析为 dict。"""
-    if raw_arguments is None:
-        return {}
-    if isinstance(raw_arguments, dict):
-        return dict(raw_arguments)
-    if isinstance(raw_arguments, str):
-        text = raw_arguments.strip()
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise OpenAIResponseError(
-                f'Invalid tool arguments payload: {raw_arguments!r}'
-            ) from exc
-        if not isinstance(parsed, dict):
-            raise OpenAIResponseError('Tool arguments must decode to JSON object')
-        return parsed
-    raise OpenAIResponseError(
-        f'Unsupported tool arguments payload type: {type(raw_arguments).__name__}'
-    )
-
-
-def _build_response_format(
-    output_schema: OutputSchemaConfig | None,
-) -> JSONDict | None:
-    """把 OutputSchemaConfig 转换为 OpenAI-compatible response_format。"""
-    if output_schema is None:
-        return None
-    return {
-        'type': 'json_schema',
-        'json_schema': {
-            'name': output_schema.name,
-            'schema': dict(output_schema.schema),
-            'strict': output_schema.strict,
-        },
-    }
-
-
-def _parse_usage(payload: Any) -> TokenUsage:
-    """兼容多种字段命名并转换为 TokenUsage。"""
-    if not isinstance(payload, dict):
-        return TokenUsage()
-
-    normalized: JSONDict = dict(payload)
-    completion_details = payload.get('completion_tokens_details')
-
-    # 兼容 ollama 风格字段。
-    if (
-        'input_tokens' not in normalized
-        and 'prompt_tokens' not in normalized
-        and 'prompt_eval_count' in payload
-    ):
-        normalized['prompt_tokens'] = payload.get('prompt_eval_count')
-
-    if (
-        'output_tokens' not in normalized
-        and 'completion_tokens' not in normalized
-        and 'eval_count' in payload
-    ):
-        normalized['completion_tokens'] = payload.get('eval_count')
-
-    # 推理 token 可能在 completion_tokens_details 里。
-    if (
-        'reasoning_tokens' not in normalized
-        and isinstance(completion_details, dict)
-        and completion_details.get('reasoning_tokens') is not None
-    ):
-        normalized['reasoning_tokens'] = completion_details.get('reasoning_tokens')
-
-    return TokenUsage.from_dict(normalized)
-
-
-def _http_error_detail(exc: error.HTTPError) -> str:
-    """尽量读取 HTTP 错误体，便于定位后端问题。"""
-    try:
-        detail = exc.read().decode('utf-8', errors='replace')
-    except Exception:
-        detail = ''
-    return detail or exc.reason or exc.msg or 'unknown error'
-
-
-def _has_usage_value(usage: TokenUsage) -> bool:
-    """判断 usage 是否包含有效统计值。"""
-    return any(
-        (
-            usage.input_tokens,
-            usage.output_tokens,
-            usage.cache_creation_input_tokens,
-            usage.cache_read_input_tokens,
-            usage.reasoning_tokens,
-        )
-    )
-
-
-def _raise_request_error(
-    exc: error.HTTPError | error.URLError | TimeoutError,
-    *,
-    base_url: str,
-    timeout_seconds: float,
-) -> None:
-    """把底层网络异常统一映射到客户端异常族。"""
-    if isinstance(exc, error.HTTPError):
-        detail = _http_error_detail(exc)
-        raise OpenAIResponseError(
-            f'HTTP {exc.code} from model backend: {detail}',
-            status_code=exc.code,
-            detail=detail,
-        ) from exc
-
-    if isinstance(exc, error.URLError):
-        if isinstance(exc.reason, TimeoutError):
-            raise OpenAITimeoutError(
-                f'Model request timed out after {timeout_seconds} seconds'
-            ) from exc
-        raise OpenAIConnectionError(
-            f'Unable to reach model backend at {base_url}: {exc.reason}'
-        ) from exc
-
-    raise OpenAITimeoutError(
-        f'Model request timed out after {timeout_seconds} seconds'
-    ) from exc
-
-
 @dataclass
 class _ToolCallBuildState:
-    """流式工具调用的中间聚合状态。"""
+    """流式工具调用的中间聚合状态。
+    流式返回时，工具调用的参数(arguments)是被切碎的字符串流。
+    这个类充当一个"收集器"，负责把同一个 Tool 的参数碎片拼接成完整的 JSON。
+    """
 
     name: str = 'unknown_tool'  # 工具名，可能在后续增量中才出现。
     arguments_parts: list[str] = field(default_factory=list)  # 参数 JSON 分片列表。
 
     def merge_delta(self, *, tool_name: str | None, arguments_delta: str) -> None:
         """合并一次 tool_call 增量。"""
+        """接收到 SSE 事件流中的增量数据时，更新当前收集器的状态。"""
         if self.name == 'unknown_tool' and tool_name:
             self.name = tool_name
         if arguments_delta:
@@ -228,10 +87,11 @@ class _ToolCallBuildState:
 
     def build_arguments(self) -> JSONDict:
         """把参数分片拼接并解析为 dict。"""
+        """流结束后，将收集到的字符串碎片合并，并解析为最终的字典。"""
         arguments_text = ''.join(self.arguments_parts).strip()
         if not arguments_text:
             return {}
-        return _parse_tool_arguments(arguments_text)
+        return OpenAIClient._parse_tool_arguments(arguments_text)
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +102,10 @@ class _ToolCallBuildState:
 class OpenAIClient:
     """最小可运行的 OpenAI-compatible 客户端。"""
 
-    config: ModelConfig  # 客户端固定模型配置。
+    model_config: ModelConfig  # 客户端固定模型配置。
 
-    def __init__(self, config: ModelConfig) -> None:
-        self.config = config
+    def __init__(self, model_config: ModelConfig) -> None:
+        self.model_config = model_config
 
     def complete(
         self,
@@ -254,7 +114,11 @@ class OpenAIClient:
         *,
         output_schema: OutputSchemaConfig | None = None,
     ) -> OneTurnResponse:
-        """执行一次非流式模型调用并返回标准化结果。"""
+        """执行一次非流式模型调用并返回标准化结果。
+            messages: 模型对话消息列表，每条消息是一个 dict，至少包含 'role' 和 'content' 字段。
+            tools: 可选的工具定义列表，每个工具是一个 dict，至少包含 'name' 和 'description' 字段。
+            output_schema: 可选的输出格式定义，指定模型响应应该符合的 JSON Schema。
+        """
         payload = self._build_payload(
             messages=messages,
             tools=tools,
@@ -266,12 +130,14 @@ class OpenAIClient:
 
     def stream(
         self,
-        messages: list[JSONDict],
-        tools: list[JSONDict] | None = None,
+        messages: list[JSONDict],  # 消息列表，包含对话历史
+        tools: list[JSONDict] | None = None,  # 可选的工具列表，用于扩展模型功能
         *,
-        output_schema: OutputSchemaConfig | None = None,
+        output_schema: OutputSchemaConfig | None = None,  # 输出模式配置，可选
     ) -> Iterator[StreamEvent]:
-        """执行一次流式模型调用并持续输出标准化事件。"""
+        """执行一次流式模型调用并持续输出标准化事件。
+            流式调用会返回一系列事件，每个事件表示模型生成的部分内容、工具调用增量或使用情况。
+        """
         payload = self._build_payload(
             messages=messages,
             tools=tools,
@@ -281,16 +147,16 @@ class OpenAIClient:
         req = self._build_request(payload)
 
         try:
-            with request.urlopen(req, timeout=self.config.timeout_seconds) as response:
+            with request.urlopen(req, timeout=self.model_config.timeout_seconds) as response:
                 # 先发起一个固定起始事件，调用方更容易写统一状态机。
                 yield StreamEvent(type='message_start')
                 for event_payload in self._iter_sse_payloads(response):
                     yield from self._parse_stream_payload(event_payload)
         except (error.HTTPError, error.URLError, TimeoutError) as exc:
-            _raise_request_error(
+            self._raise_request_error(
                 exc,
-                base_url=self.config.base_url,
-                timeout_seconds=self.config.timeout_seconds,
+                base_url=self.model_config.base_url,
+                timeout_seconds=self.model_config.timeout_seconds,
             )
 
     def complete_stream(
@@ -310,11 +176,12 @@ class OpenAIClient:
         tool_state: dict[str, _ToolCallBuildState] = {}
         index_to_call_id: dict[int, str] = {}
 
-        for event in self.stream(
+        stream_events = self.stream(
             messages=messages,
             tools=tools,
             output_schema=output_schema,
-        ):
+        )
+        for event in stream_events:
             if event.type == 'content_delta' and event.delta:
                 content_parts.append(event.delta)
                 continue
@@ -375,10 +242,9 @@ class OpenAIClient:
     ) -> JSONDict:
         """构造发送给 /chat/completions 的请求体。"""
         payload: JSONDict = {
-            'model': self.config.model,
-            # 只保留 dict，避免脏输入污染请求体。
-            'messages': [dict(item) for item in messages if isinstance(item, dict)],
-            'temperature': self.config.temperature,
+            'model': self.model_config.model,
+            'messages': [dict(item) for item in messages if isinstance(item, dict)], # 只保留 dict，避免脏输入污染请求体。
+            'temperature': self.model_config.temperature,
         }
 
         if tools:
@@ -387,54 +253,120 @@ class OpenAIClient:
 
         if stream:
             payload['stream'] = True
-            # 让后端在结束事件里带回 usage，便于最终统计。
-            payload['stream_options'] = {'include_usage': True}
+            payload['stream_options'] = {'include_usage': True} # 让后端在结束事件里带回 usage，便于最终统计。
 
-        response_format = _build_response_format(output_schema)
+        # 指定输出格式，告诉大模型后端我们希望它按照某个 JSON Schema 来组织响应内容，这样可以提升结构化输出的质量和解析的鲁棒性。
+        response_format = self._build_response_format(output_schema)
         if response_format is not None:
             payload['response_format'] = response_format
         return payload
 
-    def _build_request(self, payload: JSONDict) -> request.Request:
-        """构造标准 POST 请求对象。"""
-        return request.Request(
-            _join_url(self.config.base_url, '/chat/completions'),
-            data=json.dumps(payload).encode('utf-8'),
-            headers={
-                'Authorization': f'Bearer {self.config.api_key}',
-                'Content-Type': 'application/json',
+    @staticmethod
+    def _build_response_format(
+        output_schema: OutputSchemaConfig | None,
+    ) -> JSONDict | None:
+        """把 OutputSchemaConfig 转换为 OpenAI-compatible response_format。"""
+        if output_schema is None:
+            return None
+        return {
+            'type': 'json_schema',
+            'json_schema': {
+                'name': output_schema.name,
+                'schema': dict(output_schema.schema),
+                'strict': output_schema.strict,
             },
-            method='POST',
-        )
+        }
 
     def _request_json(self, payload: JSONDict) -> JSONDict:
         """发送请求并返回 JSON 对象。"""
         req = self._build_request(payload)
 
         try:
-            with request.urlopen(req, timeout=self.config.timeout_seconds) as response:
-                raw = response.read()
+            with request.urlopen(req, timeout=self.model_config.timeout_seconds) as response:
+                body = response.read()
         except (error.HTTPError, error.URLError, TimeoutError) as exc:
-            _raise_request_error(
+            self._raise_request_error(
                 exc,
-                base_url=self.config.base_url,
-                timeout_seconds=self.config.timeout_seconds,
+                base_url=self.model_config.base_url,
+                timeout_seconds=self.model_config.timeout_seconds,
             )
 
         try:
-            decoded = json.loads(raw.decode('utf-8'))
+            decoded_body = json.loads(body.decode('utf-8')) # Deserialize the response body from JSON, ensuring it's a dict.
         except json.JSONDecodeError as exc:
             raise OpenAIResponseError(
                 'Model backend returned invalid JSON'
             ) from exc
 
-        if not isinstance(decoded, dict):
+        if not isinstance(decoded_body, dict):
             raise OpenAIResponseError(
                 'Model backend returned malformed JSON payload'
             )
-        return decoded
+        return decoded_body
 
-    def _extract_choice_and_message(self, payload: JSONDict) -> tuple[JSONDict, JSONDict]:
+    def _build_request(self, payload: JSONDict) -> request.Request:
+        """构造标准的 HTTP 请求对象，包含 URL、方法 POST、必要的头部和 JSON 编码的请求体。"""
+        return request.Request(
+            _join_url(self.model_config.base_url, '/chat/completions'),
+            data=json.dumps(payload).encode('utf-8'), # Serialize the payload to JSON and encode it as bytes.
+            headers={
+                'Authorization': f'Bearer {self.model_config.api_key}',
+                'Content-Type': 'application/json',
+            },
+            method='POST',
+        )
+
+    @classmethod
+    def _raise_request_error(
+        cls,
+        exc: error.HTTPError | error.URLError | TimeoutError,
+        *,
+        base_url: str,
+        timeout_seconds: float,
+    ) -> None:
+        """把底层网络异常统一映射到客户端异常族。"""
+        if isinstance(exc, error.HTTPError):
+            detail = cls._http_error_detail(exc)
+            raise OpenAIResponseError(
+                f'HTTP {exc.code} from model backend: {detail}',
+                status_code=exc.code,
+                detail=detail,
+            ) from exc
+
+        if isinstance(exc, error.URLError):
+            if isinstance(exc.reason, TimeoutError):
+                raise OpenAITimeoutError(
+                    f'Model request timed out after {timeout_seconds} seconds'
+                ) from exc
+            raise OpenAIConnectionError(
+                f'Unable to reach model backend at {base_url}: {exc.reason}'
+            ) from exc
+
+        raise OpenAITimeoutError(
+            f'Model request timed out after {timeout_seconds} seconds'
+        ) from exc
+
+    @staticmethod
+    def _http_error_detail(exc: error.HTTPError) -> str:
+        """尽量读取 HTTP 错误体，便于定位后端问题。"""
+        try:
+            detail = exc.read().decode('utf-8', errors='replace')
+        except Exception:
+            detail = ''
+        return detail or exc.reason or exc.msg or 'unknown error'
+
+    def _parse_one_turn_response(self, payload: JSONDict) -> OneTurnResponse:
+        """把后端响应解析为 OneTurnResponse。"""
+        first_choice, message = self._extract_choice_and_message(payload)
+        return OneTurnResponse(
+            content=self._normalize_content(message.get('content')),
+            tool_calls=tuple(self._parse_tool_calls_from_message(message)),
+            finish_reason=self._normalize_finish_reason(first_choice.get('finish_reason')),
+            usage=self._parse_usage(payload.get('usage')),
+        )
+
+    @staticmethod
+    def _extract_choice_and_message(payload: JSONDict) -> tuple[JSONDict, JSONDict]:
         """提取第一条 choice 及 message，并做结构校验。"""
         choices = payload.get('choices')
         if not isinstance(choices, list) or not choices:
@@ -451,46 +383,27 @@ class OpenAIClient:
         return first_choice, message
 
     @staticmethod
-    def _normalize_finish_reason(value: Any) -> str | None:
-        """把 finish_reason 统一成 str 或 None。"""
-        if value is None:
-            return None
-        return str(value)
-
-    def _parse_one_turn_response(self, payload: JSONDict) -> OneTurnResponse:
-        """把后端响应解析为 OneTurnResponse。"""
-        first_choice, message = self._extract_choice_and_message(payload)
-        return OneTurnResponse(
-            content=_normalize_content(message.get('content')),
-            tool_calls=tuple(self._parse_tool_calls_from_message(message)),
-            finish_reason=self._normalize_finish_reason(first_choice.get('finish_reason')),
-            usage=_parse_usage(payload.get('usage')),
-        )
-
-    def _parse_single_tool_call(self, raw_call: JSONDict, index: int) -> ToolCall:
-        """解析单个新格式 tool_call。"""
-        function_block = raw_call.get('function')
-        if not isinstance(function_block, dict):
-            raise OpenAIResponseError('Malformed tool call function payload')
-
-        name = function_block.get('name')
-        if not isinstance(name, str) or not name:
-            raise OpenAIResponseError('Tool call missing function name')
-
-        call_id = raw_call.get('id')
-        if not isinstance(call_id, str) or not call_id:
-            call_id = f'call_{index}'
-
-        arguments = _parse_tool_arguments(function_block.get('arguments'))
-        return ToolCall(id=call_id, name=name, arguments=arguments)
-
-    def _parse_legacy_function_call(self, function_call: JSONDict) -> ToolCall:
-        """解析旧格式 function_call。"""
-        name = function_call.get('name')
-        if not isinstance(name, str) or not name:
-            raise OpenAIResponseError('Function call missing name')
-        arguments = _parse_tool_arguments(function_call.get('arguments'))
-        return ToolCall(id='call_0', name=name, arguments=arguments)
+    def _normalize_content(content: Any) -> str:
+        """把各种格式的 content 统一转换为字符串。"""
+        if content is None:
+            return ''
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if isinstance(item, dict):
+                    if isinstance(item.get('text'), str):
+                        parts.append(item['text'])
+                        continue
+                    parts.append(json.dumps(item, ensure_ascii=True))
+                    continue
+                parts.append(str(item))
+            return ''.join(parts)
+        return str(content)
 
     def _parse_tool_calls_from_message(self, message: JSONDict) -> list[ToolCall]:
         """从 message 中解析工具调用，兼容新旧字段。"""
@@ -508,6 +421,93 @@ class OpenAIClient:
             return [self._parse_legacy_function_call(function_call)]
 
         return []
+
+    def _parse_single_tool_call(self, raw_call: JSONDict, index: int) -> ToolCall:
+        """解析单个新格式 tool_call。"""
+        function_block = raw_call.get('function')
+        if not isinstance(function_block, dict):
+            raise OpenAIResponseError('Malformed tool call function payload')
+
+        name = function_block.get('name')
+        if not isinstance(name, str) or not name:
+            raise OpenAIResponseError('Tool call missing function name')
+
+        call_id = raw_call.get('id')
+        if not isinstance(call_id, str) or not call_id:
+            call_id = f'call_{index}'
+
+        arguments = self._parse_tool_arguments(function_block.get('arguments'))
+        return ToolCall(id=call_id, name=name, arguments=arguments)
+
+    @staticmethod
+    def _parse_tool_arguments(raw_arguments: Any) -> JSONDict:
+        """解析工具调用的参数，把工具 arguments 解析为 dict。"""
+        if raw_arguments is None:
+            return {}
+        if isinstance(raw_arguments, dict):
+            return dict(raw_arguments)
+        if isinstance(raw_arguments, str):
+            text = raw_arguments.strip()
+            if not text:
+                return {}
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise OpenAIResponseError(
+                    f'Invalid tool arguments payload: {raw_arguments!r}'
+                ) from exc
+            if not isinstance(parsed, dict):
+                raise OpenAIResponseError('Tool arguments must decode to JSON object')
+            return parsed
+        raise OpenAIResponseError(
+            f'Unsupported tool arguments payload type: {type(raw_arguments).__name__}'
+        )
+
+    def _parse_legacy_function_call(self, function_call: JSONDict) -> ToolCall:
+        """解析旧格式 function_call。"""
+        name = function_call.get('name')
+        if not isinstance(name, str) or not name:
+            raise OpenAIResponseError('Function call missing name')
+        arguments = self._parse_tool_arguments(function_call.get('arguments'))
+        return ToolCall(id='call_0', name=name, arguments=arguments)
+
+    @staticmethod
+    def _normalize_finish_reason(value: Any) -> str | None:
+        """把 finish_reason 统一成 str 或 None。"""
+        if value is None:
+            return None
+        return str(value)
+
+    @staticmethod
+    def _parse_usage(payload: Any) -> TokenUsage:
+        """兼容多种字段命名并转换为 TokenUsage。"""
+        if not isinstance(payload, dict):
+            return TokenUsage()
+
+        normalized: JSONDict = dict(payload)
+        if (
+            'input_tokens' not in normalized
+            and 'prompt_tokens' not in normalized
+            and 'prompt_eval_count' in payload
+        ):
+            normalized['prompt_tokens'] = payload.get('prompt_eval_count')
+
+        if (
+            'output_tokens' not in normalized
+            and 'completion_tokens' not in normalized
+            and 'eval_count' in payload
+        ):
+            normalized['completion_tokens'] = payload.get('eval_count')
+
+        completion_details = payload.get('completion_tokens_details')
+        if (
+            'reasoning_tokens' not in normalized
+            and isinstance(completion_details, dict)
+            and completion_details.get('reasoning_tokens') is not None
+        ):
+            normalized['reasoning_tokens'] = completion_details.get('reasoning_tokens')
+
+        return TokenUsage.from_dict(normalized)
 
     def _iter_sse_payloads(self, response: Any) -> Iterator[JSONDict]:
         """从 SSE 响应中按事件读取 JSON payload。"""
@@ -556,8 +556,8 @@ class OpenAIClient:
 
     def _parse_stream_payload(self, payload: JSONDict) -> Iterator[StreamEvent]:
         """把单个流式 payload 转换为 StreamEvent。"""
-        usage = _parse_usage(payload.get('usage'))
-        if _has_usage_value(usage):
+        usage = self._parse_usage(payload.get('usage'))
+        if self._has_usage_value(usage):
             yield StreamEvent(
                 type='usage',
                 usage=usage,
@@ -581,7 +581,7 @@ class OpenAIClient:
                 raise OpenAIResponseError('Model backend returned malformed stream delta')
 
             if 'content' in delta:
-                content_delta = _normalize_content(delta.get('content'))
+                content_delta = self._normalize_content(delta.get('content'))
                 if content_delta:
                     yield StreamEvent(
                         type='content_delta',
@@ -603,6 +603,19 @@ class OpenAIClient:
                     finish_reason=self._normalize_finish_reason(finish_reason),
                     raw_event=dict(choice),
                 )
+
+    @staticmethod
+    def _has_usage_value(usage: TokenUsage) -> bool:
+        """判断 usage 是否包含有效统计值。"""
+        return any(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_creation_input_tokens,
+                usage.cache_read_input_tokens,
+                usage.reasoning_tokens,
+            )
+        )
 
     def _parse_stream_tool_call_delta(self, raw_tool_call: Any) -> StreamEvent:
         """把 tool_call 增量片段标准化为 StreamEvent。"""

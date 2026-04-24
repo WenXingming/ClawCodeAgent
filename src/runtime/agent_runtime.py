@@ -119,7 +119,7 @@ class LocalCodingAgent:
                 session_id=session_id,
                 turns_offset=turns_offset,
                 runtime_config=self.runtime_config,
-                model_config=self.client.config,
+                model_config=self.client.model_config,
                 tool_registry=self.tool_registry,
             ),
             prompt,
@@ -247,7 +247,7 @@ class LocalCodingAgent:
 
         guard = BudgetGuard(
             budget=self.runtime_config.budget_config,
-            pricing=self.client.config.pricing,
+            pricing=self.client.model_config.pricing,
             cost_baseline=cost_baseline,
         )
         tool_context = build_tool_context(self.runtime_config, tool_registry=self.tool_registry)
@@ -612,11 +612,11 @@ class LocalCodingAgent:
         """
         transcript = session.transcript()
         events_snapshot = tuple(dict(item) for item in events)
-        delta_cost = self.client.config.pricing.estimate_cost_usd(usage_delta)
+        delta_cost = self.client.model_config.pricing.estimate_cost_usd(usage_delta)
         total_cost_usd = cost_baseline + delta_cost
         stored_session = StoredAgentSession(
             session_id=session_id,
-            model_config=self.client.config,
+            model_config=self.client.model_config,
             runtime_config=self.runtime_config,
             messages=tuple(session.to_messages()),
             transcript=transcript,

@@ -537,7 +537,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='test-session-999',
-            model_config=fake_client.config,
+            model_config=fake_client.model_config,
             runtime_config=config,
             messages=({'role': 'user', 'content': '历史消息'},),
             turns=3,
@@ -624,7 +624,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-001',
-            model_config=fake_client.config,
+            model_config=fake_client.model_config,
             runtime_config=config,
             messages=(
                 {'role': 'user', 'content': '旧需求 ' * 80},
@@ -667,7 +667,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-002',
-            model_config=fake_client.config,
+            model_config=fake_client.model_config,
             runtime_config=config,
             messages=(
                 {'role': 'user', 'content': '旧需求'},
@@ -716,7 +716,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-003',
-            model_config=fake_client.config,
+            model_config=fake_client.model_config,
             runtime_config=config,
             messages=(
                 {'role': 'user', 'content': '旧需求 ' * 80},
@@ -762,7 +762,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         from session.session_contracts import StoredAgentSession
         stored = StoredAgentSession(
             session_id='compact-session-004',
-            model_config=fake_client.config,
+            model_config=fake_client.model_config,
             runtime_config=config,
             messages=(
                 {'role': 'user', 'content': '旧需求 ' * 80},
