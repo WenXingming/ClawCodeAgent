@@ -279,7 +279,58 @@ print(runtime.render_plan())
 
 说明：`sync_tasks()` 会把 `PlanStep.step_id` 映射为 `TaskRecord.task_id`，并保持依赖关系一致；若对应任务已存在，其执行状态会在同步后回写到计划步骤中。图形化计划编辑器和跨仓库同步仍不在本期范围内。
 
-## 12. 预算控制（BudgetConfig）
+## 12. 工作区 Workflow Runtime（ISSUE-019）
+
+当前版本支持从工作区发现 workflow manifest，执行一组基于 Task Runtime 的操作序列，并把每次运行的结果持久化为历史记录。
+
+发现与持久化路径：
+
+- `.claw/workflows.json`
+- `.claw/workflows/*.json`
+- `.claw/workflow_runs.json`
+
+当前能力：
+
+- `list_workflows` / `get_workflow`：查询已发现的工作流定义。
+- `run_workflow`：按 manifest 中的步骤顺序执行 `create/update/start/complete/block/cancel` 等 Task Runtime 操作。
+- `history`：读取已持久化的运行记录，便于回放和诊断。
+
+步骤动作集合：
+
+- `create`
+- `update`
+- `start`
+- `complete`
+- `block`
+- `cancel`
+
+示例：
+
+```json
+{
+  "workflow_id": "demo-workflow",
+  "title": "Demo Workflow",
+  "steps": [
+    {
+      "action": "create",
+      "task_id": "task-001",
+      "title": "准备任务"
+    },
+    {
+      "action": "start",
+      "task_id": "task-001"
+    },
+    {
+      "action": "complete",
+      "task_id": "task-001"
+    }
+  ]
+}
+```
+
+说明：工作流运行记录会包含每一步的前后状态、是否成功和错误信息，因此失败流程也能在历史文件中被诊断。当前版本只做本地顺序执行，不包含分布式调度。
+
+## 13. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -314,13 +365,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 13. CLI 迁移说明
+## 14. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 14. 说明
+## 15. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：
