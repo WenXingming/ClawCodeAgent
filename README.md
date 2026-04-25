@@ -125,7 +125,58 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 
 冲突策略：核心工具和先注册成功的工具优先；若插件工具名称冲突，冲突项会被跳过，并出现在 `/tools` 的插件摘要里。
 
-## 9. 预算控制（BudgetConfig）
+## 9. 工作区 Policy（ISSUE-015）
+
+当前版本支持从工作区自动发现 hook/policy manifest，并在 agent 初始化时应用三类治理能力：
+
+- deny 规则：可按精确工具名或名前缀移除工具。
+- safe env：把白名单环境变量注入到工具上下文；当前主要影响 `bash` 工具的子进程环境。
+- budget override：覆盖运行时 `BudgetConfig`，在真正进入主循环前生效。
+
+发现路径：
+
+- `.claw/policies.json`
+- `.claw/policies/*.json`
+
+示例：
+
+```json
+{
+  "name": "workspace-policy",
+  "trusted": true,
+  "deny_tools": ["edit_file"],
+  "deny_prefixes": ["workspace_"],
+  "safe_env": {
+    "POLICY_MODE": "strict"
+  },
+  "budget_overrides": {
+    "max_model_calls": 4,
+    "max_tool_calls": 8
+  },
+  "before_hooks": [
+    {
+      "kind": "message",
+      "content": "before hook placeholder"
+    }
+  ],
+  "after_hooks": [
+    {
+      "kind": "message",
+      "content": "after hook placeholder"
+    }
+  ]
+}
+```
+
+`trusted=false` 的 manifest 会被跳过，不会进入有效 policy 合并结果。多个 trusted manifest 会按文件排序依次合并：
+
+- `deny_tools` / `deny_prefixes` 追加去重。
+- `safe_env` 后者覆盖前者的同名 key。
+- `budget_overrides` 只覆盖显式给出的非空字段。
+
+说明：当前版本会加载并暴露 `before_hooks` / `after_hooks`，但真正把 hooks 注入工具执行链是在 ISSUE-016 完成。
+
+## 10. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -160,13 +211,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 10. CLI 迁移说明
+## 11. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 11. 说明
+## 12. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：

@@ -311,6 +311,78 @@ class LocalCodingAgentTests(unittest.TestCase):
         self.assertEqual(len(tool_rows), 1)
         self.assertIn('Banner from plugin runtime.', tool_rows[0].get('content', ''))
 
+    def test_run_policy_budget_override_applies_before_first_model_call(self) -> None:
+        workspace = _make_test_dir()
+        manifest_dir = workspace / '.claw' / 'policies'
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / 'budget.json').write_text(
+            json.dumps(
+                {
+                    'name': 'budget-policy',
+                    'trusted': True,
+                    'budget_overrides': {'max_model_calls': 0},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding='utf-8',
+        )
+
+        fake_client = _FakeOpenAIClient([])
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+
+        result = agent.run('这次不应触发模型调用')
+
+        self.assertEqual(result.stop_reason, 'model_call_limit')
+        self.assertEqual(len(fake_client.calls), 0)
+        self.assertEqual(agent.runtime_config.budget_config.max_model_calls, 0)
+
+    def test_run_policy_deny_filters_tool_registry(self) -> None:
+        workspace = _make_test_dir()
+        (workspace / 'demo.txt').write_text('hello', encoding='utf-8')
+        manifest_dir = workspace / '.claw' / 'policies'
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / 'deny.json').write_text(
+            json.dumps(
+                {
+                    'name': 'deny-policy',
+                    'trusted': True,
+                    'deny_tools': ['read_file'],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding='utf-8',
+        )
+
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(id='call_1', name='read_file', arguments={'path': 'demo.txt'}),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=4, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='已处理 deny 结果。',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ]
+        )
+
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        result = agent.run('尝试读取 demo.txt')
+
+        self.assertNotIn('read_file', agent.tool_registry)
+        self.assertEqual(result.stop_reason, 'stop')
+        tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
+        self.assertEqual(len(tool_rows), 1)
+        self.assertIn('Unknown tool: read_file', tool_rows[0].get('content', ''))
+
     def test_run_stops_with_max_turns(self) -> None:
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient(

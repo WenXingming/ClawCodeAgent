@@ -43,6 +43,7 @@ graph TB
     %% ================= Runtime =================
     subgraph Runtime [runtime package / 主循环编排]
         direction TB
+        n_hook_policy_runtime(["🛡️ runtime/hook_policy_runtime.py"])
         n_plugin_runtime(["🧩 runtime/plugin_runtime.py"])
         n_runtime(["⚙️ runtime/agent_runtime.py"])
         style Runtime fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
@@ -95,6 +96,7 @@ graph TB
     n_cli --> n_runtime
     n_cli --> n_session_store
     n_runtime --> n_slash
+    n_runtime --> n_hook_policy_runtime
     n_runtime --> n_plugin_runtime
     n_runtime --> n_openai_client
     n_runtime --> n_tools
@@ -110,6 +112,7 @@ graph TB
     n_slash --> n_token_budget
 
     %% ================= 工具 =================
+    n_hook_policy_runtime --> n_tools
     n_plugin_runtime --> n_tools
     n_tools --> n_bash_security
 
@@ -128,6 +131,7 @@ graph TB
     main -.-> n_core_contracts
     n_cli -.-> n_core_contracts
     n_runtime -.-> n_core_contracts
+    n_hook_policy_runtime -.-> n_core_contracts
     n_plugin_runtime -.-> n_core_contracts
     n_slash -.-> n_core_contracts
     n_tools -.-> n_core_contracts
@@ -141,6 +145,7 @@ graph TB
     style main fill:#343a40,color:#fff,stroke:#1d2124
     style n_cli fill:#6610f2,color:#fff,stroke:#520dc2
     style n_runtime fill:#007bff,color:#fff,stroke:#0056b3
+    style n_hook_policy_runtime fill:#198754,color:#fff,stroke:#146c43
     style n_plugin_runtime fill:#0d6efd,color:#fff,stroke:#0a58ca
     style n_slash fill:#8a5cf6,color:#fff,stroke:#6f42c1
     style n_core_contracts fill:#6c757d,color:#fff,stroke:#495057
@@ -162,6 +167,7 @@ graph TB
 - `openai_client/` 现在是源码根下的命名空间目录，不再依赖 `__init__.py`；具体 HTTP 与 SSE 解析仍然集中在 `openai_client/openai_client.py`。
 - `context/context_compactor.py` 是少数刻意允许跨层调用客户端的模块，因为它需要主动发起摘要压缩模型请求。
 - `main.py` 现在只是极薄的进程入口；真正的 CLI 子命令、chat loop 和控制面装配都下沉到了 `control_plane/cli.py`。
+- `runtime/hook_policy_runtime.py` 在主循环启动前扫描工作区内的 `.claw/policies*.json` manifest，负责合并 deny 规则、safe env 与 budget override；hook 定义在此阶段只加载暴露，不直接执行。
 - `runtime/plugin_runtime.py` 在主循环启动前扫描工作区内的 `.claw/plugins*.json` manifest，注册 alias/virtual tool，并产出可供 `/tools` 渲染的插件摘要。
 - `control_plane/slash_commands.py` 作为本地控制面，挂在 `runtime/agent_runtime.py` 前面做 prompt 预分流；它读取 session、tool registry 与 token 预算投影，但不会触发模型调用。
 
@@ -170,6 +176,6 @@ graph TB
 1. 先看 `core_contracts/`，建立共享契约层与配置/协议对象的边界感。
 2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧两个外部交互面。
 3. 再看 `session/` 与 `context/`，理解状态恢复、预算治理、snip、compact 的局部职责。
-4. 再看 `runtime/plugin_runtime.py` 与 `runtime/agent_runtime.py`，理解工作区插件如何在主循环开始前合并进 tool registry。
+4. 再看 `runtime/hook_policy_runtime.py`、`runtime/plugin_runtime.py` 与 `runtime/agent_runtime.py`，理解工作区 policy/plugin 如何在主循环开始前影响 budget 与 tool registry。
 5. 再看 `control_plane/slash_commands.py` 与 `control_plane/cli.py`，理解 CLI 子命令、chat loop 和本地控制面如何装配到 runtime 上。
 6. 最后看 `main.py`，确认顶层进程入口只是一个薄包装层。

@@ -27,6 +27,7 @@ from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
+from runtime.hook_policy_runtime import HookPolicyRuntime
 from runtime.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
@@ -49,10 +50,14 @@ class LocalCodingAgent:
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
     plugin_runtime: PluginRuntime = field(init=False)
+    hook_policy_runtime: HookPolicyRuntime = field(init=False)
 
     def __post_init__(self) -> None:
         self.plugin_runtime = PluginRuntime.from_workspace(self.runtime_config.cwd, self.tool_registry)
         self.tool_registry = self.plugin_runtime.merge_tool_registry(self.tool_registry)
+        self.hook_policy_runtime = HookPolicyRuntime.from_workspace(self.runtime_config.cwd)
+        self.tool_registry = self.hook_policy_runtime.filter_tool_registry(self.tool_registry)
+        self.runtime_config = self.hook_policy_runtime.apply_runtime_config(self.runtime_config)
         self.context_compactor = ContextCompactor(self.client)
 
     def run(self, prompt: str) -> AgentRunResult:
@@ -257,7 +262,11 @@ class LocalCodingAgent:
             pricing=self.client.model_config.pricing,
             cost_baseline=cost_baseline,
         )
-        tool_context = build_tool_context(self.runtime_config, tool_registry=self.tool_registry)
+        tool_context = build_tool_context(
+            self.runtime_config,
+            tool_registry=self.tool_registry,
+            safe_env=self.hook_policy_runtime.safe_env,
+        )
 
         for turn_index in range(1, self.runtime_config.max_turns + 1):
             turns_this_run = turn_index

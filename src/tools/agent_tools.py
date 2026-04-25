@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,7 @@ class ToolExecutionContext:
     command_timeout_seconds: float  # 命令超时时间（为后续工具保留）。
     max_output_chars: int  # 工具文本输出最大长度。
     permissions: AgentPermissions  # 当前会话权限开关。
+    safe_env: dict[str, str] = field(default_factory=dict)  # shell 执行可见的安全环境变量。
     tool_registry: dict[str, 'AgentTool'] | None = None  # 当前可用工具映射（可选）。
 
 
@@ -127,6 +129,7 @@ def build_tool_context(
     config: AgentRuntimeConfig,
     *,
     tool_registry: dict[str, AgentTool] | None = None,
+    safe_env: dict[str, str] | None = None,
 ) -> ToolExecutionContext:
     """根据运行配置构建工具执行上下文。"""
     return ToolExecutionContext(
@@ -134,6 +137,7 @@ def build_tool_context(
         command_timeout_seconds=config.command_timeout_seconds,
         max_output_chars=config.max_output_chars,
         permissions=config.permissions,
+        safe_env=dict(safe_env or {}),
         tool_registry=tool_registry,
     )
 
@@ -486,6 +490,8 @@ def _run_bash_stream(
 
 def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple[str, str, int]:
     """执行 shell 命令并返回 stdout/stderr/exit_code。"""
+    environment = dict(os.environ)
+    environment.update(context.safe_env)
     process = subprocess.Popen(
         command,
         shell=True,
@@ -495,6 +501,7 @@ def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple
         text=True,
         encoding='utf-8',
         errors='replace',
+        env=environment,
     )
     try:
         stdout, stderr = process.communicate(timeout=context.command_timeout_seconds)

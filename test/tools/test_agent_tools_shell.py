@@ -28,6 +28,7 @@ class AgentToolsShellTests(unittest.TestCase):
         allow_destructive_shell_commands: bool,
         max_output_chars: int = 12000,
         command_timeout_seconds: float = 3.0,
+        safe_env: dict[str, str] | None = None,
     ):
         config = AgentRuntimeConfig(
             cwd=workspace,
@@ -39,7 +40,7 @@ class AgentToolsShellTests(unittest.TestCase):
             ),
         )
         registry = default_tool_registry()
-        context = build_tool_context(config, tool_registry=registry)
+        context = build_tool_context(config, tool_registry=registry, safe_env=safe_env)
         return registry, context
 
     def test_registry_contains_bash_tool(self) -> None:
@@ -132,6 +133,25 @@ class AgentToolsShellTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'tool_execution_error')
         self.assertIn('timed out', result.content)
+
+    @patch('tools.agent_tools.subprocess.Popen')
+    def test_bash_passes_safe_env_to_subprocess(self, mock_popen: object) -> None:
+        process = mock_popen.return_value
+        process.communicate.return_value = ('hello', '')
+        process.returncode = 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            registry, context = self._build_context(
+                workspace,
+                allow_shell_commands=True,
+                allow_destructive_shell_commands=False,
+                safe_env={'POLICY_FLAG': 'enabled'},
+            )
+            result = execute_tool(registry, 'bash', {'command': 'echo hello'}, context)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(mock_popen.call_args.kwargs['env']['POLICY_FLAG'], 'enabled')
 
 
 if __name__ == '__main__':
