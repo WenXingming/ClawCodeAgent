@@ -13,7 +13,7 @@ from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from main import main
-from session.session_contracts import StoredAgentSession
+from session.session_contracts import AgentSessionSnapshot
 
 
 class _FakeAgent:
@@ -21,6 +21,7 @@ class _FakeAgent:
 
     last_client = None
     last_runtime = None
+    last_session_store = None
     run_prompts: list[str] = []
     resume_calls: list[tuple[str, str | None]] = []
 
@@ -28,12 +29,14 @@ class _FakeAgent:
     def reset(cls) -> None:
         cls.last_client = None
         cls.last_runtime = None
+        cls.last_session_store = None
         cls.run_prompts = []
         cls.resume_calls = []
 
-    def __init__(self, client, runtime_config) -> None:
+    def __init__(self, client, runtime_config, session_store) -> None:
         _FakeAgent.last_client = client
         _FakeAgent.last_runtime = runtime_config
+        _FakeAgent.last_session_store = session_store
 
     def run(self, prompt: str) -> AgentRunResult:
         _FakeAgent.run_prompts.append(prompt)
@@ -46,16 +49,27 @@ class _FakeAgent:
             session_id='new-session-001',
         )
 
-    def resume(self, prompt: str, stored_session) -> AgentRunResult:
-        _FakeAgent.resume_calls.append((prompt, stored_session.session_id))
+    def resume(self, prompt: str, session_snapshot) -> AgentRunResult:
+        _FakeAgent.resume_calls.append((prompt, session_snapshot.session_id))
         return AgentRunResult(
             final_output=f'resumed:{prompt}',
             turns=2,
             tool_calls=0,
             transcript=(),
             usage=TokenUsage(),
-            session_id=stored_session.session_id,
+            session_id=session_snapshot.session_id,
         )
+
+
+def _make_session_store_cls(load_impl):
+    class _FakeSessionStore:
+        def __init__(self, directory=None) -> None:
+            self.directory = directory
+
+        def load(self, session_id: str) -> AgentSessionSnapshot:
+            return load_impl(session_id, self.directory)
+
+    return _FakeSessionStore
 
 
 class MainEntryTests(unittest.TestCase):
@@ -153,9 +167,9 @@ class MainEntryTests(unittest.TestCase):
     # ISSUE-013 agent-resume CLI 路径
     # ------------------------------------------------------------------
 
-    def _make_stored_session(self) -> StoredAgentSession:
+    def _make_session_snapshot(self) -> AgentSessionSnapshot:
         """构造最小可用的持久化会话对象，用于 resume 测试。"""
-        return StoredAgentSession(
+        return AgentSessionSnapshot(
             session_id='resume-test-001',
             model_config=ModelConfig(
                 model='demo-model',
@@ -167,10 +181,14 @@ class MainEntryTests(unittest.TestCase):
         )
 
     def test_agent_resume_triggers_resume_not_run(self) -> None:
-        """agent-resume 应触发 load_agent_session + agent.resume，而非 agent.run。"""
-        stored = self._make_stored_session()
+        """agent-resume 应触发 AgentSessionStore.load() + agent.resume，而非 agent.run。"""
+        stored = self._make_session_snapshot()
+
+        def _load_snapshot(session_id, directory):
+            return stored
+
         with (
-            patch('main.load_agent_session', return_value=stored),
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
         ):
             stdout = io.StringIO()
@@ -182,7 +200,7 @@ class MainEntryTests(unittest.TestCase):
         self.assertEqual(_FakeAgent.resume_calls, [('续跑问题', 'resume-test-001')])
 
     def test_agent_resume_can_override_stored_config(self) -> None:
-        stored = StoredAgentSession(
+        stored = AgentSessionSnapshot(
             session_id='resume-test-001',
             model_config=ModelConfig(
                 model='stored-model',
@@ -195,8 +213,12 @@ class MainEntryTests(unittest.TestCase):
             ),
             messages=({'role': 'user', 'content': '历史问题'},),
         )
+
+        def _load_snapshot(session_id, directory):
+            return stored
+
         with (
-            patch('main.load_agent_session', return_value=stored),
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
         ):
             stdout = io.StringIO()
@@ -222,9 +244,13 @@ class MainEntryTests(unittest.TestCase):
         self.assertFalse(_FakeAgent.last_runtime.permissions.allow_file_write)
 
     def test_agent_resume_trailing_flag_after_prompt_still_applies(self) -> None:
-        stored = self._make_stored_session()
+        stored = self._make_session_snapshot()
+
+        def _load_snapshot(session_id, directory):
+            return stored
+
         with (
-            patch('main.load_agent_session', return_value=stored),
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
         ):
             stdout = io.StringIO()
@@ -245,7 +271,10 @@ class MainEntryTests(unittest.TestCase):
 
     def test_agent_resume_missing_session_returns_error(self) -> None:
         """session 文件不存在时应返回退出码 2 并输出可读错误。"""
-        with patch('main.load_agent_session', side_effect=ValueError('Session not found: xyz')):
+        def _load_snapshot(session_id, directory):
+            raise ValueError('Session not found: xyz')
+
+        with patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 code = main(['agent-resume', 'xyz', '续跑'])

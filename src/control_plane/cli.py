@@ -7,15 +7,14 @@ import os
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable
 
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import ModelPricing
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
 from runtime.agent_runtime import LocalCodingAgent
-from session.session_contracts import StoredAgentSession
-from session.session_store import load_agent_session
+from session.session_contracts import AgentSessionSnapshot
+from session.session_store import AgentSessionStore
 
 
 _CHAT_EXIT_COMMANDS = {'.exit', '.quit'}
@@ -166,7 +165,7 @@ def main(
     *,
     openai_client_cls: type[OpenAIClient] = OpenAIClient,
     agent_cls: type[LocalCodingAgent] = LocalCodingAgent,
-    load_session: Callable = load_agent_session,
+    session_store_cls: type[AgentSessionStore] = AgentSessionStore,
 ) -> int:
     parser = _build_parser()
     try:
@@ -176,7 +175,12 @@ def main(
 
     try:
         if args.command == 'agent':
-            result = _run_agent_command(args, openai_client_cls=openai_client_cls, agent_cls=agent_cls)
+            result = _run_agent_command(
+                args,
+                openai_client_cls=openai_client_cls,
+                agent_cls=agent_cls,
+                session_store_cls=session_store_cls,
+            )
             print(result.final_output)
             return 0
 
@@ -185,7 +189,7 @@ def main(
                 args,
                 openai_client_cls=openai_client_cls,
                 agent_cls=agent_cls,
-                load_session=load_session,
+                session_store_cls=session_store_cls,
             )
             print(result.final_output)
             return 0
@@ -195,7 +199,7 @@ def main(
                 args,
                 openai_client_cls=openai_client_cls,
                 agent_cls=agent_cls,
-                load_session=load_session,
+                session_store_cls=session_store_cls,
             )
 
         raise ValueError(f'Unknown command: {args.command}')
@@ -209,8 +213,14 @@ def _run_agent_command(
     *,
     openai_client_cls: type[OpenAIClient],
     agent_cls: type[LocalCodingAgent],
+    session_store_cls: type[AgentSessionStore],
 ) -> AgentRunResult:
-    agent, _ = _build_agent_from_args(args, openai_client_cls=openai_client_cls, agent_cls=agent_cls)
+    agent, _ = _build_agent_from_args(
+        args,
+        openai_client_cls=openai_client_cls,
+        agent_cls=agent_cls,
+        session_store_cls=session_store_cls,
+    )
     return agent.run(_join_prompt_parts(args.prompt))
 
 
@@ -219,16 +229,16 @@ def _run_agent_resume_command(
     *,
     openai_client_cls: type[OpenAIClient],
     agent_cls: type[LocalCodingAgent],
-    load_session: Callable,
+    session_store_cls: type[AgentSessionStore],
 ) -> AgentRunResult:
-    agent, stored_session, _ = _build_resumed_agent(
+    agent, session_snapshot, _ = _build_resumed_agent(
         args,
         session_id=args.session_id,
         openai_client_cls=openai_client_cls,
         agent_cls=agent_cls,
-        load_session=load_session,
+        session_store_cls=session_store_cls,
     )
-    return agent.resume(_join_prompt_parts(args.prompt), stored_session)
+    return agent.resume(_join_prompt_parts(args.prompt), session_snapshot)
 
 
 def _run_agent_chat_command(
@@ -236,22 +246,27 @@ def _run_agent_chat_command(
     *,
     openai_client_cls: type[OpenAIClient],
     agent_cls: type[LocalCodingAgent],
-    load_session: Callable,
+    session_store_cls: type[AgentSessionStore],
 ) -> int:
     current_session_id = _normalize_optional_text(args.session_id)
     current_session_directory = _normalize_optional_path(args.session_directory)
-    pending_stored_session: StoredAgentSession | None = None
+    pending_session_snapshot: AgentSessionSnapshot | None = None
 
     if current_session_id:
-        agent, pending_stored_session, current_session_directory = _build_resumed_agent(
+        agent, pending_session_snapshot, current_session_directory = _build_resumed_agent(
             args,
             session_id=current_session_id,
             openai_client_cls=openai_client_cls,
             agent_cls=agent_cls,
-            load_session=load_session,
+            session_store_cls=session_store_cls,
         )
     else:
-        agent, runtime_config = _build_agent_from_args(args, openai_client_cls=openai_client_cls, agent_cls=agent_cls)
+        agent, runtime_config = _build_agent_from_args(
+            args,
+            openai_client_cls=openai_client_cls,
+            agent_cls=agent_cls,
+            session_store_cls=session_store_cls,
+        )
         current_session_directory = current_session_directory or runtime_config.session_directory.resolve()
 
     initial_prompt = _join_optional_prompt_parts(args.prompt)
@@ -261,10 +276,10 @@ def _run_agent_chat_command(
             prompt=initial_prompt,
             current_session_id=current_session_id,
             current_session_directory=current_session_directory,
-            stored_session=pending_stored_session,
-            load_session=load_session,
+            session_snapshot=pending_session_snapshot,
+            session_store_cls=session_store_cls,
         )
-        pending_stored_session = None
+        pending_session_snapshot = None
         _render_chat_result(result, previous_session_id=current_session_id)
         current_session_id, current_session_directory = _advance_chat_state(
             result,
@@ -293,10 +308,10 @@ def _run_agent_chat_command(
             prompt=prompt,
             current_session_id=current_session_id,
             current_session_directory=current_session_directory,
-            stored_session=pending_stored_session,
-            load_session=load_session,
+            session_snapshot=pending_session_snapshot,
+            session_store_cls=session_store_cls,
         )
-        pending_stored_session = None
+        pending_session_snapshot = None
         _render_chat_result(result, previous_session_id=current_session_id)
         current_session_id, current_session_directory = _advance_chat_state(
             result,
@@ -311,18 +326,18 @@ def _execute_chat_turn(
     prompt: str,
     current_session_id: str | None,
     current_session_directory: Path | None,
-    stored_session: StoredAgentSession | None,
-    load_session: Callable,
+    session_snapshot: AgentSessionSnapshot | None,
+    session_store_cls: type[AgentSessionStore],
 ) -> AgentRunResult:
     if current_session_id:
-        effective_session = stored_session
-        if effective_session is None or effective_session.session_id != current_session_id:
-            effective_session = _load_stored_session(
+        effective_snapshot = session_snapshot
+        if effective_snapshot is None or effective_snapshot.session_id != current_session_id:
+            effective_snapshot = _load_session_snapshot(
                 current_session_id,
                 directory=current_session_directory,
-                load_session=load_session,
+                session_store_cls=session_store_cls,
             )
-        return agent.resume(prompt, effective_session)
+        return agent.resume(prompt, effective_snapshot)
     return agent.run(prompt)
 
 
@@ -351,12 +366,14 @@ def _build_agent_from_args(
     *,
     openai_client_cls: type[OpenAIClient],
     agent_cls: type[LocalCodingAgent],
+    session_store_cls: type[AgentSessionStore],
 ) -> tuple[LocalCodingAgent, AgentRuntimeConfig]:
     model_config = _build_new_model_config(args)
     runtime_config = _build_new_runtime_config(args)
     _validate_runtime_config(runtime_config)
     client = openai_client_cls(model_config)
-    return agent_cls(client, runtime_config), runtime_config
+    session_store = session_store_cls(runtime_config.session_directory)
+    return agent_cls(client, runtime_config, session_store), runtime_config
 
 
 def _build_resumed_agent(
@@ -365,15 +382,24 @@ def _build_resumed_agent(
     session_id: str,
     openai_client_cls: type[OpenAIClient],
     agent_cls: type[LocalCodingAgent],
-    load_session: Callable,
-) -> tuple[LocalCodingAgent, StoredAgentSession, Path | None]:
+    session_store_cls: type[AgentSessionStore],
+) -> tuple[LocalCodingAgent, AgentSessionSnapshot, Path | None]:
     loader_directory = _normalize_optional_path(args.session_directory)
-    stored_session = _load_stored_session(session_id, directory=loader_directory, load_session=load_session)
-    model_config = _apply_model_overrides(stored_session.model_config, args)
-    runtime_config = _apply_runtime_overrides(stored_session.runtime_config, args)
+    session_snapshot = _load_session_snapshot(
+        session_id,
+        directory=loader_directory,
+        session_store_cls=session_store_cls,
+    )
+    model_config = _apply_model_overrides(session_snapshot.model_config, args)
+    runtime_config = _apply_runtime_overrides(session_snapshot.runtime_config, args)
     _validate_runtime_config(runtime_config)
     client = openai_client_cls(model_config)
-    return agent_cls(client, runtime_config), stored_session, loader_directory or runtime_config.session_directory.resolve()
+    session_store = session_store_cls(runtime_config.session_directory)
+    return (
+        agent_cls(client, runtime_config, session_store),
+        session_snapshot,
+        loader_directory or runtime_config.session_directory.resolve(),
+    )
 
 
 def _build_new_model_config(args: argparse.Namespace) -> ModelConfig:
@@ -518,15 +544,14 @@ def _validate_runtime_config(runtime_config: AgentRuntimeConfig) -> None:
         raise ValueError('allow_destructive_shell requires --allow-shell')
 
 
-def _load_stored_session(
+def _load_session_snapshot(
     session_id: str,
     *,
     directory: Path | None,
-    load_session: Callable,
-) -> StoredAgentSession:
-    if directory is None:
-        return load_session(session_id)
-    return load_session(session_id, directory=directory)
+    session_store_cls: type[AgentSessionStore],
+) -> AgentSessionSnapshot:
+    session_store = session_store_cls(directory)
+    return session_store.load(session_id)
 
 
 def _normalize_optional_text(value: str | None) -> str | None:

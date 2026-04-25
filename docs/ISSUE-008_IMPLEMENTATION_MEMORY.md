@@ -35,7 +35,7 @@ total_cost_usd = cost_baseline + estimate_cost_usd(usage_delta)
 本期不实现 plugin state 恢复，延至 ISSUE-014/016 插件 runtime 统一处理。
 
 ### 5. session_store 错误统一
-`load_agent_session` 对 `FileNotFoundError` 转为 `ValueError('Session not found: ...')`，
+`AgentSessionStore.load()` 对 `FileNotFoundError` 转为 `ValueError('Session not found: ...')`，
 与损坏文件 `ValueError` 语义一致，main.py 只需单次 `except ValueError` 捕获。
 
 ## 测试覆盖（新增 +11）

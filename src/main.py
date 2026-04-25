@@ -9,7 +9,7 @@ from __future__ import annotations
 from control_plane.cli import main as _control_plane_main
 from openai_client.openai_client import OpenAIClient
 from runtime.agent_runtime import LocalCodingAgent
-from session.session_store import load_agent_session
+from session.session_store import AgentSessionStore
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
         argv,
         openai_client_cls=OpenAIClient,
         agent_cls=LocalCodingAgent,
-        load_session=load_agent_session,
+        session_store_cls=AgentSessionStore,
     )
 
 

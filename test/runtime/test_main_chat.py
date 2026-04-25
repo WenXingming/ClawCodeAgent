@@ -13,12 +13,13 @@ from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from main import main
-from session.session_contracts import StoredAgentSession
+from session.session_contracts import AgentSessionSnapshot
 
 
 class _ChatFakeAgent:
     last_client = None
     last_runtime = None
+    last_session_store = None
     run_prompts: list[str] = []
     resume_calls: list[tuple[str, str | None]] = []
     queued_results: list[AgentRunResult] = []
@@ -27,6 +28,7 @@ class _ChatFakeAgent:
     def reset(cls) -> None:
         cls.last_client = None
         cls.last_runtime = None
+        cls.last_session_store = None
         cls.run_prompts = []
         cls.resume_calls = []
         cls.queued_results = []
@@ -35,9 +37,10 @@ class _ChatFakeAgent:
     def queue_results(cls, *results: AgentRunResult) -> None:
         cls.queued_results = list(results)
 
-    def __init__(self, client, runtime_config) -> None:
+    def __init__(self, client, runtime_config, session_store) -> None:
         _ChatFakeAgent.last_client = client
         _ChatFakeAgent.last_runtime = runtime_config
+        _ChatFakeAgent.last_session_store = session_store
 
     def run(self, prompt: str) -> AgentRunResult:
         _ChatFakeAgent.run_prompts.append(prompt)
@@ -53,8 +56,8 @@ class _ChatFakeAgent:
             session_path=str((Path.cwd() / '.port_sessions' / 'agent' / 'chat-session-001.json').resolve()),
         )
 
-    def resume(self, prompt: str, stored_session) -> AgentRunResult:
-        _ChatFakeAgent.resume_calls.append((prompt, stored_session.session_id))
+    def resume(self, prompt: str, session_snapshot) -> AgentRunResult:
+        _ChatFakeAgent.resume_calls.append((prompt, session_snapshot.session_id))
         if _ChatFakeAgent.queued_results:
             return _ChatFakeAgent.queued_results.pop(0)
         return AgentRunResult(
@@ -63,17 +66,28 @@ class _ChatFakeAgent:
             tool_calls=0,
             transcript=(),
             usage=TokenUsage(),
-            session_id=stored_session.session_id,
-            session_path=str((Path.cwd() / '.port_sessions' / 'agent' / f'{stored_session.session_id}.json').resolve()),
+            session_id=session_snapshot.session_id,
+            session_path=str((Path.cwd() / '.port_sessions' / 'agent' / f'{session_snapshot.session_id}.json').resolve()),
         )
+
+
+def _make_session_store_cls(load_impl):
+    class _FakeSessionStore:
+        def __init__(self, directory=None) -> None:
+            self.directory = directory
+
+        def load(self, session_id: str) -> AgentSessionSnapshot:
+            return load_impl(session_id, self.directory)
+
+    return _FakeSessionStore
 
 
 class MainChatEntryTests(unittest.TestCase):
     def setUp(self) -> None:
         _ChatFakeAgent.reset()
 
-    def _make_stored_session(self, session_id: str) -> StoredAgentSession:
-        return StoredAgentSession(
+    def _make_session_snapshot(self, session_id: str) -> AgentSessionSnapshot:
+        return AgentSessionSnapshot(
             session_id=session_id,
             model_config=ModelConfig(
                 model='demo-model',
@@ -101,7 +115,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertIn('[session] chat-session-001', stdout.getvalue())
 
     def test_agent_chat_resumes_existing_session_from_loop(self) -> None:
-        stored = self._make_stored_session('resume-test-001')
+        stored = self._make_session_snapshot('resume-test-001')
         load_calls: list[str] = []
 
         def _load_session(session_id, directory=None):
@@ -109,7 +123,7 @@ class MainChatEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.load_agent_session', side_effect=_load_session),
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['继续', '.exit']),
         ):
@@ -156,7 +170,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         def _load_session(session_id, directory=None):
             load_calls.append(session_id)
-            return self._make_stored_session(session_id)
+            return self._make_session_snapshot(session_id)
 
         _ChatFakeAgent.queue_results(
             AgentRunResult(
@@ -181,7 +195,7 @@ class MainChatEntryTests(unittest.TestCase):
         )
 
         with (
-            patch('main.load_agent_session', side_effect=_load_session),
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['/clear', '继续处理', '.exit']),
         ):

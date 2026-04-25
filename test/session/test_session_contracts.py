@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.usage import TokenUsage
-from session.session_contracts import StoredAgentSession
+from session.session_contracts import AgentSessionSnapshot
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -21,12 +21,12 @@ def _make_test_dir() -> Path:
     return workspace
 
 
-class StoredAgentSessionTests(unittest.TestCase):
+class AgentSessionSnapshotTests(unittest.TestCase):
     """验证会话快照契约的解析与兼容行为。"""
 
-    def test_stored_agent_session_round_trip(self) -> None:
+    def test_agent_session_snapshot_round_trip(self) -> None:
         workspace = _make_test_dir()
-        session = StoredAgentSession(
+        session = AgentSessionSnapshot(
             session_id='session-001',
             model_config=ModelConfig(model='demo-model'),
             runtime_config=AgentRuntimeConfig(cwd=workspace),
@@ -43,7 +43,7 @@ class StoredAgentSessionTests(unittest.TestCase):
             scratchpad_directory=str(workspace / 'scratchpad'),
         )
 
-        restored = StoredAgentSession.from_dict(session.to_dict())
+        restored = AgentSessionSnapshot.from_dict(session.to_dict())
 
         self.assertEqual(restored.session_id, session.session_id)
         self.assertEqual(restored.model_config, session.model_config)
@@ -55,9 +55,9 @@ class StoredAgentSessionTests(unittest.TestCase):
         self.assertEqual(restored.total_cost_usd, session.total_cost_usd)
         self.assertEqual(restored.schema_version, 1)
 
-    def test_stored_agent_session_defaults_optional_fields(self) -> None:
+    def test_agent_session_snapshot_defaults_optional_fields(self) -> None:
         workspace = _make_test_dir()
-        restored = StoredAgentSession.from_dict(
+        restored = AgentSessionSnapshot.from_dict(
             {
                 'session_id': 'minimal',
                 'model_config': {'model': 'demo-model'},
@@ -74,9 +74,9 @@ class StoredAgentSessionTests(unittest.TestCase):
         self.assertEqual(restored.file_history, ())
         self.assertIsNone(restored.stop_reason)
 
-    def test_stored_agent_session_supports_camel_case_fields(self) -> None:
+    def test_agent_session_snapshot_supports_camel_case_fields(self) -> None:
         workspace = _make_test_dir()
-        restored = StoredAgentSession.from_dict(
+        restored = AgentSessionSnapshot.from_dict(
             {
                 'schemaVersion': 3,
                 'sessionId': 'camel-case',
@@ -100,9 +100,9 @@ class StoredAgentSessionTests(unittest.TestCase):
         self.assertEqual(restored.stop_reason, 'completed')
         self.assertEqual(restored.file_history, ({'action': 'edit_file'},))
 
-    def test_stored_agent_session_requires_core_fields(self) -> None:
+    def test_agent_session_snapshot_requires_core_fields(self) -> None:
         with self.assertRaises(ValueError):
-            StoredAgentSession.from_dict({'session_id': 'missing-messages'})
+            AgentSessionSnapshot.from_dict({'session_id': 'missing-messages'})
 
 
 if __name__ == '__main__':

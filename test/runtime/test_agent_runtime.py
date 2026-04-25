@@ -11,7 +11,8 @@ from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from runtime.agent_runtime import LocalCodingAgent
-from session.session_store import load_agent_session
+from session.session_contracts import AgentSessionSnapshot
+from session.session_store import AgentSessionStore
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -65,6 +66,12 @@ class LocalCodingAgentTests(unittest.TestCase):
             ),
         )
 
+    def _load_session_snapshot(self, workspace: Path, session_id: str) -> AgentSessionSnapshot:
+        return AgentSessionStore(workspace / 'sessions').load(session_id)
+
+    def _build_agent(self, fake_client: OpenAIClient, config: AgentRuntimeConfig) -> LocalCodingAgent:
+        return LocalCodingAgent(fake_client, config, AgentSessionStore(config.session_directory))
+
     def test_run_without_tool_calls_returns_immediately(self) -> None:
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient(
@@ -77,9 +84,9 @@ class LocalCodingAgentTests(unittest.TestCase):
                 )
             ]
         )
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
         result = agent.run('你好')
-        stored = load_agent_session(result.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, result.session_id or '')
         self.assertIsNotNone(result.session_id)
         self.assertIsNotNone(result.session_path)
         self.assertTrue(Path(result.session_path or '').exists())
@@ -99,10 +106,10 @@ class LocalCodingAgentTests(unittest.TestCase):
     def test_run_help_slash_bypasses_model_and_transcript(self) -> None:
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         result = agent.run('/help')
-        stored = load_agent_session(result.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, result.session_id or '')
 
         self.assertEqual(len(fake_client.calls), 0)
         self.assertEqual(result.stop_reason, 'slash_command')
@@ -124,12 +131,12 @@ class LocalCodingAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=2, output_tokens=1),
             ),
         ])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         first = agent.run('历史问题')
-        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, first.session_id or '')
         second = agent.resume('/status', stored)
-        restored = load_agent_session(second.session_id or '', directory=workspace / 'sessions')
+        restored = self._load_session_snapshot(workspace, second.session_id or '')
 
         self.assertEqual(len(fake_client.calls), 1)
         self.assertEqual(second.session_id, first.session_id)
@@ -151,13 +158,13 @@ class LocalCodingAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=2, output_tokens=1),
             ),
         ])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         first = agent.run('历史问题')
-        original = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        original = self._load_session_snapshot(workspace, first.session_id or '')
         cleared = agent.resume('/clear', original)
-        cleared_stored = load_agent_session(cleared.session_id or '', directory=workspace / 'sessions')
-        original_stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        cleared_stored = self._load_session_snapshot(workspace, cleared.session_id or '')
+        original_stored = self._load_session_snapshot(workspace, first.session_id or '')
 
         self.assertEqual(len(fake_client.calls), 1)
         self.assertNotEqual(cleared.session_id, first.session_id)
@@ -195,9 +202,9 @@ class LocalCodingAgentTests(unittest.TestCase):
                 ),
             ]
         )
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
         result = agent.run('读取 demo.txt 并总结')
-        stored = load_agent_session(result.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, result.session_id or '')
         self.assertEqual(len(list((workspace / 'sessions').glob('*.json'))), 1)
 
         self.assertEqual(result.turns, 2)
@@ -239,7 +246,7 @@ class LocalCodingAgentTests(unittest.TestCase):
                 ),
             ]
         )
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
         result = agent.run('先看目录，再看 note.txt')
 
         self.assertEqual(result.turns, 2)
@@ -266,9 +273,9 @@ class LocalCodingAgentTests(unittest.TestCase):
             ]
         )
         config = self._build_runtime_config(workspace, max_turns=1)
-        agent = LocalCodingAgent(fake_client, config)
+        agent = self._build_agent(fake_client, config)
         result = agent.run('持续执行直到停止')
-        stored = load_agent_session(result.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, result.session_id or '')
 
         self.assertEqual(result.turns, 1)
         self.assertEqual(result.stop_reason, 'max_turns')
@@ -280,9 +287,9 @@ class LocalCodingAgentTests(unittest.TestCase):
     def test_run_returns_backend_error_when_model_call_fails(self) -> None:
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([OpenAIConnectionError('network down')])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
         result = agent.run('测试后端异常')
-        stored = load_agent_session(result.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, result.session_id or '')
 
         self.assertEqual(result.turns, 1)
         self.assertEqual(result.stop_reason, 'backend_error')
@@ -315,10 +322,10 @@ class LocalCodingAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=4, output_tokens=3),
             ),
         ])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         first = agent.run('第一个问题')
-        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, first.session_id or '')
         second = agent.resume('第二个问题', stored)
 
         self.assertEqual(second.session_id, first.session_id)
@@ -350,10 +357,10 @@ class LocalCodingAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=3, output_tokens=4),
             ),
         ])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         first = agent.run('任务一')
-        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, first.session_id or '')
         second = agent.resume('任务二', stored)
 
         self.assertEqual(second.turns, 3)          # 1 + 2
@@ -362,7 +369,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         self.assertEqual(second.usage.output_tokens, 10)  # 5+1+4
 
         # 落盘后的累计值同样一致
-        restored2 = load_agent_session(second.session_id or '', directory=workspace / 'sessions')
+        restored2 = self._load_session_snapshot(workspace, second.session_id or '')
         self.assertEqual(restored2.turns, 3)
         self.assertEqual(restored2.usage.input_tokens, 17)
 
@@ -383,10 +390,10 @@ class LocalCodingAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=3, output_tokens=2),
             ),
         ])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         first = agent.run('历史问题')
-        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, first.session_id or '')
         agent.resume('续跑问题', stored)
 
         # fake_client.calls[1] 是 resume 时发出的请求消息列表
@@ -410,17 +417,17 @@ class LocalCodingAgentTests(unittest.TestCase):
             ),
             OpenAIConnectionError('network down'),
         ])
-        agent = LocalCodingAgent(fake_client, self._build_runtime_config(workspace))
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         first = agent.run('任务一')
-        stored = load_agent_session(first.session_id or '', directory=workspace / 'sessions')
+        stored = self._load_session_snapshot(workspace, first.session_id or '')
         second = agent.resume('任务二', stored)
 
         self.assertEqual(second.session_id, first.session_id)
         self.assertEqual(second.stop_reason, 'backend_error')
 
         # 落盘文件应仍可读取且 session_id 一致
-        restored2 = load_agent_session(second.session_id or '', directory=workspace / 'sessions')
+        restored2 = self._load_session_snapshot(workspace, second.session_id or '')
         self.assertEqual(restored2.session_id, first.session_id)
         self.assertEqual(restored2.stop_reason, 'backend_error')
 
@@ -444,7 +451,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         fake_client = _FakeOpenAIClient([
             OneTurnResponse(content='ok', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
         ])
-        agent = LocalCodingAgent(
+        agent = self._build_agent(
             fake_client,
             self._build_budget_config(workspace, BudgetConfig(max_input_tokens=1)),
         )
@@ -459,7 +466,7 @@ class LocalCodingAgentTests(unittest.TestCase):
         fake_client = _FakeOpenAIClient([
             OneTurnResponse(content='ok', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
         ])
-        agent = LocalCodingAgent(
+        agent = self._build_agent(
             fake_client,
             self._build_budget_config(workspace, BudgetConfig(max_total_cost_usd=0.0)),
         )
@@ -484,7 +491,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             ),
             OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
         ])
-        agent = LocalCodingAgent(
+        agent = self._build_agent(
             fake_client,
             self._build_budget_config(workspace, BudgetConfig(max_tool_calls=1)),
         )
@@ -510,7 +517,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             # 第 2 次模型调用永远不应被触发
             OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
         ])
-        agent = LocalCodingAgent(
+        agent = self._build_agent(
             fake_client,
             self._build_budget_config(workspace, BudgetConfig(max_model_calls=1)),
         )
@@ -532,10 +539,9 @@ class LocalCodingAgentTests(unittest.TestCase):
             permissions=AgentPermissions(allow_file_write=True),
             budget_config=BudgetConfig(max_session_turns=3),
         )
-        agent = LocalCodingAgent(fake_client, config)
+        agent = self._build_agent(fake_client, config)
         # 伪造一个已经用了 3 轮的历史会话
-        from session.session_contracts import StoredAgentSession
-        stored = StoredAgentSession(
+        stored = AgentSessionSnapshot(
             session_id='test-session-999',
             model_config=fake_client.model_config,
             runtime_config=config,
@@ -570,7 +576,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             budget_config=BudgetConfig(max_input_tokens=5000),
             compact_preserve_messages=1,   # 确保消息不全在尾部，snip 有候选目标
         )
-        agent = LocalCodingAgent(fake_client, config)
+        agent = self._build_agent(fake_client, config)
         result = agent.run('任务')
         snip_events = [e for e in result.events if e.get('type') == 'snip_boundary']
         # 至少发生一次 snip（第 2 轮或更晚的轮次，消息已有工具结果可剪）
@@ -591,7 +597,7 @@ class LocalCodingAgentTests(unittest.TestCase):
             permissions=AgentPermissions(allow_file_write=True),
             # 不设置 max_input_tokens → soft_over 永远 False
         )
-        agent = LocalCodingAgent(fake_client, config)
+        agent = self._build_agent(fake_client, config)
         result = agent.run('任务')
         snip_events = [e for e in result.events if e.get('type') == 'snip_boundary']
         self.assertEqual(len(snip_events), 0)
@@ -620,9 +626,8 @@ class LocalCodingAgentTests(unittest.TestCase):
             auto_compact_threshold_tokens=1,
             compact_preserve_messages=1,
         )
-        agent = LocalCodingAgent(fake_client, config)
-        from session.session_contracts import StoredAgentSession
-        stored = StoredAgentSession(
+        agent = self._build_agent(fake_client, config)
+        stored = AgentSessionSnapshot(
             session_id='compact-session-001',
             model_config=fake_client.model_config,
             runtime_config=config,
@@ -663,9 +668,8 @@ class LocalCodingAgentTests(unittest.TestCase):
             auto_compact_threshold_tokens=10_000,
             compact_preserve_messages=1,
         )
-        agent = LocalCodingAgent(fake_client, config)
-        from session.session_contracts import StoredAgentSession
-        stored = StoredAgentSession(
+        agent = self._build_agent(fake_client, config)
+        stored = AgentSessionSnapshot(
             session_id='compact-session-002',
             model_config=fake_client.model_config,
             runtime_config=config,
@@ -712,9 +716,8 @@ class LocalCodingAgentTests(unittest.TestCase):
             permissions=AgentPermissions(allow_file_write=True),
             compact_preserve_messages=1,
         )
-        agent = LocalCodingAgent(fake_client, config)
-        from session.session_contracts import StoredAgentSession
-        stored = StoredAgentSession(
+        agent = self._build_agent(fake_client, config)
+        stored = AgentSessionSnapshot(
             session_id='compact-session-003',
             model_config=fake_client.model_config,
             runtime_config=config,
@@ -758,9 +761,8 @@ class LocalCodingAgentTests(unittest.TestCase):
             permissions=AgentPermissions(allow_file_write=True),
             compact_preserve_messages=1,
         )
-        agent = LocalCodingAgent(fake_client, config)
-        from session.session_contracts import StoredAgentSession
-        stored = StoredAgentSession(
+        agent = self._build_agent(fake_client, config)
+        stored = AgentSessionSnapshot(
             session_id='compact-session-004',
             model_config=fake_client.model_config,
             runtime_config=config,

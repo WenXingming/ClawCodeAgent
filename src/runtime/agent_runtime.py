@@ -6,8 +6,8 @@
 3) 达到停止条件后返回 AgentRunResult。
 
 ISSUE-008 扩展：
-4) resume(prompt, stored_session) 从持久化会话恢复并继续执行。
-   - 严格继承 stored_session 的 model/runtime 配置。
+4) resume(prompt, session_snapshot) 从持久化会话恢复并继续执行。
+    - 严格继承 session_snapshot 的 model/runtime 配置。
    - usage/cost/turns/tool_calls 从历史基线累计。
    - session_id 保持不变。
 """
@@ -32,9 +32,9 @@ from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
-from session.session_contracts import StoredAgentSession
+from session.session_contracts import AgentSessionSnapshot
 from session.session_state import AgentSessionState
-from session.session_store import save_agent_session
+from session.session_store import AgentSessionStore
 from tools.agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
 
 
@@ -47,6 +47,7 @@ class LocalCodingAgent:
 
     client: OpenAIClient  # 模型客户端。
     runtime_config: AgentRuntimeConfig  # 运行配置。
+    session_store: AgentSessionStore  # 会话持久化依赖。
     tool_registry: dict[str, AgentTool] = field(default_factory=default_tool_registry)  # 可用工具集合。
 
     def run(self, prompt: str) -> AgentRunResult:
@@ -71,35 +72,35 @@ class LocalCodingAgent:
             cost_baseline=0.0,
         )
 
-    def resume(self, prompt: str, stored_session: StoredAgentSession) -> AgentRunResult:
+    def resume(self, prompt: str, session_snapshot: AgentSessionSnapshot) -> AgentRunResult:
         """从已保存的会话恢复并继续执行新 prompt。
 
-        严格继承 stored_session 的 model/runtime 配置；
+        严格继承 session_snapshot 的 model/runtime 配置；
         usage、turns、tool_calls 从历史基线累计；
         cost = 历史成本 + 本次 delta 成本；
         session_id 保持不变。
         """
         session = AgentSessionState.from_persisted(
-            messages=list(stored_session.messages),
-            transcript=list(stored_session.transcript),
-            tool_call_count=stored_session.tool_calls,
+            messages=list(session_snapshot.messages),
+            transcript=list(session_snapshot.transcript),
+            tool_call_count=session_snapshot.tool_calls,
         )
         local_result = self._prepare_prompt(
             prompt=prompt,
             session=session,
-            session_id=stored_session.session_id,
-            turns_offset=stored_session.turns,
-            usage_baseline=stored_session.usage,
-            cost_baseline=stored_session.total_cost_usd,
+            session_id=session_snapshot.session_id,
+            turns_offset=session_snapshot.turns,
+            usage_baseline=session_snapshot.usage,
+            cost_baseline=session_snapshot.total_cost_usd,
         )
         if local_result is not None:
             return local_result
         return self._execute_loop(
             session=session,
-            session_id=stored_session.session_id,
-            turns_offset=stored_session.turns,
-            usage_baseline=stored_session.usage,
-            cost_baseline=stored_session.total_cost_usd,
+            session_id=session_snapshot.session_id,
+            turns_offset=session_snapshot.turns,
+            usage_baseline=session_snapshot.usage,
+            cost_baseline=session_snapshot.total_cost_usd,
         )
 
     def _prepare_prompt(
@@ -614,7 +615,7 @@ class LocalCodingAgent:
         events_snapshot = tuple(dict(item) for item in events)
         delta_cost = self.client.model_config.pricing.estimate_cost_usd(usage_delta)
         total_cost_usd = cost_baseline + delta_cost
-        stored_session = StoredAgentSession(
+        session_snapshot = AgentSessionSnapshot(
             session_id=session_id,
             model_config=self.client.model_config,
             runtime_config=self.runtime_config,
@@ -628,10 +629,7 @@ class LocalCodingAgent:
             total_cost_usd=total_cost_usd,
             stop_reason=stop_reason,
         )
-        session_path = save_agent_session(
-            stored_session,
-            directory=self.runtime_config.session_directory,
-        )
+        session_path = self.session_store.save(session_snapshot)
         return AgentRunResult(
             final_output=final_output,
             turns=turns_total,
@@ -641,8 +639,8 @@ class LocalCodingAgent:
             usage=usage_total,
             total_cost_usd=total_cost_usd,
             stop_reason=stop_reason,
-            file_history=stored_session.file_history,
+            file_history=session_snapshot.file_history,
             session_id=session_id,
             session_path=str(session_path),
-            scratchpad_directory=stored_session.scratchpad_directory,
+            scratchpad_directory=session_snapshot.scratchpad_directory,
         )

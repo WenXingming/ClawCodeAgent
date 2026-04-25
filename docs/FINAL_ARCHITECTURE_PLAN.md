@@ -98,7 +98,7 @@
 5. `ToolCall`
 6. `ToolExecutionResult`
 7. `AgentRunResult`
-8. `StoredAgentSession`
+8. `AgentSessionSnapshot`
 
 ## 6. 开发阶段计划（最终版）
 
@@ -509,7 +509,7 @@
 
 目标：完成 session save/load 与核心状态落盘。
 
-范围：`StoredAgentSession`、session 目录规范、序列化兼容。
+范围：`AgentSessionSnapshot`、session 目录规范、序列化兼容。
 
 非范围：复杂 replay 提示。
 
@@ -565,7 +565,7 @@
 - `LocalCodingAgent.resume(prompt, stored_session)` 严格继承 `stored_session.model_config` 与 `runtime_config`；usage/turns/tool_calls 从历史基线累计；cost = 历史成本 + 本次 delta，避免历史计费策略变化造成偏差。
 - run/resume 共用 `_execute_loop` 私有方法，stop_reason 行为一致。
 - CLI 新增 `--session-id` 参数；有 session_id 时走 load + resume，无时走原有 run 路径。
-- `load_agent_session` 现在对 FileNotFoundError 也抛 ValueError，main 统一 except 即可。
+- `AgentSessionStore.load()` 现在对 FileNotFoundError 也抛 ValueError，main 统一 except 即可。
 - **本期不实现 plugin state 恢复**，延后至 ISSUE-014/016 插件 runtime 一并处理。
 
 #### ISSUE-009 Token Budget 预检
