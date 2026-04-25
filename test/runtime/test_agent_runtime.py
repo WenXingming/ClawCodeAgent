@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from uuid import uuid4
@@ -257,6 +258,58 @@ class LocalCodingAgentTests(unittest.TestCase):
         tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
         self.assertEqual(len(tool_rows), 2)
         self.assertEqual({item.get('tool_call_id') for item in tool_rows}, {'call_1', 'call_2'})
+
+    def test_run_loads_virtual_tool_from_workspace_plugin_manifest(self) -> None:
+        workspace = _make_test_dir()
+        manifest_dir = workspace / '.claw' / 'plugins'
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / 'demo.json').write_text(
+            json.dumps(
+                {
+                    'name': 'demo-plugin',
+                    'summary': 'Expose a workspace banner tool.',
+                    'virtual_tools': [
+                        {
+                            'name': 'workspace_banner',
+                            'description': 'Return a fixed banner.',
+                            'content': 'Banner from plugin runtime.',
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding='utf-8',
+        )
+
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(id='call_1', name='workspace_banner', arguments={}),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=3, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='插件工具执行完成。',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ]
+        )
+
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        result = agent.run('调用 workspace_banner')
+
+        self.assertEqual(result.stop_reason, 'stop')
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.final_output, '插件工具执行完成。')
+        tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
+        self.assertEqual(len(tool_rows), 1)
+        self.assertIn('Banner from plugin runtime.', tool_rows[0].get('content', ''))
 
     def test_run_stops_with_max_turns(self) -> None:
         workspace = _make_test_dir()

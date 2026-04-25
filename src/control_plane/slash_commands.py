@@ -31,6 +31,7 @@ class SlashCommandContext:
     runtime_config: AgentRuntimeConfig
     model_config: ModelConfig
     tool_registry: Mapping[str, AgentTool]
+    plugin_summary: str = ''
 
 
 @dataclass(frozen=True)
@@ -214,6 +215,8 @@ def _handle_tools(context: SlashCommandContext, parsed: ParsedSlashCommand) -> S
     ]
     for tool in context.tool_registry.values():
         lines.append(f'{tool.name} - {tool.description}')
+    if context.plugin_summary.strip():
+        lines.extend(['', context.plugin_summary.strip()])
     return SlashCommandResult(
         handled=True,
         continue_query=False,

@@ -83,7 +83,49 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 
 这些命令只会写入 `slash_command` event，不会写入模型 transcript。
 
-## 8. 预算控制（BudgetConfig）
+## 8. 工作区插件（ISSUE-014）
+
+当前版本支持从工作区自动发现插件 manifest，并注册两类工具：
+
+- alias tool：把现有工具包装成新的名字，并可注入固定参数。
+- virtual tool：注册一个不触发底层文件/shell 的虚拟工具，直接返回固定内容。
+
+发现路径：
+
+- `.claw/plugins.json`
+- `.claw/plugins/*.json`
+
+示例：
+
+```json
+{
+  "name": "demo-plugin",
+  "summary": "Expose README alias and workspace banner.",
+  "aliases": [
+    {
+      "name": "read_readme",
+      "target": "read_file",
+      "description": "Read README.md through plugin alias.",
+      "arguments": {
+        "path": "README.md"
+      }
+    }
+  ],
+  "virtual_tools": [
+    {
+      "name": "workspace_banner",
+      "description": "Return a fixed plugin banner.",
+      "content": "Workspace banner from plugin runtime."
+    }
+  ]
+}
+```
+
+将上面的 JSON 保存到 `.claw/plugins/demo.json` 后，新建的 `LocalCodingAgent` 会在启动时自动装载插件工具；执行 `/tools` 时也会额外显示已发现插件摘要。
+
+冲突策略：核心工具和先注册成功的工具优先；若插件工具名称冲突，冲突项会被跳过，并出现在 `/tools` 的插件摘要里。
+
+## 9. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -118,13 +160,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 9. CLI 迁移说明
+## 10. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 10. 说明
+## 11. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：

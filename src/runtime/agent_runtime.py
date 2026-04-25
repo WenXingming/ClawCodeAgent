@@ -27,6 +27,7 @@ from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
+from runtime.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
@@ -47,8 +48,11 @@ class LocalCodingAgent:
     budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
+    plugin_runtime: PluginRuntime = field(init=False)
 
     def __post_init__(self) -> None:
+        self.plugin_runtime = PluginRuntime.from_workspace(self.runtime_config.cwd, self.tool_registry)
+        self.tool_registry = self.plugin_runtime.merge_tool_registry(self.tool_registry)
         self.context_compactor = ContextCompactor(self.client)
 
     def run(self, prompt: str) -> AgentRunResult:
@@ -123,6 +127,7 @@ class LocalCodingAgent:
                 runtime_config=self.runtime_config,
                 model_config=self.client.model_config,
                 tool_registry=self.tool_registry,
+                plugin_summary=self.plugin_runtime.render_summary(),
             ),
             prompt,
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import unittest
 from pathlib import Path
 
@@ -66,6 +67,18 @@ class SlashCommandModuleTests(unittest.TestCase):
         self.assertTrue(result.handled)
         self.assertIn('read_file -', result.output)
         self.assertIn('Shell enabled: no', result.output)
+
+    def test_dispatch_tools_renders_plugin_summary_when_present(self) -> None:
+        context = replace(
+            self._make_context(),
+            plugin_summary='Discovered Plugins\n==================\ndemo-plugin - plugin summary',
+        )
+
+        result = dispatch_slash_command(context, '/tools')
+
+        self.assertTrue(result.handled)
+        self.assertIn('Discovered Plugins', result.output)
+        self.assertIn('demo-plugin - plugin summary', result.output)
 
     def test_dispatch_clear_requests_forked_empty_session(self) -> None:
         result = dispatch_slash_command(self._make_context(), '/clear')
