@@ -381,7 +381,120 @@ class LocalCodingAgentTests(unittest.TestCase):
         self.assertEqual(result.stop_reason, 'stop')
         tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
         self.assertEqual(len(tool_rows), 1)
-        self.assertIn('Unknown tool: read_file', tool_rows[0].get('content', ''))
+        self.assertIn('blocked by policy', tool_rows[0].get('content', ''))
+        self.assertEqual(tool_rows[0].get('metadata', {}).get('blocked_by'), 'policy')
+
+    def test_run_plugin_block_in_tool_pipeline(self) -> None:
+        workspace = _make_test_dir()
+        (workspace / 'demo.txt').write_text('hello', encoding='utf-8')
+        manifest_dir = workspace / '.claw' / 'plugins'
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / 'blocker.json').write_text(
+            json.dumps(
+                {
+                    'name': 'plugin-blocker',
+                    'summary': 'Block read_file in tool pipeline.',
+                    'deny_tools': ['read_file'],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding='utf-8',
+        )
+
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(id='call_1', name='read_file', arguments={'path': 'demo.txt'}),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=4, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='插件阻断已处理。',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ]
+        )
+
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        result = agent.run('尝试调用 read_file')
+
+        tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
+        self.assertEqual(len(tool_rows), 1)
+        self.assertIn('blocked by plugin', tool_rows[0].get('content', ''))
+        self.assertEqual(tool_rows[0].get('metadata', {}).get('blocked_by'), 'plugin')
+        self.assertTrue(any(item.get('type') == 'tool_blocked' and item.get('source') == 'plugin' for item in result.events))
+
+    def test_run_tool_pipeline_injects_plugin_and_policy_messages(self) -> None:
+        workspace = _make_test_dir()
+        plugin_dir = workspace / '.claw' / 'plugins'
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        (plugin_dir / 'hooks.json').write_text(
+            json.dumps(
+                {
+                    'name': 'plugin-hooks',
+                    'summary': 'Inject plugin pre/post messages.',
+                    'before_hooks': [{'kind': 'message', 'content': 'plugin before'}],
+                    'after_hooks': [{'kind': 'message', 'content': 'plugin after'}],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding='utf-8',
+        )
+
+        policy_dir = workspace / '.claw' / 'policies'
+        policy_dir.mkdir(parents=True, exist_ok=True)
+        (policy_dir / 'hooks.json').write_text(
+            json.dumps(
+                {
+                    'name': 'policy-hooks',
+                    'trusted': True,
+                    'before_hooks': [{'kind': 'message', 'content': 'policy before'}],
+                    'after_hooks': [{'kind': 'message', 'content': 'policy after'}],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding='utf-8',
+        )
+
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(id='call_1', name='list_dir', arguments={'path': '.'}),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=3, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='双重注入完成。',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ]
+        )
+
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        result = agent.run('执行 list_dir 并观测 hook 注入')
+
+        system_rows = [item for item in result.transcript if item.get('role') == 'system']
+        self.assertEqual([item.get('content') for item in system_rows], ['plugin before', 'policy before', 'plugin after', 'policy after'])
+
+        tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
+        self.assertEqual(len(tool_rows), 1)
+        self.assertEqual(tool_rows[0].get('metadata', {}).get('preflight_sources'), ['plugin', 'policy'])
+        self.assertEqual(tool_rows[0].get('metadata', {}).get('after_hook_sources'), ['plugin', 'policy'])
+        self.assertEqual(len([item for item in result.events if item.get('type') == 'tool_preflight']), 2)
+        self.assertEqual(len([item for item in result.events if item.get('type') == 'tool_after_hook']), 2)
 
     def test_run_stops_with_max_turns(self) -> None:
         workspace = _make_test_dir()

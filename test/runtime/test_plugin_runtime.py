@@ -121,6 +121,28 @@ class PluginRuntimeTests(unittest.TestCase):
         self.assertIn('read_file', summary)
         self.assertIn('skipped', summary)
 
+    def test_from_workspace_exposes_hook_and_block_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            self._write_manifest(
+                workspace,
+                'hooks.json',
+                {
+                    'name': 'hook-plugin',
+                    'summary': 'Injects hook messages and blocks shell tools.',
+                    'deny_prefixes': ['bash'],
+                    'before_hooks': [{'kind': 'message', 'content': 'plugin before'}],
+                    'after_hooks': [{'kind': 'message', 'content': 'plugin after'}],
+                },
+            )
+
+            plugin_runtime = PluginRuntime.from_workspace(workspace, default_tool_registry())
+
+        self.assertEqual(plugin_runtime.get_before_hooks('bash_exec')[0]['content'], 'plugin before')
+        self.assertEqual(plugin_runtime.get_after_hooks('bash_exec')[0]['content'], 'plugin after')
+        self.assertEqual(plugin_runtime.resolve_block('bash_exec')['source'], 'plugin')
+        self.assertEqual(plugin_runtime.resolve_block('bash_exec')['reason'], 'deny_prefixes')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -23,7 +23,7 @@ from context.context_budget import ContextBudgetEvaluator
 from context.context_compactor import CompactionResult, ContextCompactor
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
-from core_contracts.protocol import JSONDict, OneTurnResponse
+from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
@@ -426,13 +426,64 @@ class LocalCodingAgent:
 
             # 执行工具调用并回填结果
             for tool_call in response.tool_calls:
-                tool_result = execute_tool(
-                    self.tool_registry,
-                    tool_call.name,
-                    tool_call.arguments,
-                    tool_context,
-                )
+                before_hooks = self.plugin_runtime.get_before_hooks(tool_call.name) + self.hook_policy_runtime.get_before_hooks(tool_call.name)
+                after_hooks = self.plugin_runtime.get_after_hooks(tool_call.name) + self.hook_policy_runtime.get_after_hooks(tool_call.name)
+
+                for hook in before_hooks:
+                    self._append_tool_hook_message(
+                        session_state,
+                        hook=hook,
+                        tool_call=tool_call,
+                        turn_index=turn_index,
+                        events=events,
+                    )
+
+                metadata_updates: JSONDict = {
+                    'preflight_sources': [hook['source'] for hook in before_hooks],
+                    'after_hook_sources': [hook['source'] for hook in after_hooks],
+                }
+
+                block_decision = self.hook_policy_runtime.resolve_block(tool_call.name)
+                if block_decision is None:
+                    block_decision = self.plugin_runtime.resolve_block(tool_call.name)
+
+                if block_decision is not None:
+                    tool_result = self._make_blocked_tool_result(
+                        tool_call,
+                        block_decision,
+                        metadata_updates,
+                    )
+                    events.append(
+                        {
+                            'type': 'tool_blocked',
+                            'turn': turn_index,
+                            'tool_call_id': tool_call.id,
+                            'tool_name': tool_call.name,
+                            'source': block_decision['source'],
+                            'source_name': block_decision['source_name'],
+                            'reason': block_decision['reason'],
+                        }
+                    )
+                else:
+                    tool_result = execute_tool(
+                        self.tool_registry,
+                        tool_call.name,
+                        tool_call.arguments,
+                        tool_context,
+                    )
+                    tool_result = self._merge_tool_result_metadata(tool_result, metadata_updates)
+
                 session_state.append_tool_result(tool_call, tool_result)
+
+                for hook in after_hooks:
+                    self._append_tool_hook_message(
+                        session_state,
+                        hook=hook,
+                        tool_call=tool_call,
+                        turn_index=turn_index,
+                        events=events,
+                    )
+
                 events.append({
                     'type': 'tool_result',
                     'turn': turn_index,
@@ -440,6 +491,7 @@ class LocalCodingAgent:
                     'tool_name': tool_call.name,
                     'ok': tool_result.ok,
                     'error_kind': tool_result.metadata.get('error_kind'),
+                    'metadata': dict(tool_result.metadata),
                 })
 
                 # 工具执行后预算检查
@@ -605,6 +657,75 @@ class LocalCodingAgent:
     def _build_openai_tools(self) -> list[JSONDict]:
         """构建发送给模型的工具定义列表。"""
         return [tool.to_openai_tool() for tool in self.tool_registry.values()]
+
+    @staticmethod
+    def _merge_tool_result_metadata(
+        result: ToolExecutionResult,
+        metadata_updates: JSONDict,
+    ) -> ToolExecutionResult:
+        merged_metadata = dict(result.metadata)
+        for key, value in metadata_updates.items():
+            if value:
+                merged_metadata[key] = value
+        return ToolExecutionResult(
+            name=result.name,
+            ok=result.ok,
+            content=result.content,
+            metadata=merged_metadata,
+        )
+
+    def _make_blocked_tool_result(
+        self,
+        tool_call: ToolCall,
+        block_decision: JSONDict,
+        metadata_updates: JSONDict,
+    ) -> ToolExecutionResult:
+        merged_metadata = dict(metadata_updates)
+        merged_metadata.update(
+            {
+                'error_kind': 'tool_blocked',
+                'blocked_by': block_decision['source'],
+                'blocked_by_name': block_decision['source_name'],
+                'block_reason': block_decision['reason'],
+            }
+        )
+        return ToolExecutionResult(
+            name=tool_call.name,
+            ok=False,
+            content=str(block_decision['message']),
+            metadata=merged_metadata,
+        )
+
+    @staticmethod
+    def _append_tool_hook_message(
+        session_state: AgentSessionState,
+        *,
+        hook: JSONDict,
+        tool_call: ToolCall,
+        turn_index: int,
+        events: list[JSONDict],
+    ) -> None:
+        phase = str(hook.get('phase', 'before'))
+        event_type = 'tool_preflight' if phase == 'before' else 'tool_after_hook'
+        metadata = {
+            'phase': phase,
+            'tool_call_id': tool_call.id,
+            'tool_name': tool_call.name,
+            'source': hook.get('source', 'unknown'),
+            'source_name': hook.get('source_name', 'unknown'),
+        }
+        session_state.append_runtime_message(str(hook.get('content', '')), metadata=metadata)
+        events.append(
+            {
+                'type': event_type,
+                'turn': turn_index,
+                'tool_call_id': tool_call.id,
+                'tool_name': tool_call.name,
+                'source': hook.get('source', 'unknown'),
+                'source_name': hook.get('source_name', 'unknown'),
+                'phase': phase,
+            }
+        )
 
     def _build_run_result(
         self,

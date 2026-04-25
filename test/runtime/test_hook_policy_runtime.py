@@ -93,6 +93,25 @@ class HookPolicyRuntimeTests(unittest.TestCase):
         self.assertNotIn('workspace_banner', filtered)
         self.assertIn('list_dir', filtered)
 
+    def test_runtime_exposes_hook_and_block_helpers(self) -> None:
+        runtime = HookPolicyRuntime(
+            manifests=(),
+            deny_tools=('read_file',),
+            deny_prefixes=('workspace_',),
+        )
+
+        self.assertEqual(runtime.resolve_block('read_file')['source'], 'policy')
+        self.assertEqual(runtime.resolve_block('workspace_banner')['reason'], 'deny_prefixes')
+
+        runtime = HookPolicyRuntime(
+            manifests=(),
+            before_hooks=({'kind': 'message', 'content': 'policy before'},),
+            after_hooks=({'kind': 'message', 'content': 'policy after'},),
+        )
+
+        self.assertEqual(runtime.get_before_hooks('list_dir')[0]['content'], 'policy before')
+        self.assertEqual(runtime.get_after_hooks('list_dir')[0]['content'], 'policy after')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -164,6 +164,48 @@ class HookPolicyRuntime:
             return runtime_config
         return replace(runtime_config, budget_config=merged_budget)
 
+    def resolve_block(self, tool_name: str) -> JSONDict | None:
+        if not self.manifests:
+            if tool_name in self.deny_tools:
+                return {
+                    'source': 'policy',
+                    'source_name': 'merged-policy',
+                    'reason': 'deny_tools',
+                    'message': f'Tool {tool_name} blocked by policy merged-policy.',
+                }
+            for prefix in self.deny_prefixes:
+                if tool_name.startswith(prefix):
+                    return {
+                        'source': 'policy',
+                        'source_name': 'merged-policy',
+                        'reason': 'deny_prefixes',
+                        'message': f'Tool {tool_name} blocked by policy merged-policy.',
+                    }
+            return None
+        for manifest in self.manifests:
+            if tool_name in manifest.deny_tools:
+                return {
+                    'source': 'policy',
+                    'source_name': manifest.name,
+                    'reason': 'deny_tools',
+                    'message': f'Tool {tool_name} blocked by policy {manifest.name}.',
+                }
+            for prefix in manifest.deny_prefixes:
+                if tool_name.startswith(prefix):
+                    return {
+                        'source': 'policy',
+                        'source_name': manifest.name,
+                        'reason': 'deny_prefixes',
+                        'message': f'Tool {tool_name} blocked by policy {manifest.name}.',
+                    }
+        return None
+
+    def get_before_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        return self._collect_hooks('before', tool_name)
+
+    def get_after_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        return self._collect_hooks('after', tool_name)
+
     def render_summary(self) -> str:
         if not self.manifests and not self.skipped_manifests and not self.load_errors:
             return ''
@@ -181,6 +223,46 @@ class HookPolicyRuntime:
                 location = f' ({item.source_path})' if item.source_path else ''
                 lines.append(f'{item.name}{location}: {item.error}')
         return '\n'.join(lines)
+
+    def _collect_hooks(self, phase: str, tool_name: str) -> tuple[JSONDict, ...]:
+        if not self.manifests:
+            raw_hooks = self.before_hooks if phase == 'before' else self.after_hooks
+            hooks: list[JSONDict] = []
+            for hook in raw_hooks:
+                if hook.get('kind') != 'message':
+                    continue
+                content = str(hook.get('content', '')).strip()
+                if not content:
+                    continue
+                hooks.append(
+                    {
+                        'phase': phase,
+                        'content': content,
+                        'tool_name': tool_name,
+                        'source': 'policy',
+                        'source_name': 'merged-policy',
+                    }
+                )
+            return tuple(hooks)
+        hooks: list[JSONDict] = []
+        for manifest in self.manifests:
+            raw_hooks = manifest.before_hooks if phase == 'before' else manifest.after_hooks
+            for hook in raw_hooks:
+                if hook.get('kind') != 'message':
+                    continue
+                content = str(hook.get('content', '')).strip()
+                if not content:
+                    continue
+                hooks.append(
+                    {
+                        'phase': phase,
+                        'content': content,
+                        'tool_name': tool_name,
+                        'source': 'policy',
+                        'source_name': manifest.name,
+                    }
+                )
+        return tuple(hooks)
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:

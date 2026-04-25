@@ -85,10 +85,11 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 
 ## 8. 工作区插件（ISSUE-014）
 
-当前版本支持从工作区自动发现插件 manifest，并注册两类工具：
+当前版本支持从工作区自动发现插件 manifest，并注册两类工具，同时也允许插件在工具执行链里注入 hook / block：
 
 - alias tool：把现有工具包装成新的名字，并可注入固定参数。
 - virtual tool：注册一个不触发底层文件/shell 的虚拟工具，直接返回固定内容。
+- hook / block：在工具执行前后注入 system message，或按工具名/前缀阻断调用。
 
 发现路径：
 
@@ -101,6 +102,19 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 {
   "name": "demo-plugin",
   "summary": "Expose README alias and workspace banner.",
+  "deny_tools": ["edit_file"],
+  "before_hooks": [
+    {
+      "kind": "message",
+      "content": "plugin before"
+    }
+  ],
+  "after_hooks": [
+    {
+      "kind": "message",
+      "content": "plugin after"
+    }
+  ],
   "aliases": [
     {
       "name": "read_readme",
@@ -121,17 +135,18 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 }
 ```
 
-将上面的 JSON 保存到 `.claw/plugins/demo.json` 后，新建的 `LocalCodingAgent` 会在启动时自动装载插件工具；执行 `/tools` 时也会额外显示已发现插件摘要。
+将上面的 JSON 保存到 `.claw/plugins/demo.json` 后，新建的 `LocalCodingAgent` 会在启动时自动装载插件工具；执行 `/tools` 时也会额外显示已发现插件摘要。若配置了 `before_hooks` / `after_hooks` / `deny_*`，这些规则会在 tool pipeline 中生效，并写入 transcript/event metadata。
 
 冲突策略：核心工具和先注册成功的工具优先；若插件工具名称冲突，冲突项会被跳过，并出现在 `/tools` 的插件摘要里。
 
 ## 9. 工作区 Policy（ISSUE-015）
 
-当前版本支持从工作区自动发现 hook/policy manifest，并在 agent 初始化时应用三类治理能力：
+当前版本支持从工作区自动发现 hook/policy manifest，并在 agent 初始化时应用四类治理能力：
 
 - deny 规则：可按精确工具名或名前缀移除工具。
 - safe env：把白名单环境变量注入到工具上下文；当前主要影响 `bash` 工具的子进程环境。
 - budget override：覆盖运行时 `BudgetConfig`，在真正进入主循环前生效。
+- hook 注入：在工具执行前后追加 system message，并把来源写入 tool result metadata 与 runtime events。
 
 发现路径：
 
@@ -174,7 +189,7 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 - `safe_env` 后者覆盖前者的同名 key。
 - `budget_overrides` 只覆盖显式给出的非空字段。
 
-说明：当前版本会加载并暴露 `before_hooks` / `after_hooks`，但真正把 hooks 注入工具执行链是在 ISSUE-016 完成。
+说明：当前版本会在 tool pipeline 中执行 `before_hooks` / `after_hooks`，并按“policy 优先于 plugin”的顺序判断阻断；阻断结果不会真的执行底层工具，但仍会以同一个 `tool_call_id` 回填一条 tool result，便于后续模型轮次继续消费。
 
 ## 10. 预算控制（BudgetConfig）
 

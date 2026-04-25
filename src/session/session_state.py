@@ -98,6 +98,22 @@ class AgentSessionState:
             }
         )
 
+    def append_runtime_message(self, content: str, *, metadata: JSONDict | None = None) -> None:
+        """向会话中追加一条运行时 system/reminder 消息。"""
+        message = {
+            'role': 'system',
+            'content': content,
+        }
+        self.messages.append(message)
+
+        transcript_entry: JSONDict = {
+            'role': 'system',
+            'content': content,
+        }
+        if metadata:
+            transcript_entry['metadata'] = dict(metadata)
+        self.transcript_entries.append(transcript_entry)
+
     def append_tool_result(self, tool_call: ToolCall, result: ToolExecutionResult) -> None:
         """向会话中追加一条工具执行结果。
         Args:

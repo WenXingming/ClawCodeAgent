@@ -985,7 +985,7 @@
 
 交付物：mcp runtime 与测试。
 
-#### ISSUE-022 Remote Runtime 与基础连接状态
+#### ISSUE-022 Remote Runtime 与基础连接状态（本人注释：暂时可不做）
 
 类型：feature
 

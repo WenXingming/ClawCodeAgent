@@ -97,6 +97,10 @@ class PluginManifest:
 
     name: str
     summary: str = ''
+    deny_tools: tuple[str, ...] = ()
+    deny_prefixes: tuple[str, ...] = ()
+    before_hooks: tuple[JSONDict, ...] = ()
+    after_hooks: tuple[JSONDict, ...] = ()
     aliases: tuple[AliasToolSpec, ...] = ()
     virtual_tools: tuple[VirtualToolSpec, ...] = ()
     source_path: Path | None = None
@@ -115,6 +119,11 @@ class PluginManifest:
         if not isinstance(virtual_tools_raw, list):
             raise ValueError(f'Plugin manifest {name!r} virtual_tools must be a list')
 
+        deny_tools = _normalize_string_list(data.get('deny_tools', data.get('denyTools', [])))
+        deny_prefixes = _normalize_string_list(data.get('deny_prefixes', data.get('denyPrefixes', [])))
+        before_hooks = _normalize_hook_list(data.get('before_hooks', data.get('beforeHooks', [])))
+        after_hooks = _normalize_hook_list(data.get('after_hooks', data.get('afterHooks', [])))
+
         aliases = tuple(
             AliasToolSpec.from_dict(item)
             for item in aliases_raw
@@ -129,6 +138,10 @@ class PluginManifest:
         return cls(
             name=name,
             summary=str(data.get('summary', '')).strip(),
+            deny_tools=deny_tools,
+            deny_prefixes=deny_prefixes,
+            before_hooks=before_hooks,
+            after_hooks=after_hooks,
             aliases=aliases,
             virtual_tools=virtual_tools,
             source_path=source_path.resolve() if source_path else None,
@@ -277,6 +290,33 @@ class PluginRuntime:
         merged.update(self.plugin_registry)
         return merged
 
+    def resolve_block(self, tool_name: str) -> JSONDict | None:
+        if not self.manifests:
+            return None
+        for manifest in self.manifests:
+            if tool_name in manifest.deny_tools:
+                return {
+                    'source': 'plugin',
+                    'source_name': manifest.name,
+                    'reason': 'deny_tools',
+                    'message': f'Tool {tool_name} blocked by plugin {manifest.name}.',
+                }
+            for prefix in manifest.deny_prefixes:
+                if tool_name.startswith(prefix):
+                    return {
+                        'source': 'plugin',
+                        'source_name': manifest.name,
+                        'reason': 'deny_prefixes',
+                        'message': f'Tool {tool_name} blocked by plugin {manifest.name}.',
+                    }
+        return None
+
+    def get_before_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        return self._collect_hooks('before', tool_name)
+
+    def get_after_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        return self._collect_hooks('after', tool_name)
+
     def render_summary(self) -> str:
         if not self.manifests and not self.load_errors:
             return ''
@@ -315,6 +355,29 @@ class PluginRuntime:
 
         return '\n'.join(lines)
 
+    def _collect_hooks(self, phase: str, tool_name: str) -> tuple[JSONDict, ...]:
+        if not self.manifests:
+            return ()
+        hooks: list[JSONDict] = []
+        for manifest in self.manifests:
+            raw_hooks = manifest.before_hooks if phase == 'before' else manifest.after_hooks
+            for hook in raw_hooks:
+                if hook.get('kind') != 'message':
+                    continue
+                content = str(hook.get('content', '')).strip()
+                if not content:
+                    continue
+                hooks.append(
+                    {
+                        'phase': phase,
+                        'content': content,
+                        'tool_name': tool_name,
+                        'source': 'plugin',
+                        'source_name': manifest.name,
+                    }
+                )
+        return tuple(hooks)
+
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
     candidates: list[Path] = []
@@ -330,6 +393,29 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
             if path.is_file()
         )
     return tuple(candidates)
+
+
+def _normalize_string_list(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        normalized = item.strip()
+        if normalized:
+            result.append(normalized)
+    return tuple(result)
+
+
+def _normalize_hook_list(value: object) -> tuple[JSONDict, ...]:
+    if not isinstance(value, list):
+        return ()
+    hooks: list[JSONDict] = []
+    for item in value:
+        if isinstance(item, dict):
+            hooks.append(dict(item))
+    return tuple(hooks)
 
 
 def _validate_declared_tool_names(
