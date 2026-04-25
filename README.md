@@ -191,7 +191,51 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 
 说明：当前版本会在 tool pipeline 中执行 `before_hooks` / `after_hooks`，并按“policy 优先于 plugin”的顺序判断阻断；阻断结果不会真的执行底层工具，但仍会以同一个 `tool_call_id` 回填一条 tool result，便于后续模型轮次继续消费。
 
-## 10. 预算控制（BudgetConfig）
+## 10. 工作区 Task Runtime（ISSUE-017）
+
+当前版本支持从工作区加载本地任务状态机，用于维护任务的创建、更新、开始、完成、阻塞、取消，以及基于依赖关系选择下一批可执行任务。
+
+持久化路径：
+
+- `.claw/tasks.json`
+
+当前能力：
+
+- `create_task`：创建任务；若依赖尚未完成，任务会自动进入 `blocked`。
+- `update_task`：更新标题、描述和依赖列表，并立即重新计算依赖阻塞状态。
+- `start_task` / `complete_task`：执行标准状态流转 `pending -> in_progress -> completed`。
+- `block_task` / `cancel_task`：显式把任务标记为 `blocked` 或 `cancelled`。
+- `list_tasks` / `next_tasks`：列出所有任务，或返回当前可执行的 `pending` 任务。
+
+状态集合：
+
+- `pending`
+- `in_progress`
+- `completed`
+- `blocked`
+- `cancelled`
+
+示例：
+
+```python
+from pathlib import Path
+
+from runtime.task_runtime import TaskRuntime
+
+runtime = TaskRuntime.from_workspace(Path('.'))
+runtime.create_task('task-001', '实现 Task Runtime')
+runtime.create_task('task-002', '为 Plan Runtime 预留同步点', dependencies=('task-001',))
+
+runtime.start_task('task-001')
+runtime.complete_task('task-001')
+
+print([task.task_id for task in runtime.next_tasks()])
+# ['task-002']
+```
+
+说明：每次变更操作都会自动写回 `.claw/tasks.json`。跨仓库任务同步和 plan-task 同步不在本期范围内，分别留给后续 ISSUE。
+
+## 11. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -226,13 +270,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 11. CLI 迁移说明
+## 12. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 12. 说明
+## 13. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：
