@@ -4,7 +4,16 @@
 1. `check_pre_model()`：在模型调用前按优先级检查 session_turns、model_calls、token、cost。
 2. `check_post_tool()`：在每次工具执行后检查 tool_calls。
 
-类内方法顺序按“公开入口优先，再顺着首次调用链往下读”组织，便于从主流程直接定位对应的私有维度检查。
+文件内定义按“公共入口优先，再顺着第一次调用链往下读”的顺序组织。当前主阅读链为：
+
+`BudgetGuard.check_pre_model()`
+-> `_check_session_turns()`
+-> `_check_model_calls()`
+-> `_check_token()`
+-> `_check_cost()`
+
+`BudgetGuard.check_post_tool()`
+-> `_check_tool_calls()`
 """
 
 from __future__ import annotations
@@ -13,7 +22,7 @@ from dataclasses import dataclass
 
 from core_contracts.config import BudgetConfig
 from core_contracts.usage import ModelPricing, TokenUsage
-from .token_budget import TokenBudgetSnapshot
+from .context_budget import TokenBudgetSnapshot
 
 
 @dataclass

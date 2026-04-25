@@ -19,14 +19,9 @@ from uuid import uuid4
 
 from control_plane.slash_commands import SlashCommandContext, SlashCommandResult, dispatch_slash_command
 from context.budget_guard import BudgetGuard
-from context.compact import (
-    CompactResult,
-    compact_conversation,
-    is_context_length_error,
-    should_auto_compact,
-)
-from context.snip import snip_session
-from context.token_budget import check_token_budget
+from context.context_budget import ContextBudgetEvaluator
+from context.context_compactor import CompactionResult, ContextCompactor
+from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.result import AgentRunResult
@@ -49,6 +44,12 @@ class LocalCodingAgent:
     runtime_config: AgentRuntimeConfig  # 运行配置。
     session_store: AgentSessionStore  # 会话持久化依赖。
     tool_registry: dict[str, AgentTool] = field(default_factory=default_tool_registry)  # 可用工具集合。
+    budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
+    context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
+    context_compactor: ContextCompactor = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.context_compactor = ContextCompactor(self.client)
 
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务（新会话）。"""
@@ -258,7 +259,7 @@ class LocalCodingAgent:
 
             # token preflight
             openai_tools = self._build_openai_tools()
-            snapshot = check_token_budget(
+            snapshot = self.budget_evaluator.evaluate(
                 messages=session_state.to_messages(),
                 tools=openai_tools,
                 max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
@@ -266,7 +267,7 @@ class LocalCodingAgent:
 
             # ISSUE-010 snip：soft_over 时就地剪裁旧消息，降低 prompt 压力
             if snapshot.is_soft_over:
-                snip_result = snip_session(
+                snip_result = self.context_snipper.snip(
                     session_state.messages,
                     preserve_messages=self.runtime_config.compact_preserve_messages,
                     tools=openai_tools,
@@ -280,7 +281,7 @@ class LocalCodingAgent:
                         'tokens_removed': snip_result.tokens_removed,
                     })
                     # 重新计算，token_budget event 反映 snip 后的状态
-                    snapshot = check_token_budget(
+                    snapshot = self.budget_evaluator.evaluate(
                         messages=session_state.to_messages(),
                         tools=openai_tools,
                         max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
@@ -295,14 +296,13 @@ class LocalCodingAgent:
             )
 
             if (
-                should_auto_compact(
+                self.context_compactor.should_auto_compact(
                     snapshot.projected_input_tokens,
                     self.runtime_config.auto_compact_threshold_tokens,
                 )
                 and pre_model_stop is None
             ):
-                compact_result = compact_conversation(
-                    self.client,
+                compact_result = self.context_compactor.compact(
                     session_state.messages,
                     preserve_messages=self.runtime_config.compact_preserve_messages,
                 )
@@ -310,7 +310,7 @@ class LocalCodingAgent:
                     model_call_count += 1
                     usage_delta = usage_delta + compact_result.usage
                     events.append(self._make_compact_event(turn_index, 'auto', compact_result))
-                    snapshot = check_token_budget(
+                    snapshot = self.budget_evaluator.evaluate(
                         messages=session_state.to_messages(),
                         tools=openai_tools,
                         max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
@@ -514,7 +514,7 @@ class LocalCodingAgent:
                 return response, current_usage, current_model_call_count, None
             except OpenAIClientError as exc:
                 current_error = exc
-                if not is_context_length_error(exc) or attempt >= _MAX_REACTIVE_COMPACT_RETRIES:
+                if not self.context_compactor.is_context_length_error(exc) or attempt >= _MAX_REACTIVE_COMPACT_RETRIES:
                     break
 
                 attempt += 1
@@ -522,8 +522,7 @@ class LocalCodingAgent:
                     1,
                     self.runtime_config.compact_preserve_messages - (attempt - 1),
                 )
-                compact_result = compact_conversation(
-                    self.client,
+                compact_result = self.context_compactor.compact(
                     session_state.messages,
                     preserve_messages=preserve_messages,
                 )
@@ -550,7 +549,7 @@ class LocalCodingAgent:
                 events.append(self._make_compact_event(turn_index, 'reactive', compact_result, attempt=attempt))
                 events.append(retry_event)
 
-                snapshot = check_token_budget(
+                snapshot = self.budget_evaluator.evaluate(
                     messages=session_state.to_messages(),
                     tools=openai_tools,
                     max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
@@ -571,7 +570,7 @@ class LocalCodingAgent:
     def _make_compact_event(
         turn_index: int,
         trigger: str,
-        result: CompactResult,
+        result: CompactionResult,
         *,
         attempt: int | None = None,
     ) -> JSONDict:

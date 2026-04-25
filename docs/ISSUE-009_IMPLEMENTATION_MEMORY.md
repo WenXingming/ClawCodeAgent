@@ -5,7 +5,7 @@
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
 | `src/context/__init__.py` | 新建 | 建立 context 子包统一导出入口 |
-| `src/context/token_budget.py` | 新建 | `TokenBudgetSnapshot` + token 预检与估算函数 |
+| `src/context/context_budget.py` | 新建 | `TokenBudgetSnapshot`、`ContextTokenEstimator` 与 `ContextBudgetEvaluator` |
 | `src/context/budget_guard.py` | 新建 | `BudgetGuard` 五维预算闸门与私有 `_check_*` 子方法 |
 | `src/runtime/agent_runtime.py` | 修改 | `_execute_loop` 接入 token / cost / tool_calls / model_calls / session_turns 闸门 |
 | `test/context/test_token_budget.py` | 新建 | 15 个 token 估算与预算快照单测 |
@@ -15,7 +15,7 @@
 ## 关键设计决策
 
 ### 1. token 估算采用 char/4 启发式
-`token_budget.py` 采用 `1 token ≈ 4 chars` 的近似规则；每条消息额外计入结构开销，
+`context_budget.py` 采用 `1 token ≈ 4 chars` 的近似规则；每条消息额外计入结构开销，
 工具 schema 先序列化再估算。这样可在不引入真实 tokenizer 依赖的前提下，稳定完成调用前预检。
 
 ### 2. 明确区分软超限与硬超限

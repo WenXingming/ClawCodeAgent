@@ -51,7 +51,7 @@
 1. 入口层：`src/main.py`
 2. 核心编排层：`src/runtime/agent_runtime.py` 的 `LocalCodingAgent`
 3. 工具执行层：`src/tools/agent_tools.py` + `src/tools/bash_security.py`
-4. 上下文治理层：`src/context/`（`token_budget.py` / `budget_guard.py` / `snip.py` / `compact.py`）
+4. 上下文治理层：`src/context/`（`context_budget.py` / `budget_guard.py` / `context_snipper.py` / `context_compactor.py`）
 5. 状态与持久化层：`src/session/session_state.py` + `src/session/session_snapshot.py` + `src/session/session_store.py`
 6. 模型接入层：`src/openai_client/openai_client.py`
 7. 共享契约层：`src/core_contracts/`
@@ -598,7 +598,7 @@
 
 **实施决策（已落地）**
 
-- 新建 `src/context/` 子包，导出 `TokenBudgetSnapshot, check_token_budget`，与 `src/session/` 包风格一致；ISSUE-010/011 的 snip/compact 公共接口也将在此导出。
+- 新建 `src/context/` 子包，导出 `TokenBudgetSnapshot, ContextTokenEstimator, ContextBudgetEvaluator`，并统一从包级导出 `ContextSnipper` 与 `ContextCompactor` 等上下文治理对象。
 - token 估算使用 **char/4 启发式**（1 token ≈ 4 chars），每条消息加 4 token 结构开销，工具 schema 序列化后按 char/4 计；如需精确计数可替换内部实现，公共接口不变。
 - 常量：`OUTPUT_RESERVE_TOKENS=4096`（输出预留），`SOFT_BUFFER_TOKENS=13000`（auto-compact 触发缓冲）。
 - 硬超限 `is_hard_over`：`projected > hard_limit - output_reserve` → `stop_reason='token_limit'`。
@@ -640,8 +640,8 @@
 
 **实施决策（已落地）**
 
-- `src/context/snip.py` 提供 `SnipResult` 与 `snip_session(messages, *)`；接口直接接收裸 `list[JSONDict]` 并就地修改，不依赖 `AgentSessionState` 容器。
-- 触发条件固定为 `check_token_budget(...).is_soft_over`；snip 发生在 turn loop 每轮 token preflight 之后、`token_budget` event 记录之前。
+- `src/context/context_snipper.py` 提供 `ContextSnipper` 与 `SnipResult`；公开入口为 `ContextSnipper.snip(messages, *)`，接口直接接收裸 `list[JSONDict]` 并就地修改，不依赖 `AgentSessionState` 容器。
+- 触发条件固定为 `ContextBudgetEvaluator.evaluate(...).is_soft_over`；snip 发生在 turn loop 每轮 token preflight 之后、`token_budget` event 记录之前。
 - 保留区间固定为“前缀连续 `system` 消息 + 尾部 `compact_preserve_messages` 条最近消息”；仅中间段候选允许被替换。
 - 可 snip 候选限定为：`role='tool'`、带 `tool_calls` 的 assistant 消息、或 `content` 长度超过 300 字符的 assistant 消息；已是 tombstone 的消息通过 `<system-reminder>\nOlder ` 前缀识别并跳过。
 - tombstone 内容统一写成 `<system-reminder>` 摘要块，仅替换 `content`；同时保留 `role / tool_call_id / name / tool_calls` 等协议字段，避免工具调用链断裂。
@@ -661,7 +661,7 @@
 
 实施步骤：
 
-1. 实现 compact_conversation。
+1. 实现 `ContextCompactor.compact()`。
 2. 主循环接入 auto compact。
 3. backend prompt-too-long 触发 reactive compact retry。
 
@@ -677,7 +677,7 @@
 
 **实施决策（已落地）**
 
-- 新建 `src/context/compact.py`，导出 `CompactResult / compact_conversation / is_context_length_error / should_auto_compact`；与 `snip.py` 并列作为 context 子包的第二层治理能力。
+- 新建 `src/context/context_compactor.py`，导出 `CompactionResult / ContextCompactor`；`compact()`、`is_context_length_error()` 与 `should_auto_compact()` 统一收敛到 compactor 对象上，作为 context 子包的第二层治理能力。
 - auto compact 触发条件采用 `AgentRuntimeConfig.auto_compact_threshold_tokens`，**不复用** `is_soft_over`；`is_soft_over` 继续仅作为 ISSUE-010 snip 的信号。
 - compact 的消息布局复用 snip 的保留规则：前缀连续 `system` 消息不参与压缩，尾部 `compact_preserve_messages` 条最近消息保留，仅中间段被替换为 `compact boundary + compact summary` 两条 system reminder。
 - compact 摘要调用显式禁用工具（`tools=[]`），只要求模型输出纯文本摘要；compact 写回消息只保留标准 OpenAI message 字段，不向模型发送自定义 metadata。
@@ -718,7 +718,7 @@
 - 新增 `src/agent_slash_commands.py`，集中承载 slash parse、命令规格注册和六个高频本地命令。
 - slash 分流发生在 `LocalCodingAgent.run/resume` 把 prompt 写入 `AgentSessionState` 之前，从根上保证本地命令不污染 `messages` 与 `transcript`。
 - 本地 slash 命令统一返回 `stop_reason='slash_command'`，并写入 `slash_command` event；只记录 event，不写入 transcript。
-- `/context` 复用 `check_token_budget(messages, tools, max_input_tokens)` 做本地上下文投影，展示当前 messages、transcript、tool_calls 与 projected tokens。
+- `/context` 复用 `ContextBudgetEvaluator.evaluate(messages, tools, max_input_tokens)` 做本地上下文投影，展示当前 messages、transcript、tool_calls 与 projected tokens。
 - `/clear` 采用 fork 语义：不覆盖旧 session 文件，而是生成新的 cleared `session_id` 并保存空会话快照；输出中同时提示旧 session_id 与新 session_id。
 - 首版不改 `src/main.py` 参数面；slash 命令仍通过现有 `prompt` 入口传入，ISSUE-013 再处理 CLI 子命令扩展。
 - 测试面拆为 `test/runtime/test_agent_slash_commands.py` 单测与 `test/runtime/test_agent_runtime.py` 集成测试，覆盖 `/help`、`/status`、`/clear` 的 no-model-call 路径。

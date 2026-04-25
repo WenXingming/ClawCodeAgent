@@ -58,9 +58,9 @@ graph TB
     subgraph ContextPkg [context package]
         direction TB
         n_budget_guard(["🛡️ budget_guard.py"])
-        n_snip(["✂️ snip.py"])
-        n_compact(["🗜️ compact.py"])
-        n_token_budget(["🔢 token_budget.py"])
+        n_snip(["✂️ context_snipper.py"])
+        n_compact(["🗜️ context_compactor.py"])
+        n_token_budget(["🔢 context_budget.py"])
         style ContextPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -155,7 +155,7 @@ graph TB
 
 - `core_contracts/` 已经成为共享底座，跨模块 dataclass、JSON 协议和配置解析都从这里下沉出去。
 - `openai_client/` 现在是源码根下的命名空间目录，不再依赖 `__init__.py`；具体 HTTP 与 SSE 解析仍然集中在 `openai_client/openai_client.py`。
-- `context/compact.py` 是少数刻意允许跨层调用客户端的模块，因为它需要主动发起摘要压缩模型请求。
+- `context/context_compactor.py` 是少数刻意允许跨层调用客户端的模块，因为它需要主动发起摘要压缩模型请求。
 - `main.py` 现在只是极薄的进程入口；真正的 CLI 子命令、chat loop 和控制面装配都下沉到了 `control_plane/cli.py`。
 - `control_plane/slash_commands.py` 作为本地控制面，挂在 `runtime/agent_runtime.py` 前面做 prompt 预分流；它读取 session、tool registry 与 token 预算投影，但不会触发模型调用。
 

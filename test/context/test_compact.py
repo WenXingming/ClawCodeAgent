@@ -1,17 +1,10 @@
-"""ISSUE-011 compact 单元测试。"""
+"""ISSUE-011 ContextCompactor 单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
-from context.compact import (
-    apply_compact_summary,
-    build_compact_request_messages,
-    compact_conversation,
-    format_compact_summary,
-    is_context_length_error,
-    should_auto_compact,
-)
+from context.context_compactor import ContextCompactor
 from core_contracts.config import ModelConfig
 from core_contracts.protocol import OneTurnResponse
 from core_contracts.usage import TokenUsage
@@ -47,20 +40,25 @@ class _FakeCompactClient(OpenAIClient):
         return current
 
 
+def _compactor(client: OpenAIClient | None = None) -> ContextCompactor:
+    return ContextCompactor(client or _FakeCompactClient([]))
+
+
 class CompactThresholdTests(unittest.TestCase):
     def test_threshold_none_disables_auto_compact(self) -> None:
-        self.assertFalse(should_auto_compact(100, None))
+        self.assertFalse(_compactor().should_auto_compact(100, None))
 
     def test_threshold_triggers_at_or_above_limit(self) -> None:
-        self.assertTrue(should_auto_compact(100, 100))
-        self.assertTrue(should_auto_compact(101, 100))
-        self.assertFalse(should_auto_compact(99, 100))
+        compactor = _compactor()
+        self.assertTrue(compactor.should_auto_compact(100, 100))
+        self.assertTrue(compactor.should_auto_compact(101, 100))
+        self.assertFalse(compactor.should_auto_compact(99, 100))
 
 
 class ContextLengthErrorTests(unittest.TestCase):
     def test_http_413_is_always_context_length_error(self) -> None:
         exc = OpenAIResponseError('HTTP 413 from model backend', status_code=413, detail='too large')
-        self.assertTrue(is_context_length_error(exc))
+        self.assertTrue(_compactor().is_context_length_error(exc))
 
     def test_keyword_based_context_length_error_detection(self) -> None:
         exc = OpenAIResponseError(
@@ -68,44 +66,61 @@ class ContextLengthErrorTests(unittest.TestCase):
             status_code=400,
             detail='maximum context length exceeded',
         )
-        self.assertTrue(is_context_length_error(exc))
+        self.assertTrue(_compactor().is_context_length_error(exc))
 
     def test_non_context_error_is_not_detected(self) -> None:
-        self.assertFalse(is_context_length_error(OpenAIConnectionError('network down')))
+        self.assertFalse(_compactor().is_context_length_error(OpenAIConnectionError('network down')))
 
 
-class CompactPromptTests(unittest.TestCase):
-    def test_build_compact_request_excludes_preserved_tail(self) -> None:
+class CompactWorkflowTests(unittest.TestCase):
+    def test_compact_request_excludes_preserved_tail(self) -> None:
         messages = [
             {'role': 'system', 'content': 'rule'},
             {'role': 'user', 'content': 'old request'},
             {'role': 'assistant', 'content': 'old answer'},
             {'role': 'user', 'content': 'latest request'},
         ]
+        client = _FakeCompactClient([
+            OneTurnResponse(content='Summary', finish_reason='stop', usage=TokenUsage())
+        ])
 
-        request_messages = build_compact_request_messages(messages, preserve_messages=1)
+        result = ContextCompactor(client).compact(messages, preserve_messages=1)
 
-        self.assertIsNotNone(request_messages)
-        assert request_messages is not None
+        self.assertTrue(result.compacted)
+        request_messages = client.calls[0]['messages']
         self.assertEqual(len(request_messages), 2)
         self.assertIn('old request', request_messages[1]['content'])
         self.assertIn('old answer', request_messages[1]['content'])
         self.assertNotIn('latest request', request_messages[1]['content'])
 
-    def test_format_compact_summary_collapses_excess_blank_lines(self) -> None:
-        self.assertEqual(format_compact_summary('A\n\n\nB\n'), 'A\n\nB')
-
-
-class ApplyCompactSummaryTests(unittest.TestCase):
-    def test_apply_compact_summary_preserves_prefix_and_tail(self) -> None:
+    def test_compact_collapses_excess_blank_lines_in_summary(self) -> None:
         messages = [
             {'role': 'system', 'content': 'rule'},
             {'role': 'user', 'content': 'old request'},
             {'role': 'assistant', 'content': 'old answer'},
             {'role': 'user', 'content': 'latest request'},
         ]
+        client = _FakeCompactClient([
+            OneTurnResponse(content='A\n\n\nB\n', finish_reason='stop', usage=TokenUsage())
+        ])
 
-        result = apply_compact_summary(messages, 'Goal: continue work', preserve_messages=1)
+        result = ContextCompactor(client).compact(messages, preserve_messages=1)
+
+        self.assertEqual(result.summary_text, 'A\n\nB')
+        self.assertIn('A\n\nB', messages[2]['content'])
+
+    def test_compact_preserves_prefix_and_tail(self) -> None:
+        messages = [
+            {'role': 'system', 'content': 'rule'},
+            {'role': 'user', 'content': 'old request'},
+            {'role': 'assistant', 'content': 'old answer'},
+            {'role': 'user', 'content': 'latest request'},
+        ]
+        client = _FakeCompactClient([
+            OneTurnResponse(content='Goal: continue work', finish_reason='stop', usage=TokenUsage())
+        ])
+
+        result = ContextCompactor(client).compact(messages, preserve_messages=1)
 
         self.assertTrue(result.compacted)
         self.assertEqual(messages[0]['content'], 'rule')
@@ -114,15 +129,15 @@ class ApplyCompactSummaryTests(unittest.TestCase):
         self.assertEqual(messages[-1]['content'], 'latest request')
         self.assertGreaterEqual(result.tokens_removed, 0)
 
-    def test_apply_compact_summary_requires_middle_slice(self) -> None:
+    def test_compact_requires_middle_slice(self) -> None:
         messages = [{'role': 'user', 'content': 'latest request'}]
-        result = apply_compact_summary(messages, 'Goal', preserve_messages=1)
+        result = _compactor().compact(messages, preserve_messages=1)
         self.assertFalse(result.compacted)
         self.assertEqual(result.error, 'Not enough messages to compact')
 
 
 class CompactConversationTests(unittest.TestCase):
-    def test_compact_conversation_rewrites_messages_and_tracks_usage(self) -> None:
+    def test_compact_rewrites_messages_and_tracks_usage(self) -> None:
         messages = [
             {'role': 'user', 'content': 'old request'},
             {'role': 'assistant', 'content': 'old answer'},
@@ -137,7 +152,7 @@ class CompactConversationTests(unittest.TestCase):
             )
         ])
 
-        result = compact_conversation(client, messages, preserve_messages=1)
+        result = ContextCompactor(client).compact(messages, preserve_messages=1)
 
         self.assertTrue(result.compacted)
         self.assertEqual(result.usage.input_tokens, 7)
@@ -145,7 +160,7 @@ class CompactConversationTests(unittest.TestCase):
         self.assertEqual(messages[-1]['content'], 'latest request')
         self.assertIn('User goal: fix file', messages[1]['content'])
 
-    def test_compact_conversation_returns_error_on_empty_summary(self) -> None:
+    def test_compact_returns_error_on_empty_summary(self) -> None:
         messages = [
             {'role': 'user', 'content': 'old request'},
             {'role': 'assistant', 'content': 'old answer'},
@@ -155,7 +170,7 @@ class CompactConversationTests(unittest.TestCase):
             OneTurnResponse(content='  ', finish_reason='stop', usage=TokenUsage(input_tokens=2, output_tokens=1))
         ])
 
-        result = compact_conversation(client, messages, preserve_messages=1)
+        result = ContextCompactor(client).compact(messages, preserve_messages=1)
 
         self.assertFalse(result.compacted)
         self.assertEqual(result.error, 'Compact model returned empty summary')

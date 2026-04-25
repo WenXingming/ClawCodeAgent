@@ -1,27 +1,29 @@
-"""ISSUE-009 单元测试：TokenBudgetSnapshot 与 check_token_budget。"""
+"""ISSUE-009 单元测试：ContextTokenEstimator 与 ContextBudgetEvaluator。"""
 
 from __future__ import annotations
 
 import unittest
 
-from context.token_budget import (
+from context.context_budget import (
+    ContextBudgetEvaluator,
+    ContextTokenEstimator,
     OUTPUT_RESERVE_TOKENS,
     SOFT_BUFFER_TOKENS,
     TokenBudgetSnapshot,
-    check_token_budget,
-    estimate_message_tokens,
-    estimate_messages_tokens,
-    estimate_tools_tokens,
 )
 
 
+ESTIMATOR = ContextTokenEstimator()
+EVALUATOR = ContextBudgetEvaluator(token_estimator=ESTIMATOR)
+
+
 class EstimateMessageTokensTests(unittest.TestCase):
-    """estimate_message_tokens 的覆盖测试。"""
+    """ContextTokenEstimator.estimate_message 的覆盖测试。"""
 
     def test_empty_message_returns_overhead_only(self) -> None:
         """空 content 消息只返回结构开销（role + _MSG_OVERHEAD）。"""
         msg = {'role': 'user', 'content': ''}
-        tokens = estimate_message_tokens(msg)
+        tokens = ESTIMATOR.estimate_message(msg)
         # role='user'(4chars→1token) + content=0 + MSG_OVERHEAD=4 → 至少 5
         self.assertGreaterEqual(tokens, 5)
 
@@ -30,8 +32,8 @@ class EstimateMessageTokensTests(unittest.TestCase):
         short_msg = {'role': 'user', 'content': 'hi'}
         long_msg = {'role': 'user', 'content': 'hi' * 100}
         self.assertLess(
-            estimate_message_tokens(short_msg),
-            estimate_message_tokens(long_msg),
+            ESTIMATOR.estimate_message(short_msg),
+            ESTIMATOR.estimate_message(long_msg),
         )
 
     def test_multimodal_list_content_estimated(self) -> None:
@@ -43,29 +45,28 @@ class EstimateMessageTokensTests(unittest.TestCase):
                 {'type': 'image_url', 'image_url': {'url': 'http://example.com/img.png'}},
             ],
         }
-        tokens = estimate_message_tokens(msg)
+        tokens = ESTIMATOR.estimate_message(msg)
         self.assertGreater(tokens, 5)
 
     def test_non_string_content_falls_back_to_json(self) -> None:
         """非 str/list content 通过 json 序列化兜底估算，结果正整数。"""
         msg = {'role': 'user', 'content': {'nested': 'object'}}
-        tokens = estimate_message_tokens(msg)
+        tokens = ESTIMATOR.estimate_message(msg)
         self.assertGreater(tokens, 0)
 
 
 class EstimateMessagesTokensTests(unittest.TestCase):
-    """estimate_messages_tokens 的覆盖测试。"""
+    """ContextTokenEstimator.estimate_messages 的覆盖测试。"""
 
     def test_empty_list_returns_base_overhead(self) -> None:
-        """空列表只有基础 _CHAT_BASE 开销。"""
-        from context.token_budget import _CHAT_BASE
-        tokens = estimate_messages_tokens([])
-        self.assertEqual(tokens, _CHAT_BASE)
+        """空列表只有基础 chat_base_tokens 开销。"""
+        tokens = ESTIMATOR.estimate_messages([])
+        self.assertEqual(tokens, ESTIMATOR.chat_base_tokens)
 
     def test_multiple_messages_accumulate(self) -> None:
         """多条消息的结果大于单条。"""
-        one = estimate_messages_tokens([{'role': 'user', 'content': 'hello'}])
-        two = estimate_messages_tokens([
+        one = ESTIMATOR.estimate_messages([{'role': 'user', 'content': 'hello'}])
+        two = ESTIMATOR.estimate_messages([
             {'role': 'user', 'content': 'hello'},
             {'role': 'assistant', 'content': 'world'},
         ])
@@ -73,25 +74,25 @@ class EstimateMessagesTokensTests(unittest.TestCase):
 
 
 class EstimateToolsTokensTests(unittest.TestCase):
-    """estimate_tools_tokens 的覆盖测试。"""
+    """ContextTokenEstimator.estimate_tools 的覆盖测试。"""
 
     def test_empty_tools_returns_zero(self) -> None:
-        self.assertEqual(estimate_tools_tokens([]), 0)
+        self.assertEqual(ESTIMATOR.estimate_tools([]), 0)
 
     def test_nonempty_tools_add_to_projection(self) -> None:
         tools = [{'name': 'read_file', 'description': 'read a file', 'parameters': {}}]
-        self.assertGreater(estimate_tools_tokens(tools), 0)
+        self.assertGreater(ESTIMATOR.estimate_tools(tools), 0)
 
 
 class CheckTokenBudgetTests(unittest.TestCase):
-    """check_token_budget 的核心行为测试。"""
+    """ContextBudgetEvaluator.evaluate 的核心行为测试。"""
 
     def _simple_messages(self) -> list[dict]:
         return [{'role': 'user', 'content': 'hello'}]
 
     def test_no_limit_never_hard_over(self) -> None:
         """无 max_input_tokens 限制时，is_hard_over 和 is_soft_over 永远为 False。"""
-        snapshot = check_token_budget(self._simple_messages(), max_input_tokens=None)
+        snapshot = EVALUATOR.evaluate(self._simple_messages(), max_input_tokens=None)
         self.assertFalse(snapshot.is_hard_over)
         self.assertFalse(snapshot.is_soft_over)
         self.assertIsNone(snapshot.hard_input_limit)
@@ -99,7 +100,7 @@ class CheckTokenBudgetTests(unittest.TestCase):
 
     def test_within_limit_not_over(self) -> None:
         """投影远小于限制时两个标志均为 False。"""
-        snapshot = check_token_budget(
+        snapshot = EVALUATOR.evaluate(
             self._simple_messages(),
             max_input_tokens=100_000,
         )
@@ -108,18 +109,18 @@ class CheckTokenBudgetTests(unittest.TestCase):
 
     def test_hard_overflow_when_projected_exceeds_usable(self) -> None:
         """极小限制（1 token）时 is_hard_over=True。"""
-        snapshot = check_token_budget(
+        snapshot = EVALUATOR.evaluate(
             self._simple_messages(),
             max_input_tokens=1,
-            output_reserve=0,
-            soft_buffer=0,
+            output_reserve_tokens=0,
+            soft_buffer_tokens=0,
         )
         self.assertTrue(snapshot.is_hard_over)
 
     def test_soft_over_when_approaching_limit(self) -> None:
         """投影超过 soft_limit 但未超过 hard_limit 时，is_soft_over=True，is_hard_over=False。"""
         messages = self._simple_messages()
-        projected = check_token_budget(messages, max_input_tokens=None).projected_input_tokens
+        projected = EVALUATOR.evaluate(messages, max_input_tokens=None).projected_input_tokens
         # hard_limit = projected + output_reserve + soft_buffer + 1  → 恰好不超 hard
         # soft_limit = projected + 1 - 1 = projected  → 恰好不超 soft ... 需要细调
         # 设 hard_limit = projected + OUTPUT_RESERVE_TOKENS + 1，soft_buffer 很大
@@ -141,11 +142,11 @@ class CheckTokenBudgetTests(unittest.TestCase):
         # usable = projected+5, is_hard_over: projected > projected+5 → False ✓
         # soft_limit = projected+5-10 = projected-5 → is_soft_over: projected > projected-5 → True ✓
         limit = projected + 5
-        snapshot = check_token_budget(
+        snapshot = EVALUATOR.evaluate(
             messages,
             max_input_tokens=limit,
-            output_reserve=0,
-            soft_buffer=10,
+            output_reserve_tokens=0,
+            soft_buffer_tokens=10,
         )
         self.assertFalse(snapshot.is_hard_over)
         self.assertTrue(snapshot.is_soft_over)
@@ -153,31 +154,30 @@ class CheckTokenBudgetTests(unittest.TestCase):
     def test_both_over_when_far_exceeds_limit(self) -> None:
         """极小限制时 is_hard_over 和 is_soft_over 均为 True。"""
         messages = [{'role': 'user', 'content': 'x' * 1000}]
-        snapshot = check_token_budget(
+        snapshot = EVALUATOR.evaluate(
             messages,
             max_input_tokens=10,
-            output_reserve=0,
-            soft_buffer=0,
+            output_reserve_tokens=0,
+            soft_buffer_tokens=0,
         )
         self.assertTrue(snapshot.is_hard_over)
         self.assertTrue(snapshot.is_soft_over)
 
     def test_projected_tokens_included_in_snapshot(self) -> None:
         """projected_input_tokens 应大于 0 且等于消息估算与工具估算之和。"""
-        from context.token_budget import estimate_messages_tokens, estimate_tools_tokens
         messages = self._simple_messages()
         tools = [{'name': 'read_file', 'description': 'read', 'parameters': {}}]
-        snapshot = check_token_budget(messages, tools=tools, max_input_tokens=None)
-        expected = estimate_messages_tokens(messages) + estimate_tools_tokens(tools)
+        snapshot = EVALUATOR.evaluate(messages, tools=tools, max_input_tokens=None)
+        expected = ESTIMATOR.estimate_messages(messages) + ESTIMATOR.estimate_tools(tools)
         self.assertEqual(snapshot.projected_input_tokens, expected)
 
     def test_soft_limit_minimum_is_zero(self) -> None:
         """soft_limit 不能为负数，最小为 0。"""
-        snapshot = check_token_budget(
+        snapshot = EVALUATOR.evaluate(
             self._simple_messages(),
             max_input_tokens=1,
-            output_reserve=100,
-            soft_buffer=100,
+            output_reserve_tokens=100,
+            soft_buffer_tokens=100,
         )
         self.assertIsNotNone(snapshot.soft_input_limit)
         self.assertGreaterEqual(snapshot.soft_input_limit, 0)

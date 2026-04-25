@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 
 from context.budget_guard import BudgetGuard
-from context.token_budget import TokenBudgetSnapshot
+from context.context_budget import TokenBudgetSnapshot
 from core_contracts.config import BudgetConfig
 from core_contracts.usage import ModelPricing, TokenUsage
 

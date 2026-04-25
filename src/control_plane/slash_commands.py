@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
-from context.token_budget import check_token_budget
+from context.context_budget import ContextBudgetEvaluator
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.protocol import JSONDict
 from session.session_state import AgentSessionState
@@ -48,6 +48,9 @@ class SlashCommandResult:
 
 
 SlashHandler = Callable[[SlashCommandContext, ParsedSlashCommand], SlashCommandResult]
+
+
+_BUDGET_EVALUATOR = ContextBudgetEvaluator()
 
 
 @dataclass(frozen=True)
@@ -139,7 +142,7 @@ def _handle_help(context: SlashCommandContext, parsed: ParsedSlashCommand) -> Sl
 
 def _handle_context(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
     openai_tools = _build_openai_tools(context.tool_registry)
-    snapshot = check_token_budget(
+    snapshot = _BUDGET_EVALUATOR.evaluate(
         messages=context.session_state.to_messages(),
         tools=openai_tools,
         max_input_tokens=context.runtime_config.budget_config.max_input_tokens,
