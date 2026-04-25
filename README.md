@@ -330,7 +330,63 @@ print(runtime.render_plan())
 
 说明：工作流运行记录会包含每一步的前后状态、是否成功和错误信息，因此失败流程也能在历史文件中被诊断。当前版本只做本地顺序执行，不包含分布式调度。
 
-## 13. 预算控制（BudgetConfig）
+## 13. 工作区 Search Runtime（ISSUE-020）
+
+当前版本支持从工作区和环境变量发现搜索 provider，切换当前 active provider，并通过真实 HTTP 后端执行结构化检索。
+
+发现与持久化路径：
+
+- `.claw/search.json`
+- `.claw/search/*.json`
+- `.claw/search_state.json`
+
+当前环境变量发现：
+
+- `SEARXNG_BASE_URL`
+- `CLAW_SEARCH_PROVIDER`（可选，用于指定默认 active provider）
+
+当前能力：
+
+- `list_providers` / `get_provider`：列出和读取已发现 provider profile。
+- `activate_provider`：切换 active provider，并把结果持久化到 `.claw/search_state.json`。
+- `search`：执行结构化检索，返回 provider、query、attempts 和结果列表。
+
+当前已接通后端：
+
+- `searxng`
+
+示例：
+
+```json
+{
+  "provider_id": "workspace-search",
+  "provider": "searxng",
+  "title": "Workspace Search",
+  "base_url": "http://127.0.0.1:8080",
+  "default_max_results": 5,
+  "description": "Local SearxNG provider for workspace search."
+}
+```
+
+代码示例：
+
+```python
+from pathlib import Path
+
+from runtime.search_runtime import SearchRuntime
+
+runtime = SearchRuntime.from_workspace(Path('.'))
+runtime.activate_provider('workspace-search')
+response = runtime.search('ClawCodeAgent runtime design', max_retries=1)
+
+print(response.provider.provider_id)
+print(response.attempts)
+print(response.results[0].title)
+```
+
+说明：当前版本不做多 provider 融合排序；查询失败时会按 `max_retries` 重试，重试耗尽后抛出带 `provider_id`、`attempts` 和错误文本的 `SearchQueryError`，便于上层做可控处理。
+
+## 14. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -365,13 +421,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 14. CLI 迁移说明
+## 15. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 15. 说明
+## 16. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：
