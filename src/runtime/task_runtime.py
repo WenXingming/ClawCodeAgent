@@ -161,6 +161,23 @@ class TaskRuntime:
         self._commit(tasks_by_id, task_order=self.task_order + (normalized_id,))
         return self.tasks_by_id[normalized_id]
 
+    def replace_tasks(self, tasks: tuple[TaskRecord, ...] | list[TaskRecord]) -> tuple[TaskRecord, ...]:
+        normalized_tasks: list[TaskRecord] = []
+        seen_ids: set[str] = set()
+        for task in tasks:
+            if not isinstance(task, TaskRecord):
+                raise ValueError('replace_tasks expects TaskRecord items')
+            if task.task_id in seen_ids:
+                raise ValueError(f'Duplicate task id in replace_tasks: {task.task_id!r}')
+            seen_ids.add(task.task_id)
+            normalized_tasks.append(task)
+
+        self._commit(
+            {item.task_id: item for item in normalized_tasks},
+            task_order=tuple(item.task_id for item in normalized_tasks),
+        )
+        return self.list_tasks()
+
     def update_task(
         self,
         task_id: str,

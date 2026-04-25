@@ -46,6 +46,7 @@ graph TB
         n_hook_policy_runtime(["🛡️ runtime/hook_policy_runtime.py"])
         n_plugin_runtime(["🧩 runtime/plugin_runtime.py"])
         n_task_runtime(["📋 runtime/task_runtime.py"])
+        n_plan_runtime(["🗺️ runtime/plan_runtime.py"])
         n_runtime(["⚙️ runtime/agent_runtime.py"])
         style Runtime fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
@@ -113,6 +114,7 @@ graph TB
     n_slash --> n_token_budget
 
     %% ================= 工具 =================
+    n_plan_runtime --> n_task_runtime
     n_hook_policy_runtime --> n_tools
     n_plugin_runtime --> n_tools
     n_tools --> n_bash_security
@@ -135,6 +137,7 @@ graph TB
     n_hook_policy_runtime -.-> n_core_contracts
     n_plugin_runtime -.-> n_core_contracts
     n_task_runtime -.-> n_core_contracts
+    n_plan_runtime -.-> n_core_contracts
     n_slash -.-> n_core_contracts
     n_tools -.-> n_core_contracts
     n_openai_client -.-> n_core_contracts
@@ -150,6 +153,7 @@ graph TB
     style n_hook_policy_runtime fill:#198754,color:#fff,stroke:#146c43
     style n_plugin_runtime fill:#0d6efd,color:#fff,stroke:#0a58ca
     style n_task_runtime fill:#20c997,color:#fff,stroke:#0f8f6b
+    style n_plan_runtime fill:#ff922b,color:#fff,stroke:#d97706
     style n_slash fill:#8a5cf6,color:#fff,stroke:#6f42c1
     style n_core_contracts fill:#6c757d,color:#fff,stroke:#495057
     style n_openai_client fill:#17a2b8,color:#fff,stroke:#117a8b
@@ -172,7 +176,8 @@ graph TB
 - `main.py` 现在只是极薄的进程入口；真正的 CLI 子命令、chat loop 和控制面装配都下沉到了 `control_plane/cli.py`。
 - `runtime/hook_policy_runtime.py` 在主循环启动前扫描工作区内的 `.claw/policies*.json` manifest，负责合并 deny 规则、safe env 与 budget override；在 tool loop 内还会提供 policy block 决策和 before/after hook 注入描述。
 - `runtime/plugin_runtime.py` 在主循环启动前扫描工作区内的 `.claw/plugins*.json` manifest，注册 alias/virtual tool，并产出可供 `/tools` 渲染的插件摘要；在 tool loop 内还可为插件提供 before/after hook 与 block 规则。
-- `runtime/task_runtime.py` 是独立的工作区本地任务状态机，负责 `.claw/tasks.json` 的持久化、合法状态流转、依赖阻塞/释放与 actionable next tasks 选择；它暂时不接入 agent 主循环，后续由 plan/workflow issue 消费。
+- `runtime/task_runtime.py` 是独立的工作区本地任务状态机，负责 `.claw/tasks.json` 的持久化、合法状态流转、依赖阻塞/释放与 actionable next tasks 选择；当前已作为 `plan_runtime` 的同步目标。
+- `runtime/plan_runtime.py` 负责 `.claw/plan.json` 的持久化、计划渲染，以及把 `PlanStep` 列表同步到 `TaskRuntime`；它不直接接入 agent 主循环，后续主要由 plan/workflow/control-plane issue 消费。
 - `control_plane/slash_commands.py` 作为本地控制面，挂在 `runtime/agent_runtime.py` 前面做 prompt 预分流；它读取 session、tool registry 与 token 预算投影，但不会触发模型调用。
 
 ## 推荐阅读顺序
@@ -180,6 +185,6 @@ graph TB
 1. 先看 `core_contracts/`，建立共享契约层与配置/协议对象的边界感。
 2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧两个外部交互面。
 3. 再看 `session/` 与 `context/`，理解状态恢复、预算治理、snip、compact 的局部职责。
-4. 再看 `runtime/task_runtime.py`、`runtime/hook_policy_runtime.py`、`runtime/plugin_runtime.py` 与 `runtime/agent_runtime.py`，理解工作区 task/policy/plugin 如何各自管理状态、预算、工具注册和 tool loop 行为。
+4. 再看 `runtime/task_runtime.py`、`runtime/plan_runtime.py`、`runtime/hook_policy_runtime.py`、`runtime/plugin_runtime.py` 与 `runtime/agent_runtime.py`，理解工作区 task/plan/policy/plugin 如何各自管理状态、同步关系、预算、工具注册和 tool loop 行为。
 5. 再看 `control_plane/slash_commands.py` 与 `control_plane/cli.py`，理解 CLI 子命令、chat loop 和本地控制面如何装配到 runtime 上。
 6. 最后看 `main.py`，确认顶层进程入口只是一个薄包装层。

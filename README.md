@@ -233,9 +233,53 @@ print([task.task_id for task in runtime.next_tasks()])
 # ['task-002']
 ```
 
-说明：每次变更操作都会自动写回 `.claw/tasks.json`。跨仓库任务同步和 plan-task 同步不在本期范围内，分别留给后续 ISSUE。
+说明：每次变更操作都会自动写回 `.claw/tasks.json`。当前版本已由 Plan Runtime 接入 plan-task 同步；跨仓库任务同步仍不在本期范围内。
 
-## 11. 预算控制（BudgetConfig）
+## 11. 工作区 Plan Runtime（ISSUE-018）
+
+当前版本支持从工作区加载本地计划运行时，用于维护 `PlanStep` 列表、渲染计划视图，并把计划步骤稳定同步到 Task Runtime。
+
+持久化路径：
+
+- `.claw/plan.json`
+
+当前能力：
+
+- `update_plan`：更新步骤列表，并可选择立即同步到任务列表。
+- `clear_plan`：清空计划，并可选择同时清理任务列表。
+- `sync_tasks`：把计划步骤映射为任务，更新依赖关系，并把任务状态回写到计划步骤状态。
+- `render_plan`：输出稳定的文本计划视图，便于 CLI 或后续控制面消费。
+
+状态集合：
+
+- `pending`
+- `in_progress`
+- `completed`
+- `blocked`
+- `cancelled`
+
+示例：
+
+```python
+from pathlib import Path
+
+from runtime.plan_runtime import PlanRuntime, PlanStep
+
+runtime = PlanRuntime.from_workspace(Path('.'))
+runtime.update_plan(
+  (
+    PlanStep(step_id='step-001', title='收集上下文'),
+    PlanStep(step_id='step-002', title='实现代码', dependencies=('step-001',)),
+  ),
+  sync_tasks=True,
+)
+
+print(runtime.render_plan())
+```
+
+说明：`sync_tasks()` 会把 `PlanStep.step_id` 映射为 `TaskRecord.task_id`，并保持依赖关系一致；若对应任务已存在，其执行状态会在同步后回写到计划步骤中。图形化计划编辑器和跨仓库同步仍不在本期范围内。
+
+## 12. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -270,13 +314,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 12. CLI 迁移说明
+## 13. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 13. 说明
+## 14. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：
