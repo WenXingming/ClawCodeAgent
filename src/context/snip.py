@@ -1,30 +1,8 @@
-"""ISSUE-010 Snip 上下文剪裁：就地替换旧消息内容为 tombstone 摘要。
+"""ISSUE-010 Snip 上下文剪裁：把旧消息原地替换为 tombstone 摘要。
 
-公共 API
---------
-    SnipResult   — 本次剪裁统计（不可变数据类）。
-    snip_session — 对 messages 列表就地剪裁，返回 SnipResult。
+本模块负责在 `is_soft_over=True` 时做轻量级上下文瘦身。它不会压缩语义，只会把可恢复的旧消息内容替换成短摘要，以降低 prompt 压力并尽量保持消息链结构不变。
 
-设计说明
---------
-snip 的目标是在 is_soft_over=True 时降低 prompt 压力，以便本轮模型调用
-仍能正常完成；它属于轻量处理，不压缩语义，只丢弃可恢复的"旧冗余内容"。
-
-剪裁范围（从旧到新，依次处理）：
-    跳过前缀 system 消息  — 由 _count_prefix() 计算
-    跳过尾部最近 N 条     — 由 preserve_messages 参数控制（对应 compact_preserve_messages）
-    中间段所有候选消息    — 由 _is_snippable() 判断
-
-候选规则（_is_snippable）：
-    role=tool                                 → 可剪（工具结果往往最长）
-    role=assistant 且 tool_calls 非空          → 可剪（仅保留 tool_calls，清空 content）
-    role=assistant 且 content 超过 300 字符   → 可剪（长输出，非关键的中间步骤）
-    已经是 tombstone                          → 不可剪（避免重复处理）
-    其余                                      → 不可剪
-
-Tombstone 格式（_make_tombstone）：
-    content 替换为 <system-reminder> 块；
-    role / tool_call_id / tool_calls 等协议字段保留，确保消息链完整。
+文件内定义按“公开入口优先，再顺着首次调用链往下读”的顺序组织，便于沿 `snip_session()` 这条主线理解剪裁范围与 tombstone 生成逻辑。
 """
 
 from __future__ import annotations
@@ -35,20 +13,11 @@ from typing import Any
 
 from .token_budget import estimate_message_tokens
 
-# ---------------------------------------------------------------------------
-# 常量
-# ---------------------------------------------------------------------------
-
 # assistant 消息内容超过此长度才列为剪裁候选。
 _LONG_ASSISTANT_THRESHOLD: int = 300
 
 # tombstone 摘要的最大预览字符数。
 _PREVIEW_MAX_CHARS: int = 120
-
-
-# ---------------------------------------------------------------------------
-# 公共数据类
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class SnipResult:
@@ -59,13 +28,8 @@ class SnipResult:
         tokens_removed:  估算节省的 token 数（原始消息 - tombstone 之差）。
     """
 
-    snipped_count: int
-    tokens_removed: int
-
-
-# ---------------------------------------------------------------------------
-# 公共函数
-# ---------------------------------------------------------------------------
+    snipped_count: int  # int：本次被 tombstone 替换掉的消息数量。
+    tokens_removed: int  # int：本次估算节省的 token 数。
 
 def snip_session(
     messages: list[dict[str, Any]],
@@ -77,13 +41,13 @@ def snip_session(
     """就地剪裁 messages，将候选旧消息替换为 tombstone，返回剪裁统计。
 
     Args:
-        messages:          AgentSessionState.messages 的直接引用（就地修改）。
-        preserve_messages: 尾部保留不剪裁的消息数量（对应 compact_preserve_messages）。
-        tools:             当前 openai tools 定义列表（保留参数，暂未使用）。
-        max_input_tokens:  最大输入 token 上限（保留参数，暂未使用）。
+        messages (list[dict[str, Any]]): `AgentSessionState.messages` 的直接引用，会被原地修改。
+        preserve_messages (int): 尾部保留不剪裁的消息数量。
+        tools (list[dict[str, Any]] | None): 当前 openai tools 定义列表；预留给未来策略扩展。
+        max_input_tokens (int | None): 最大输入 token 上限；预留给未来策略扩展。
 
     Returns:
-        SnipResult — 本次剪裁统计；snipped_count=0 表示无变化。
+        SnipResult: 本次剪裁统计；`snipped_count=0` 表示无变化。
     """
     prefix = _count_prefix(messages)
     total = len(messages)
@@ -108,13 +72,15 @@ def snip_session(
 
     return SnipResult(snipped_count=snipped_count, tokens_removed=tokens_removed)
 
-
-# ---------------------------------------------------------------------------
-# 私有辅助函数
-# ---------------------------------------------------------------------------
-
 def _count_prefix(messages: list[dict[str, Any]]) -> int:
-    """返回消息列表头部连续 system 消息的数量（不可剪裁的前缀）。"""
+    """返回头部连续 system 消息的数量。
+
+    Args:
+        messages (list[dict[str, Any]]): 当前会话消息列表。
+
+    Returns:
+        int: 不参与剪裁的前缀 system 消息数量。
+    """
     count = 0
     for msg in messages:
         if msg.get('role') == 'system':
@@ -127,8 +93,14 @@ def _count_prefix(messages: list[dict[str, Any]]) -> int:
 def _is_snippable(message: dict[str, Any]) -> bool:
     """判断消息是否为剪裁候选。
 
+    Args:
+        message (dict[str, Any]): 待判断的单条消息。
+
     tombstone 内容的特征是以 '<system-reminder>\\nOlder ' 开头，
     用来检测已被剪裁过的消息，避免重复处理。
+
+    Returns:
+        bool: 当前消息是否允许被替换为 tombstone。
     """
     # 已是 tombstone，跳过
     content = message.get('content', '')
@@ -153,10 +125,16 @@ def _is_snippable(message: dict[str, Any]) -> bool:
 
 
 def _make_tombstone(message: dict[str, Any]) -> dict[str, Any]:
-    """将消息替换为 tombstone，保留协议字段，生成摘要 content。
+    """为单条消息生成 tombstone 替代内容。
+
+    Args:
+        message (dict[str, Any]): 原始消息对象。
 
     保留字段：role, tool_call_id（tool 消息）, tool_calls（assistant 消息）
     替换字段：content → <system-reminder> 摘要块
+
+    Returns:
+        dict[str, Any]: 保留协议字段后的 tombstone 消息对象。
     """
     role = message.get('role', '')
     content = message.get('content', '')

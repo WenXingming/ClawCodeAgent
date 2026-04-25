@@ -13,7 +13,7 @@
 
 ### 已完成
 
-1. 新增 `src/session/session_contracts.py`：
+1. 新增 `src/session/session_snapshot.py`：
    - 定义 `AgentSessionSnapshot`
    - 复用现有 `ModelConfig` / `AgentRuntimeConfig` / `TokenUsage` 的 `to_dict()` / `from_dict()`
    - 支持 `schema_version` 与常见 camelCase 历史字段
@@ -31,7 +31,7 @@
    - CLI / runtime / tests 全部切换到实例方法
 5. 新增/扩展测试：
    - `test/session/test_session_store.py`
-   - `test/session/test_session_contracts.py`
+   - `test/session/test_session_snapshot.py`
    - `test/runtime/test_agent_runtime.py`
 
 ### 未实现（按计划故意延后）
@@ -51,7 +51,7 @@
 
 ## 4. 设计决策（简洁优先）
 
-1. 会话契约下沉到 `src/session/session_contracts.py`：
+1. 会话契约下沉到 `src/session/session_snapshot.py`：
    - `AgentSessionSnapshot` 与会话存储职责同域收拢，降低 `contract_types.py` 体积。
 2. `src/session/session_store.py` 保持薄 IO 层：
    - `directory` 作为实例状态挂在 `AgentSessionStore` 上。
@@ -83,14 +83,14 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-python -m unittest test.session.test_session_contracts test.core_contracts.test_core_contracts test.runtime.test_agent_runtime test.session.test_session_store -v
+python -m unittest test.session.test_session_snapshot test.core_contracts.test_core_contracts test.runtime.test_agent_runtime test.session.test_session_store -v
 python -m unittest test.openai_client.test_openai_client test.openai_client.test_openai_client_streaming -v
 python -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test.session.test_session_contracts + test.core_contracts.test_core_contracts + test.runtime.test_agent_runtime + test.session.test_session_store`：32/32 通过。
+1. `test.session.test_session_snapshot + test.core_contracts.test_core_contracts + test.runtime.test_agent_runtime + test.session.test_session_store`：32/32 通过。
 2. `test.openai_client.test_openai_client + test.openai_client.test_openai_client_streaming`：22/22 通过。
 3. 全量 `discover`：79/79 通过。
 

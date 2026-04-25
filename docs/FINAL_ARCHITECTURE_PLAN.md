@@ -52,7 +52,7 @@
 2. 核心编排层：`src/runtime/agent_runtime.py` 的 `LocalCodingAgent`
 3. 工具执行层：`src/tools/agent_tools.py` + `src/tools/bash_security.py`
 4. 上下文治理层：`src/context/`（`token_budget.py` / `budget_guard.py` / `snip.py` / `compact.py`）
-5. 状态与持久化层：`src/session/session_state.py` + `src/session/session_contracts.py` + `src/session/session_store.py`
+5. 状态与持久化层：`src/session/session_state.py` + `src/session/session_snapshot.py` + `src/session/session_store.py`
 6. 模型接入层：`src/openai_client/openai_client.py`
 7. 共享契约层：`src/core_contracts/`
 

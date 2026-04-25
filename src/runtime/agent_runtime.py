@@ -32,7 +32,7 @@ from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
-from session.session_contracts import AgentSessionSnapshot
+from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
 from tools.agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
@@ -52,11 +52,11 @@ class LocalCodingAgent:
 
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务（新会话）。"""
-        session = AgentSessionState()
+        session_state = AgentSessionState()
         session_id = uuid4().hex
         local_result = self._prepare_prompt(
             prompt=prompt,
-            session=session,
+            session_state=session_state,
             session_id=session_id,
             turns_offset=0,
             usage_baseline=TokenUsage(),
@@ -65,7 +65,7 @@ class LocalCodingAgent:
         if local_result is not None:
             return local_result
         return self._execute_loop(
-            session=session,
+            session_state=session_state,
             session_id=session_id,
             turns_offset=0,
             usage_baseline=TokenUsage(),
@@ -80,14 +80,14 @@ class LocalCodingAgent:
         cost = 历史成本 + 本次 delta 成本；
         session_id 保持不变。
         """
-        session = AgentSessionState.from_persisted(
+        session_state = AgentSessionState.from_persisted(
             messages=list(session_snapshot.messages),
             transcript=list(session_snapshot.transcript),
             tool_call_count=session_snapshot.tool_calls,
         )
         local_result = self._prepare_prompt(
             prompt=prompt,
-            session=session,
+            session_state=session_state,
             session_id=session_snapshot.session_id,
             turns_offset=session_snapshot.turns,
             usage_baseline=session_snapshot.usage,
@@ -96,7 +96,7 @@ class LocalCodingAgent:
         if local_result is not None:
             return local_result
         return self._execute_loop(
-            session=session,
+            session_state=session_state,
             session_id=session_snapshot.session_id,
             turns_offset=session_snapshot.turns,
             usage_baseline=session_snapshot.usage,
@@ -107,16 +107,16 @@ class LocalCodingAgent:
         self,
         *,
         prompt: str,
-        session: AgentSessionState,
+        session_state: AgentSessionState,
         session_id: str,
         turns_offset: int,
         usage_baseline: TokenUsage,
         cost_baseline: float,
     ) -> AgentRunResult | None:
-        """在 prompt 写入 session 前执行 slash 分流。"""
+        """在 prompt 写入 session_state 前执行 slash 分流。"""
         slash_result = dispatch_slash_command(
             SlashCommandContext(
-                session=session,
+                session_state=session_state,
                 session_id=session_id,
                 turns_offset=turns_offset,
                 runtime_config=self.runtime_config,
@@ -127,16 +127,16 @@ class LocalCodingAgent:
         )
 
         if not slash_result.handled:
-            session.append_user(slash_result.prompt or prompt)
+            session_state.append_user(slash_result.prompt or prompt)
             return None
 
         if slash_result.continue_query:
-            session.append_user(slash_result.prompt or prompt)
+            session_state.append_user(slash_result.prompt or prompt)
             return None
 
         return self._build_slash_result(
             slash_result,
-            session=session,
+            session_state=session_state,
             session_id=session_id,
             turns_offset=turns_offset,
             usage_baseline=usage_baseline,
@@ -147,14 +147,14 @@ class LocalCodingAgent:
         self,
         slash_result: SlashCommandResult,
         *,
-        session: AgentSessionState,
+        session_state: AgentSessionState,
         session_id: str,
         turns_offset: int,
         usage_baseline: TokenUsage,
         cost_baseline: float,
     ) -> AgentRunResult:
         """构造本地 slash 命令结果并落盘。"""
-        effective_session = slash_result.replacement_session or session
+        effective_session_state = slash_result.replacement_session_state or session_state
         effective_session_id = uuid4().hex if slash_result.fork_session else session_id
 
         if slash_result.fork_session:
@@ -175,7 +175,7 @@ class LocalCodingAgent:
         )
         return self._build_run_result(
             session_id=effective_session_id,
-            session=effective_session,
+            session_state=effective_session_state,
             final_output=self._format_slash_output(
                 slash_result,
                 session_id_before=session_id,
@@ -227,7 +227,7 @@ class LocalCodingAgent:
     def _execute_loop(
         self,
         *,
-        session: AgentSessionState,
+        session_state: AgentSessionState,
         session_id: str,
         turns_offset: int,
         usage_baseline: TokenUsage,
@@ -259,7 +259,7 @@ class LocalCodingAgent:
             # token preflight
             openai_tools = self._build_openai_tools()
             snapshot = check_token_budget(
-                messages=session.to_messages(),
+                messages=session_state.to_messages(),
                 tools=openai_tools,
                 max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
             )
@@ -267,7 +267,7 @@ class LocalCodingAgent:
             # ISSUE-010 snip：soft_over 时就地剪裁旧消息，降低 prompt 压力
             if snapshot.is_soft_over:
                 snip_result = snip_session(
-                    session.messages,
+                    session_state.messages,
                     preserve_messages=self.runtime_config.compact_preserve_messages,
                     tools=openai_tools,
                     max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
@@ -281,7 +281,7 @@ class LocalCodingAgent:
                     })
                     # 重新计算，token_budget event 反映 snip 后的状态
                     snapshot = check_token_budget(
-                        messages=session.to_messages(),
+                        messages=session_state.to_messages(),
                         tools=openai_tools,
                         max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
                     )
@@ -303,7 +303,7 @@ class LocalCodingAgent:
             ):
                 compact_result = compact_conversation(
                     self.client,
-                    session.messages,
+                    session_state.messages,
                     preserve_messages=self.runtime_config.compact_preserve_messages,
                 )
                 if compact_result.compacted:
@@ -311,7 +311,7 @@ class LocalCodingAgent:
                     usage_delta = usage_delta + compact_result.usage
                     events.append(self._make_compact_event(turn_index, 'auto', compact_result))
                     snapshot = check_token_budget(
-                        messages=session.to_messages(),
+                        messages=session_state.to_messages(),
                         tools=openai_tools,
                         max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
                     )
@@ -344,14 +344,14 @@ class LocalCodingAgent:
             if pre_model_stop is not None:
                 return self._early_stop(
                     pre_model_stop,
-                    session_id=session_id, session=session, final_output=final_output,
+                    session_id=session_id, session_state=session_state, final_output=final_output,
                     turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
                     usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
                     turn_index=turn_index, events=events,
                 )
 
             response = self._complete_with_reactive_compact(
-                session=session,
+                session_state=session_state,
                 openai_tools=openai_tools,
                 turn_index=turn_index,
                 events=events,
@@ -365,7 +365,7 @@ class LocalCodingAgent:
             if reactive_stop is not None:
                 return self._early_stop(
                     reactive_stop,
-                    session_id=session_id, session=session, final_output=final_output,
+                    session_id=session_id, session_state=session_state, final_output=final_output,
                     turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
                     usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
                     turn_index=turn_index, events=events,
@@ -374,7 +374,7 @@ class LocalCodingAgent:
                 stop_reason = 'backend_error'
                 return self._build_run_result(
                     session_id=session_id,
-                    session=session,
+                    session_state=session_state,
                     final_output=final_output,
                     turns_total=turns_offset + turns_this_run,
                     usage_delta=usage_delta,
@@ -384,7 +384,7 @@ class LocalCodingAgent:
                     events=events,
                 )
 
-            session.append_assistant_turn(response)
+            session_state.append_assistant_turn(response)
             if response.content:
                 final_output = response.content
 
@@ -400,7 +400,7 @@ class LocalCodingAgent:
                 stop_reason = response.finish_reason or 'completed'
                 return self._build_run_result(
                     session_id=session_id,
-                    session=session,
+                    session_state=session_state,
                     final_output=final_output,
                     turns_total=turns_offset + turns_this_run,
                     usage_delta=usage_delta,
@@ -418,7 +418,7 @@ class LocalCodingAgent:
                     tool_call.arguments,
                     tool_context,
                 )
-                session.append_tool_result(tool_call, tool_result)
+                session_state.append_tool_result(tool_call, tool_result)
                 events.append({
                     'type': 'tool_result',
                     'turn': turn_index,
@@ -429,10 +429,10 @@ class LocalCodingAgent:
                 })
 
                 # 工具执行后预算检查
-                if stop := guard.check_post_tool(session.tool_call_count):
+                if stop := guard.check_post_tool(session_state.tool_call_count):
                     return self._early_stop(
                         stop,
-                        session_id=session_id, session=session, final_output=final_output,
+                        session_id=session_id, session_state=session_state, final_output=final_output,
                         turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
                         usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
                         turn_index=turn_index, events=events,
@@ -441,7 +441,7 @@ class LocalCodingAgent:
         # 达到最大轮数限制，返回结果
         return self._build_run_result(
             session_id=session_id,
-            session=session,
+            session_state=session_state,
             final_output=final_output,
             turns_total=turns_offset + turns_this_run,
             usage_delta=usage_delta,
@@ -456,7 +456,7 @@ class LocalCodingAgent:
         stop_reason: str,
         *,
         session_id: str,
-        session: AgentSessionState,
+        session_state: AgentSessionState,
         final_output: str,
         turns_total: int,
         usage_delta: TokenUsage,
@@ -473,7 +473,7 @@ class LocalCodingAgent:
         events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
         return self._build_run_result(
             session_id=session_id,
-            session=session,
+            session_state=session_state,
             final_output=final_output,
             turns_total=turns_total,
             usage_delta=usage_delta,
@@ -486,7 +486,7 @@ class LocalCodingAgent:
     def _complete_with_reactive_compact(
         self,
         *,
-        session: AgentSessionState,
+        session_state: AgentSessionState,
         openai_tools: list[JSONDict],
         turn_index: int,
         events: list[JSONDict],
@@ -505,7 +505,7 @@ class LocalCodingAgent:
         while True:
             try:
                 response = self.client.complete(
-                    messages=session.to_messages(),
+                    messages=session_state.to_messages(),
                     tools=openai_tools,
                     output_schema=self.runtime_config.output_schema,
                 )
@@ -524,7 +524,7 @@ class LocalCodingAgent:
                 )
                 compact_result = compact_conversation(
                     self.client,
-                    session.messages,
+                    session_state.messages,
                     preserve_messages=preserve_messages,
                 )
 
@@ -551,7 +551,7 @@ class LocalCodingAgent:
                 events.append(retry_event)
 
                 snapshot = check_token_budget(
-                    messages=session.to_messages(),
+                    messages=session_state.to_messages(),
                     tools=openai_tools,
                     max_input_tokens=self.runtime_config.budget_config.max_input_tokens,
                 )
@@ -597,7 +597,7 @@ class LocalCodingAgent:
         self,
         *,
         session_id: str,
-        session: AgentSessionState,
+        session_state: AgentSessionState,
         final_output: str,
         turns_total: int,
         usage_delta: TokenUsage,
@@ -611,7 +611,7 @@ class LocalCodingAgent:
         total_cost_usd = cost_baseline + estimate_cost_usd(usage_delta)，
         避免因历史计费策略变化导致重算偏差。
         """
-        transcript = session.transcript()
+        transcript = session_state.transcript()
         events_snapshot = tuple(dict(item) for item in events)
         delta_cost = self.client.model_config.pricing.estimate_cost_usd(usage_delta)
         total_cost_usd = cost_baseline + delta_cost
@@ -619,12 +619,12 @@ class LocalCodingAgent:
             session_id=session_id,
             model_config=self.client.model_config,
             runtime_config=self.runtime_config,
-            messages=tuple(session.to_messages()),
+            messages=tuple(session_state.to_messages()),
             transcript=transcript,
             events=events_snapshot,
             final_output=final_output,
             turns=turns_total,
-            tool_calls=session.tool_call_count,
+            tool_calls=session_state.tool_call_count,
             usage=usage_total,
             total_cost_usd=total_cost_usd,
             stop_reason=stop_reason,
@@ -633,7 +633,7 @@ class LocalCodingAgent:
         return AgentRunResult(
             final_output=final_output,
             turns=turns_total,
-            tool_calls=session.tool_call_count,
+            tool_calls=session_state.tool_call_count,
             transcript=transcript,
             events=events_snapshot,
             usage=usage_total,

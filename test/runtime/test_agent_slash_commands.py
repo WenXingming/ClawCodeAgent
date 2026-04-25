@@ -19,11 +19,11 @@ class SlashCommandModuleTests(unittest.TestCase):
     """验证 slash 解析与本地命令分发。"""
 
     def _make_context(self) -> SlashCommandContext:
-        session = AgentSessionState()
-        session.append_user('历史问题')
-        session.transcript_entries.append({'role': 'assistant', 'content': '历史回答'})
+        session_state = AgentSessionState()
+        session_state.append_user('历史问题')
+        session_state.transcript_entries.append({'role': 'assistant', 'content': '历史回答'})
         return SlashCommandContext(
-            session=session,
+            session_state=session_state,
             session_id='session-001',
             turns_offset=2,
             runtime_config=AgentRuntimeConfig(
@@ -72,9 +72,9 @@ class SlashCommandModuleTests(unittest.TestCase):
         self.assertTrue(result.handled)
         self.assertFalse(result.continue_query)
         self.assertTrue(result.fork_session)
-        self.assertIsNotNone(result.replacement_session)
-        self.assertEqual(result.replacement_session.messages, [])
-        self.assertEqual(result.replacement_session.transcript_entries, [])
+        self.assertIsNotNone(result.replacement_session_state)
+        self.assertEqual(result.replacement_session_state.messages, [])
+        self.assertEqual(result.replacement_session_state.transcript_entries, [])
         self.assertTrue(result.metadata.get('had_history'))
 
 

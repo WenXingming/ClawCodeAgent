@@ -1,4 +1,4 @@
-"""ISSUE-007 会话契约测试。"""
+"""ISSUE-007 会话快照契约测试。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.usage import TokenUsage
-from session.session_contracts import AgentSessionSnapshot
+from session.session_snapshot import AgentSessionSnapshot
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -26,7 +26,7 @@ class AgentSessionSnapshotTests(unittest.TestCase):
 
     def test_agent_session_snapshot_round_trip(self) -> None:
         workspace = _make_test_dir()
-        session = AgentSessionSnapshot(
+        session_snapshot = AgentSessionSnapshot(
             session_id='session-001',
             model_config=ModelConfig(model='demo-model'),
             runtime_config=AgentRuntimeConfig(cwd=workspace),
@@ -43,16 +43,16 @@ class AgentSessionSnapshotTests(unittest.TestCase):
             scratchpad_directory=str(workspace / 'scratchpad'),
         )
 
-        restored = AgentSessionSnapshot.from_dict(session.to_dict())
+        restored = AgentSessionSnapshot.from_dict(session_snapshot.to_dict())
 
-        self.assertEqual(restored.session_id, session.session_id)
-        self.assertEqual(restored.model_config, session.model_config)
-        self.assertEqual(restored.runtime_config.cwd, session.runtime_config.cwd.resolve())
-        self.assertEqual(restored.messages, session.messages)
-        self.assertEqual(restored.transcript, session.transcript)
-        self.assertEqual(restored.events, session.events)
-        self.assertEqual(restored.usage, session.usage)
-        self.assertEqual(restored.total_cost_usd, session.total_cost_usd)
+        self.assertEqual(restored.session_id, session_snapshot.session_id)
+        self.assertEqual(restored.model_config, session_snapshot.model_config)
+        self.assertEqual(restored.runtime_config.cwd, session_snapshot.runtime_config.cwd.resolve())
+        self.assertEqual(restored.messages, session_snapshot.messages)
+        self.assertEqual(restored.transcript, session_snapshot.transcript)
+        self.assertEqual(restored.events, session_snapshot.events)
+        self.assertEqual(restored.usage, session_snapshot.usage)
+        self.assertEqual(restored.total_cost_usd, session_snapshot.total_cost_usd)
         self.assertEqual(restored.schema_version, 1)
 
     def test_agent_session_snapshot_defaults_optional_fields(self) -> None:

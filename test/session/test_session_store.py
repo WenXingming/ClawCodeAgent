@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.usage import TokenUsage
-from session.session_contracts import AgentSessionSnapshot
+from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 
 
@@ -26,7 +26,7 @@ def _make_test_dir() -> Path:
 class SessionStoreTests(unittest.TestCase):
     """验证 AgentSessionStore 的基础行为与容错。"""
 
-    def _make_session(self, workspace: Path, *, session_id: str = 'session-001') -> AgentSessionSnapshot:
+    def _make_session_snapshot(self, workspace: Path, *, session_id: str = 'session-001') -> AgentSessionSnapshot:
         return AgentSessionSnapshot(
             session_id=session_id,
             model_config=ModelConfig(model='demo-model'),
@@ -51,39 +51,39 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_save_and_load_round_trip(self) -> None:
         workspace = _make_test_dir()
-        session = self._make_session(workspace)
+        session_snapshot = self._make_session_snapshot(workspace)
         store = self._make_store(workspace)
-        path = store.save(session)
+        path = store.save(session_snapshot)
         restored = store.load('session-001')
         self.assertTrue(path.exists())
-        self.assertEqual(restored.session_id, session.session_id)
-        self.assertEqual(restored.model_config, session.model_config)
-        self.assertEqual(restored.runtime_config.cwd, session.runtime_config.cwd.resolve())
-        self.assertEqual(restored.messages, session.messages)
-        self.assertEqual(restored.transcript, session.transcript)
-        self.assertEqual(restored.events, session.events)
-        self.assertEqual(restored.usage, session.usage)
-        self.assertEqual(restored.total_cost_usd, session.total_cost_usd)
-        self.assertEqual(restored.scratchpad_directory, session.scratchpad_directory)
+        self.assertEqual(restored.session_id, session_snapshot.session_id)
+        self.assertEqual(restored.model_config, session_snapshot.model_config)
+        self.assertEqual(restored.runtime_config.cwd, session_snapshot.runtime_config.cwd.resolve())
+        self.assertEqual(restored.messages, session_snapshot.messages)
+        self.assertEqual(restored.transcript, session_snapshot.transcript)
+        self.assertEqual(restored.events, session_snapshot.events)
+        self.assertEqual(restored.usage, session_snapshot.usage)
+        self.assertEqual(restored.total_cost_usd, session_snapshot.total_cost_usd)
+        self.assertEqual(restored.scratchpad_directory, session_snapshot.scratchpad_directory)
 
     def test_store_instance_round_trip(self) -> None:
         workspace = _make_test_dir()
-        session = self._make_session(workspace, session_id='instance-001')
+        session_snapshot = self._make_session_snapshot(workspace, session_id='instance-001')
         store = self._make_store(workspace)
 
-        path = store.save(session)
+        path = store.save(session_snapshot)
         restored = store.load('instance-001')
 
         self.assertTrue(path.exists())
         self.assertEqual(store.directory, (workspace / 'sessions').resolve())
-        self.assertEqual(restored.session_id, session.session_id)
-        self.assertEqual(restored.messages, session.messages)
+        self.assertEqual(restored.session_id, session_snapshot.session_id)
+        self.assertEqual(restored.messages, session_snapshot.messages)
 
     def test_save_creates_session_directory(self) -> None:
         workspace = _make_test_dir()
         target_dir = workspace / 'nested' / 'sessions'
         store = self._make_store(workspace, directory=target_dir)
-        store.save(self._make_session(workspace))
+        store.save(self._make_session_snapshot(workspace))
         self.assertTrue(target_dir.exists())
         self.assertTrue((target_dir / 'session-001.json').exists())
 
@@ -123,9 +123,9 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_load_restores_config_objects(self) -> None:
         workspace = _make_test_dir()
-        session = self._make_session(workspace, session_id='restore-001')
+        session_snapshot = self._make_session_snapshot(workspace, session_id='restore-001')
         store = self._make_store(workspace)
-        store.save(session)
+        store.save(session_snapshot)
         restored = store.load('restore-001')
 
         self.assertIsInstance(restored.model_config, ModelConfig)
@@ -134,16 +134,16 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_save_and_load_preserve_utf8_content(self) -> None:
         workspace = _make_test_dir()
-        session = self._make_session(workspace, session_id='utf8-001')
-        session = AgentSessionSnapshot(
-            session_id=session.session_id,
-            model_config=session.model_config,
-            runtime_config=session.runtime_config,
+        session_snapshot = self._make_session_snapshot(workspace, session_id='utf8-001')
+        session_snapshot = AgentSessionSnapshot(
+            session_id=session_snapshot.session_id,
+            model_config=session_snapshot.model_config,
+            runtime_config=session_snapshot.runtime_config,
             messages=({'role': 'user', 'content': '中文内容：你好，世界'},),
             final_output='已保存中文',
         )
         store = self._make_store(workspace)
-        store.save(session)
+        store.save(session_snapshot)
         restored = store.load('utf8-001')
 
         self.assertEqual(restored.messages[0]['content'], '中文内容：你好，世界')

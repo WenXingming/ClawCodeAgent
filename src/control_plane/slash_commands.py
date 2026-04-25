@@ -25,7 +25,7 @@ class ParsedSlashCommand:
 class SlashCommandContext:
     """Slash 命令执行所需的只读上下文。"""
 
-    session: AgentSessionState
+    session_state: AgentSessionState
     session_id: str
     turns_offset: int
     runtime_config: AgentRuntimeConfig
@@ -42,7 +42,7 @@ class SlashCommandResult:
     command_name: str = ''
     output: str = ''
     prompt: str | None = None
-    replacement_session: AgentSessionState | None = None
+    replacement_session_state: AgentSessionState | None = None
     fork_session: bool = False
     metadata: JSONDict = field(default_factory=dict)
 
@@ -140,16 +140,16 @@ def _handle_help(context: SlashCommandContext, parsed: ParsedSlashCommand) -> Sl
 def _handle_context(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
     openai_tools = _build_openai_tools(context.tool_registry)
     snapshot = check_token_budget(
-        messages=context.session.to_messages(),
+        messages=context.session_state.to_messages(),
         tools=openai_tools,
         max_input_tokens=context.runtime_config.budget_config.max_input_tokens,
     )
     lines = [
         'Context Status',
         '==============',
-        f'Messages: {len(context.session.messages)}',
-        f'Transcript entries: {len(context.session.transcript_entries)}',
-        f'Tool calls: {context.session.tool_call_count}',
+        f'Messages: {len(context.session_state.messages)}',
+        f'Transcript entries: {len(context.session_state.transcript_entries)}',
+        f'Tool calls: {context.session_state.tool_call_count}',
         f'Projected input tokens: {snapshot.projected_input_tokens}',
         f'Hard input limit: {_render_optional_int(snapshot.hard_input_limit)}',
         f'Soft input limit: {_render_optional_int(snapshot.soft_input_limit)}',
@@ -173,7 +173,7 @@ def _handle_status(context: SlashCommandContext, parsed: ParsedSlashCommand) -> 
         f'Model: {context.model_config.model}',
         f'Working directory: {context.runtime_config.cwd}',
         f'Completed turns: {context.turns_offset}',
-        f'Tool calls: {context.session.tool_call_count}',
+        f'Tool calls: {context.session_state.tool_call_count}',
     ]
     return SlashCommandResult(
         handled=True,
@@ -221,9 +221,9 @@ def _handle_tools(context: SlashCommandContext, parsed: ParsedSlashCommand) -> S
 
 def _handle_clear(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
     had_history = bool(
-        context.session.messages
-        or context.session.transcript_entries
-        or context.session.tool_call_count
+        context.session_state.messages
+        or context.session_state.transcript_entries
+        or context.session_state.tool_call_count
         or context.turns_offset
     )
     return SlashCommandResult(
@@ -231,7 +231,7 @@ def _handle_clear(context: SlashCommandContext, parsed: ParsedSlashCommand) -> S
         continue_query=False,
         command_name='clear',
         output='Cleared in-memory session context.',
-        replacement_session=AgentSessionState(),
+        replacement_session_state=AgentSessionState(),
         fork_session=True,
         metadata={'had_history': had_history},
     )

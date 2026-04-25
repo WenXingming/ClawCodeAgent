@@ -11,7 +11,7 @@ from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from runtime.agent_runtime import LocalCodingAgent
-from session.session_contracts import AgentSessionSnapshot
+from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 
 

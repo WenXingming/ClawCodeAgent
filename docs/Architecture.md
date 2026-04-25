@@ -77,7 +77,7 @@ graph TB
         direction TB
         n_session_state(["🧠 session_state.py"])
         n_session_store(["💽 session_store.py"])
-        n_session_contracts(["🧾 session_contracts.py"])
+        n_session_snapshot(["🧾 session_snapshot.py"])
         style SessionPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -111,7 +111,7 @@ graph TB
     n_tools --> n_bash_security
 
     %% ================= Session =================
-    n_session_store --> n_session_contracts
+    n_session_store --> n_session_snapshot
 
     %% ================= Context =================
     n_budget_guard --> n_token_budget
@@ -129,7 +129,7 @@ graph TB
     n_tools -.-> n_core_contracts
     n_openai_client -.-> n_core_contracts
     n_session_state -.-> n_core_contracts
-    n_session_contracts -.-> n_core_contracts
+    n_session_snapshot -.-> n_core_contracts
     n_budget_guard -.-> n_core_contracts
     n_compact -.-> n_core_contracts
 
@@ -142,7 +142,7 @@ graph TB
     style n_openai_client fill:#17a2b8,color:#fff,stroke:#117a8b
     style n_bash_security fill:#ffc107,color:#000,stroke:#d39e00
     style n_session_state fill:#17a2b8,color:#fff,stroke:#117a8b
-    style n_session_contracts fill:#17a2b8,color:#fff,stroke:#117a8b
+    style n_session_snapshot fill:#17a2b8,color:#fff,stroke:#117a8b
     style n_session_store fill:#17a2b8,color:#fff,stroke:#117a8b
     style n_token_budget fill:#28a745,color:#fff,stroke:#1e7e34
     style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34

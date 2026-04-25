@@ -42,9 +42,9 @@ class AgentSessionState:
         Returns:
             AgentSessionState: 已写入首条用户消息的会话状态对象。
         """
-        session = cls()
-        session.append_user(prompt)
-        return session
+        session_state = cls()
+        session_state.append_user(prompt)
+        return session_state
 
     def append_user(self, prompt: str) -> None:
         """向会话中追加一条用户消息。

@@ -13,7 +13,7 @@ from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from main import main
-from session.session_contracts import AgentSessionSnapshot
+from session.session_snapshot import AgentSessionSnapshot
 
 
 class _ChatFakeAgent:
