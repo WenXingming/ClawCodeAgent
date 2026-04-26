@@ -7,6 +7,8 @@ import os
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -106,7 +108,9 @@ class MCPServerProfile:
     name: str
     transport: str
     command: str
+    url: str | None = None
     args: tuple[str, ...] = ()
+    headers: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     cwd: Path | None = None
     description: str | None = None
@@ -127,8 +131,11 @@ class MCPServerProfile:
             'transport': self.transport,
             'command': self.command,
             'args': list(self.args),
+            'headers': dict(self.headers),
             'env': dict(self.env),
         }
+        if self.url is not None:
+            payload['url'] = self.url
         if self.cwd is not None:
             payload['cwd'] = str(self.cwd)
         if self.description is not None:
@@ -329,14 +336,12 @@ class MCPRuntime:
             if server is not None:
                 candidate_servers.append(server)
         for server in self.servers:
-            if server.transport != 'stdio':
-                continue
             if all(existing.name != server.name for existing in candidate_servers):
                 candidate_servers.append(server)
 
         for server in candidate_servers:
             try:
-                result = _request_stdio(server, 'resources/read', {'uri': normalized_uri})
+                result = _request_server(server, 'resources/read', {'uri': normalized_uri})
             except MCPTransportError as exc:
                 last_error = exc
                 continue
@@ -403,7 +408,7 @@ class MCPRuntime:
         if server is None:
             raise ValueError(f'Unknown MCP server: {tool.server_name!r}')
 
-        result = _request_stdio(
+        result = _request_server(
             server,
             'tools/call',
             {
@@ -580,10 +585,8 @@ class MCPRuntime:
         discovered: list[MCPResource] = []
         candidate_servers = _resolve_candidate_servers(self.servers, server_name)
         for server in candidate_servers:
-            if server.transport != 'stdio':
-                continue
             try:
-                result = _request_stdio(server, 'resources/list', {})
+                result = _request_server(server, 'resources/list', {})
             except MCPTransportError:
                 if server_name is not None:
                     raise
@@ -603,10 +606,8 @@ class MCPRuntime:
         discovered: list[MCPTool] = []
         candidate_servers = _resolve_candidate_servers(self.servers, server_name)
         for server in candidate_servers:
-            if server.transport != 'stdio':
-                continue
             try:
-                result = _request_stdio(server, 'tools/list', {})
+                result = _request_server(server, 'tools/list', {})
             except MCPTransportError:
                 if server_name is not None:
                     raise
@@ -738,13 +739,15 @@ def _extract_server_profile(
     Raises:
         Exception: 按调用链透传的异常。
     """
-    transport = _normalize_optional_text(payload.get('transport')) or 'stdio'
-    transport = transport.lower()
-    if transport != 'stdio':
+    transport = (_normalize_optional_text(payload.get('transport')) or 'stdio').lower()
+    if transport not in {'stdio', 'streamable-http', 'sse'}:
         return None
 
-    command = _normalize_optional_text(payload.get('command'))
-    if command is None:
+    url = _normalize_optional_text(payload.get('url'))
+    command = _normalize_optional_text(payload.get('command')) or ''
+    if transport == 'stdio' and not command:
+        return None
+    if transport in {'streamable-http', 'sse'} and url is None:
         return None
 
     raw_args = payload.get('args', ())
@@ -759,6 +762,13 @@ def _extract_server_profile(
         if isinstance(key, str) and isinstance(value, str)
     }
 
+    raw_headers = payload.get('headers')
+    headers = {
+        key: value
+        for key, value in (raw_headers.items() if isinstance(raw_headers, dict) else [])
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
     raw_cwd = _normalize_optional_text(payload.get('cwd'))
     resolved_cwd: Path | None = None
     if raw_cwd is not None:
@@ -766,9 +776,11 @@ def _extract_server_profile(
 
     return MCPServerProfile(
         name=_normalize_name(server_name, label='server_name'),
-        transport='stdio',
+        transport=transport,
         command=command,
+        url=url,
         args=args,
+        headers=headers,
         env=env,
         cwd=resolved_cwd,
         description=_normalize_optional_text(payload.get('description')),
@@ -837,6 +849,7 @@ def _extract_remote_resources(server: MCPServerProfile, payload: dict[str, Any])
     if not isinstance(raw_resources, list):
         return ()
 
+    server_target = server.command if server.command else (server.url or '')
     resources: list[MCPResource] = []
     for item in raw_resources:
         if not isinstance(item, dict):
@@ -854,7 +867,7 @@ def _extract_remote_resources(server: MCPServerProfile, payload: dict[str, Any])
                 mime_type=_normalize_optional_text(item.get('mimeType')) or _normalize_optional_text(item.get('mime_type')),
                 metadata={
                     'transport': server.transport,
-                    'server_command': server.command,
+                    'server_command': server_target,
                 },
             )
         )
@@ -875,6 +888,7 @@ def _extract_remote_tools(server: MCPServerProfile, payload: dict[str, Any]) -> 
     if not isinstance(raw_tools, list):
         return ()
 
+    server_target = server.command if server.command else (server.url or '')
     tools: list[MCPTool] = []
     for item in raw_tools:
         if not isinstance(item, dict):
@@ -892,7 +906,7 @@ def _extract_remote_tools(server: MCPServerProfile, payload: dict[str, Any]) -> 
                 input_schema=dict(input_schema) if isinstance(input_schema, dict) else {},
                 metadata={
                     'transport': server.transport,
-                    'server_command': server.command,
+                    'server_command': server_target,
                 },
             )
         )
@@ -974,6 +988,194 @@ def _request_stdio(
     if last_error is not None:
         raise last_error
     raise MCPTransportError(server_name=server.name, method=method, detail='Unknown stdio transport failure')
+
+
+def _request_server(
+    server: MCPServerProfile,
+    method: str,
+    params: dict[str, Any],
+    *,
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """内部方法：按 server transport 分发请求。"""
+    if server.transport == 'stdio':
+        return _request_stdio(server, method, params, timeout_seconds=timeout_seconds)
+    if server.transport in {'streamable-http', 'sse'}:
+        return _request_http(server, method, params, timeout_seconds=timeout_seconds)
+    raise MCPTransportError(
+        server_name=server.name,
+        method=method,
+        detail=f'Unsupported MCP transport: {server.transport}',
+    )
+
+
+def _request_http(
+    server: MCPServerProfile,
+    method: str,
+    params: dict[str, Any],
+    *,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """内部方法：使用 HTTP transport 请求 MCP server。"""
+    if not server.url:
+        raise MCPTransportError(server_name=server.name, method=method, detail='Missing MCP server url')
+
+    initialize_response = _post_http_jsonrpc(
+        server,
+        {
+            'jsonrpc': '2.0',
+            'id': 1,
+            'method': 'initialize',
+            'params': {
+                'protocolVersion': MCP_PROTOCOL_VERSION,
+                'capabilities': {},
+                'clientInfo': {
+                    'name': 'claw-code-agent',
+                    'version': '0.1.0',
+                },
+            },
+        },
+        timeout_seconds=timeout_seconds,
+        method_name='initialize',
+    )
+    init_error = initialize_response.get('error') if isinstance(initialize_response, dict) else None
+    if isinstance(init_error, dict):
+        raise MCPTransportError(
+            server_name=server.name,
+            method='initialize',
+            detail=str(init_error.get('message') or init_error),
+        )
+
+    _post_http_jsonrpc(
+        server,
+        {
+            'jsonrpc': '2.0',
+            'method': 'notifications/initialized',
+            'params': {},
+        },
+        timeout_seconds=timeout_seconds,
+        method_name='notifications/initialized',
+        require_response=False,
+    )
+
+    response = _post_http_jsonrpc(
+        server,
+        {
+            'jsonrpc': '2.0',
+            'id': 2,
+            'method': method,
+            'params': params,
+        },
+        timeout_seconds=timeout_seconds,
+        method_name=method,
+    )
+
+    response_error = response.get('error') if isinstance(response, dict) else None
+    if isinstance(response_error, dict):
+        raise MCPTransportError(
+            server_name=server.name,
+            method=method,
+            detail=str(response_error.get('message') or response_error),
+        )
+    result = response.get('result') if isinstance(response, dict) else None
+    if not isinstance(result, dict):
+        return {}
+    return result
+
+
+def _post_http_jsonrpc(
+    server: MCPServerProfile,
+    payload: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    method_name: str,
+    require_response: bool = True,
+) -> dict[str, Any]:
+    """内部方法：向 MCP HTTP endpoint 发送 JSON-RPC POST。"""
+    if not server.url:
+        raise MCPTransportError(server_name=server.name, method=method_name, detail='Missing MCP server url')
+
+    body = json.dumps(payload, ensure_ascii=True).encode('utf-8')
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+    }
+    headers.update(server.headers)
+
+    request = urllib.request.Request(
+        url=server.url,
+        data=body,
+        headers=headers,
+        method='POST',
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            raw = response.read()
+            messages = _decode_http_mcp_messages(raw)
+    except urllib.error.HTTPError as exc:
+        detail = f'HTTP {exc.code}'
+        try:
+            error_body = exc.read().decode('utf-8', errors='replace').strip()
+        except Exception:  # noqa: BLE001
+            error_body = ''
+        if error_body:
+            detail = f'{detail}: {error_body[:500]}'
+        raise MCPTransportError(server_name=server.name, method=method_name, detail=detail) from exc
+    except urllib.error.URLError as exc:
+        raise MCPTransportError(server_name=server.name, method=method_name, detail=f'HTTP transport error: {exc}') from exc
+
+    if not require_response:
+        return {}
+    request_id = payload.get('id')
+    if not isinstance(request_id, int):
+        return messages[0] if messages else {}
+    response_payload = _find_response(messages, request_id)
+    if response_payload is None:
+        raise MCPTransportError(
+            server_name=server.name,
+            method=method_name,
+            detail='Missing HTTP MCP response',
+        )
+    return response_payload
+
+
+def _decode_http_mcp_messages(raw: bytes | None) -> tuple[dict[str, Any], ...]:
+    """内部方法：解析 HTTP 返回中的 MCP 消息（JSON 或 SSE data）。"""
+    if not raw:
+        return ()
+    text = raw.decode('utf-8', errors='replace').strip()
+    if not text:
+        return ()
+
+    parsed_direct = _parse_json_message(text)
+    if parsed_direct is not None:
+        return (parsed_direct,)
+
+    messages: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith('data:'):
+            stripped = stripped[5:].strip()
+        if stripped in {'[DONE]', 'done'}:
+            continue
+        parsed = _parse_json_message(stripped)
+        if parsed is not None:
+            messages.append(parsed)
+    return tuple(messages)
+
+
+def _parse_json_message(raw_text: str) -> dict[str, Any] | None:
+    """内部方法：解析单条 JSON 对象消息。"""
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return None
 
 
 def _request_stdio_with_mode(

@@ -30,6 +30,15 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent \
   --max-turns 8 \
   --allow-file-write \
   "请在当前目录创建一个 demo.txt 并写入 hello"
+
+# powershell 里反斜杠并不作为续行符，因此需要把参数写在一行，或使用反引号 ` 作为续行符：
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent `
+  --cwd . `
+  --max-turns 8 `
+  --allow-file-write `
+  "请在当前目录创建一个 demo.txt 并写入 hello"
+
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent --cwd . --max-turns 8 --allow-file-write "请在当前目录创建一个 demo.txt 并写入 hello"
 ```
 
 ## 5. 交互式聊天（agent-chat）
