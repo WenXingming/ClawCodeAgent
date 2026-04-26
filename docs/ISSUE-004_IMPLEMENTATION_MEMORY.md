@@ -27,7 +27,7 @@
    - `_resolve_workspace_path(...)` 负责工作区越界拦截
    - `_ensure_write_allowed(...)` 负责写权限拦截
    - `ToolPermissionError` 与 `ToolExecutionError` 统一映射到 `ToolExecutionResult.metadata.error_kind`
-4. 在 `src/__init__.py` 导出 ISSUE-004 常用公开能力。
+4. 当前调用侧直接从 `src/tools/agent_tools.py` 导入 ISSUE-004 常用公开能力，不再依赖源码根聚合导出。
 5. 新增 `test/tools/test_agent_tools.py`，覆盖功能路径与安全路径。
 
 ### 未实现（按计划故意延后）
@@ -70,7 +70,7 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe -m unittest test.tools.test_agent_tools -v
+C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_agent_tools.py" -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 ```
 

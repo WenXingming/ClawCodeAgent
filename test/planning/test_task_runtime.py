@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runtime.task_runtime import TaskRuntime, TaskStatus
+from planning.task_runtime import TaskRuntime, TaskStatus
 
 
 class TaskRuntimeTests(unittest.TestCase):

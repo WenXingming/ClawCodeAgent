@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig
-from runtime.plugin_runtime import PluginRuntime
+from extensions.plugin_runtime import PluginRuntime
 from tools.agent_tools import build_tool_context, default_tool_registry, execute_tool
 
 

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runtime.hook_policy_runtime import HookPolicyRuntime
+from extensions.hook_policy_runtime import HookPolicyRuntime
 from tools.agent_tools import AgentTool, default_tool_registry
 
 

@@ -7,9 +7,9 @@
 | `src/context/context_compactor.py` | 新建 | `CompactionResult`、`ContextCompactor` 与 auto/reactive compact 逻辑 |
 | `src/context/__init__.py` | 修改 | 导出 `ContextCompactor` 与 `CompactionResult` |
 | `src/openai_client/openai_client.py` | 修改 | `OpenAIResponseError` 增加结构化 `status_code/detail` |
-| `src/runtime/agent_runtime.py` | 修改 | 接入 auto compact 与 reactive compact retry |
-| `test/context/test_compact.py` | 新建 | compact 单元测试 |
-| `test/runtime/test_agent_runtime.py` | 追加 | auto compact / reactive compact 集成测试 |
+| `src/orchestration/agent_runtime.py` | 修改 | 接入 auto compact 与 reactive compact retry |
+| `test/context/test_context_compactor.py` | 新建 | compact 单元测试 |
+| `test/orchestration/test_agent_runtime.py` | 追加 | auto compact / reactive compact 集成测试 |
 | `test/openai_client/test_openai_client.py` | 追加断言 | 校验 HTTP 响应异常保留结构化信息 |
 | `docs/Architecture.md` | 修改 | ContextPkg 追加 `context_compactor.py` 节点与依赖 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-011 实施决策归档 |
@@ -56,22 +56,23 @@ auto compact 和 reactive compact 本质上都在调用模型，因此：
 
 | 测试文件 | 测试方法/分组 | 验证点 |
 |----------|---------------|--------|
-| `test_compact` | threshold 判定（2 个） | `auto_compact_threshold_tokens` 为 None / 命中阈值时的触发语义 |
-| `test_compact` | context-length 错误识别（3 个） | HTTP 413、HTTP 400 关键词、非 context error 的区分 |
-| `test_compact` | `ContextCompactor` 工作流（3 个） | preserved tail 不进入摘要请求、摘要空行规范化、prefix/tail 保留 |
-| `test_compact` | `ContextCompactor.compact` 边界（3 个） | 无中间段时不压缩、成功压缩时原地改写消息并统计 usage、空摘要时返回错误 |
-| `test_agent_runtime` | `test_auto_compact_triggered_at_explicit_threshold` | 显式阈值命中时 auto compact 先于主模型调用发生 |
-| `test_agent_runtime` | `test_auto_compact_not_triggered_when_threshold_not_met` | 阈值未命中时不 compact |
-| `test_agent_runtime` | `test_reactive_compact_retries_on_context_length_error` | prompt-too-long 后触发 reactive compact 并重试成功 |
-| `test_agent_runtime` | `test_reactive_compact_returns_backend_error_when_compaction_fails` | reactive compact 无进展时回落到 backend_error |
-| `test_openai_client` | `test_complete_http_error_raises_response_error` | `OpenAIResponseError` 暴露 `status_code/detail` |
+| `test/context/test_context_compactor.py` | threshold 判定（2 个） | `auto_compact_threshold_tokens` 为 None / 命中阈值时的触发语义 |
+| `test/context/test_context_compactor.py` | context-length 错误识别（3 个） | HTTP 413、HTTP 400 关键词、非 context error 的区分 |
+| `test/context/test_context_compactor.py` | `ContextCompactor` 工作流（3 个） | preserved tail 不进入摘要请求、摘要空行规范化、prefix/tail 保留 |
+| `test/context/test_context_compactor.py` | `ContextCompactor.compact` 边界（3 个） | 无中间段时不压缩、成功压缩时原地改写消息并统计 usage、空摘要时返回错误 |
+| `test/orchestration/test_agent_runtime.py` | `test_auto_compact_triggered_at_explicit_threshold` | 显式阈值命中时 auto compact 先于主模型调用发生 |
+| `test/orchestration/test_agent_runtime.py` | `test_auto_compact_not_triggered_when_threshold_not_met` | 阈值未命中时不 compact |
+| `test/orchestration/test_agent_runtime.py` | `test_reactive_compact_retries_on_context_length_error` | prompt-too-long 后触发 reactive compact 并重试成功 |
+| `test/orchestration/test_agent_runtime.py` | `test_reactive_compact_returns_backend_error_when_compaction_fails` | reactive compact 无进展时回落到 backend_error |
+| `test/openai_client/test_openai_client.py` | `test_complete_http_error_raises_response_error` | `OpenAIResponseError` 暴露 `status_code/detail` |
 
 ## 回归结果
 
 补文档前已运行：
 
-- `python -m unittest test.context.test_compact test.openai_client.test_openai_client -v` → 全部 OK
-- `python -m unittest test.runtime.test_agent_runtime -v` → 全部 OK
+- `python -m unittest discover -s test/context -p "test_context_compactor.py" -v` → 全部 OK
+- `python -m unittest discover -s test/openai_client -p "test_openai_client.py" -v` → 全部 OK
+- `python -m unittest discover -s test/orchestration -p "test_agent_runtime.py" -v` → 全部 OK
 
 补文档后再次运行 `python -m unittest discover -s test -v`：
 

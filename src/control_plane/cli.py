@@ -12,7 +12,7 @@ from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetCo
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import ModelPricing
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
-from runtime.agent_runtime import LocalCodingAgent
+from orchestration.agent_runtime import LocalCodingAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 

@@ -4,15 +4,15 @@
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `src/runtime/search_runtime.py` | 新建 | 实现 provider 发现、active provider 持久化、结构化检索和失败重试 |
-| `test/runtime/test_search_runtime.py` | 新建 | 覆盖 provider 发现、切换持久化、结构化结果和查询失败重试 |
+| `src/extensions/search_runtime.py` | 新建 | 实现 provider 发现、active provider 持久化、结构化检索和失败重试 |
+| `test/extensions/test_search_runtime.py` | 新建 | 覆盖 provider 发现、切换持久化、结构化结果和查询失败重试 |
 | `README.md` | 修改 | 补充 Search Runtime 的 manifest/env 发现、状态文件与查询示例 |
 | `docs/Architecture.md` | 修改 | 把 search runtime 写回架构视图与运行时说明 |
 
 ## 关键设计决策
 
 ### 1. Search Runtime 保持独立，不直接接 agent 主循环
-ISSUE-020 的目标是 provider 发现、激活和真实检索，不是立即把搜索能力注入 tool pipeline。因此当前实现把 `runtime/search_runtime.py` 保持为独立模块，后续再由控制面或工具链 issue 接入。
+ISSUE-020 的目标是 provider 发现、激活和真实检索，不是立即把搜索能力注入 tool pipeline。因此当前实现把 `extensions/search_runtime.py` 保持为独立模块，后续再由控制面或工具链 issue 接入。
 
 ### 2. manifest 与状态文件统一回到 `.claw/`
 当前实现使用：
@@ -51,13 +51,13 @@ ISSUE-020 的目标是 provider 发现、激活和真实检索，不是立即把
 
 | 测试文件 | 测试方法/分组 | 验证点 |
 |----------|---------------|--------|
-| `test_search_runtime` | discovery（1 个） | manifest provider 与 env provider 可被同时发现 |
-| `test_search_runtime` | activate（1 个） | active provider 切换可持久化到 `.claw/search_state.json` |
-| `test_search_runtime` | success（1 个） | SearxNG 查询返回结构化结果，包含 provider 和 attempts |
-| `test_search_runtime` | retry failure（1 个） | 查询失败会按 `max_retries` 重试，并在耗尽后抛出受控异常 |
+| `test/extensions/test_search_runtime.py` | discovery（1 个） | manifest provider 与 env provider 可被同时发现 |
+| `test/extensions/test_search_runtime.py` | activate（1 个） | active provider 切换可持久化到 `.claw/search_state.json` |
+| `test/extensions/test_search_runtime.py` | success（1 个） | SearxNG 查询返回结构化结果，包含 provider 和 attempts |
+| `test/extensions/test_search_runtime.py` | retry failure（1 个） | 查询失败会按 `max_retries` 重试，并在耗尽后抛出受控异常 |
 
 ## 回归结果
 
 定向验证：
 
-- `python -m unittest discover -s test/runtime -p "test_search_runtime.py" -v` → 4/4 OK
+- `python -m unittest discover -s test/extensions -p "test_search_runtime.py" -v` → 4/4 OK

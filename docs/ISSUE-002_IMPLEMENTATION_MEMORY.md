@@ -62,8 +62,8 @@
 执行命令：
 
 ```powershell
-python -m unittest test.openai_client.test_openai_client -v
-python -m unittest test.core_contracts.test_core_contracts -v
+python -m unittest discover -s test/openai_client -p "test_openai_client.py" -v
+python -m unittest discover -s test/core_contracts -p "test_core_contracts.py" -v
 python -m unittest discover -s test -v
 ```
 
@@ -101,8 +101,8 @@ python -m unittest discover -s test -v
 回归结果：
 
 ```powershell
-python -m unittest test.openai_client.test_openai_client -v
-python -m unittest test.core_contracts.test_core_contracts -v
+python -m unittest discover -s test/openai_client -p "test_openai_client.py" -v
+python -m unittest discover -s test/core_contracts -p "test_core_contracts.py" -v
 python -m unittest discover -s test -v
 ```
 
@@ -133,8 +133,8 @@ python -m unittest discover -s test -v
 命名迁移后验证：
 
 ```powershell
-python -m unittest test.core_contracts.test_core_contracts -v
-python -m unittest test.openai_client.test_openai_client -v
+python -m unittest discover -s test/core_contracts -p "test_core_contracts.py" -v
+python -m unittest discover -s test/openai_client -p "test_openai_client.py" -v
 python -m unittest discover -s test -v
 ```
 

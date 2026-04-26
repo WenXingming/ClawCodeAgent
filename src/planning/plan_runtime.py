@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from core_contracts.protocol import JSONDict
-from runtime.task_runtime import TaskRecord, TaskRuntime, TaskStatus
+from planning.task_runtime import TaskRecord, TaskRuntime, TaskStatus
 
 
 _PLAN_STATE_FILE = Path('.claw') / 'plan.json'

@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runtime.plan_runtime import PlanRuntime, PlanStep, PlanStepStatus
-from runtime.task_runtime import TaskRuntime, TaskStatus
+from planning.plan_runtime import PlanRuntime, PlanStep, PlanStepStatus
+from planning.task_runtime import TaskRuntime, TaskStatus
 
 
 class PlanRuntimeTests(unittest.TestCase):

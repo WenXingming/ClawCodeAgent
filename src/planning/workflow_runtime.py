@@ -10,7 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from core_contracts.protocol import JSONDict
-from runtime.task_runtime import TaskRecord, TaskRuntime
+from planning.task_runtime import TaskRecord, TaskRuntime
 
 
 _WORKFLOW_MANIFEST_FILE = Path('.claw') / 'workflows.json'

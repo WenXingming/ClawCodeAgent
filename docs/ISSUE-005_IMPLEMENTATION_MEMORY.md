@@ -26,7 +26,7 @@
    - 新增 `_run_bash(...)` 与 `_execute_shell_command(...)`。
    - 新增 `ToolStreamUpdate` 与 `execute_tool_streaming(...)`。
    - 新增 `_run_bash_stream(...)`，输出 `stdout/stderr/result` 三类事件。
-3. 扩展 `src/__init__.py` 导出：
+3. 公开能力继续在 `src/tools/agent_tools.py` 暴露：
    - `ToolStreamUpdate`
    - `execute_tool_streaming`
 4. 新增测试：
@@ -72,8 +72,8 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe -m unittest test.tools.test_agent_tools_shell -v
-C:/ProgramData/anaconda3/python.exe -m unittest test.tools.test_bash_security -v
+C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_agent_tools_shell.py" -v
+C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_bash_security.py" -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 ```
 

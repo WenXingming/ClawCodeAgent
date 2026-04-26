@@ -35,6 +35,8 @@ def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: 
     for file_path in sorted(_TEST_ROOT.rglob('test_*.py')):
         if file_path.resolve() == _THIS_FILE:
             continue
+        if file_path.parent == _TEST_ROOT:
+            continue
         module = _load_test_module(file_path)
         suite.addTests(loader.loadTestsFromModule(module))
     return suite

@@ -4,15 +4,15 @@
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `src/runtime/mcp_runtime.py` | 新建 | 实现 MCP manifest 发现、本地资源读取和 stdio transport 资源/工具调用 |
-| `test/runtime/test_mcp_runtime.py` | 新建 | 覆盖资源读取、工具调用、无效 server 错误追踪 |
+| `src/extensions/mcp_runtime.py` | 新建 | 实现 MCP manifest 发现、本地资源读取和 stdio transport 资源/工具调用 |
+| `test/extensions/test_mcp_runtime.py` | 新建 | 覆盖资源读取、工具调用、无效 server 错误追踪 |
 | `README.md` | 修改 | 补充 MCP Runtime 的 manifest 路径、stdio 能力与示例 |
 | `docs/Architecture.md` | 修改 | 把 mcp runtime 写回架构视图与运行时说明 |
 
 ## 关键设计决策
 
 ### 1. MCP Runtime 保持独立，不直接接 agent 主循环
-ISSUE-021 的目标是 MCP 资源/工具发现与 stdio transport 调用，不是立即把 MCP runtime 注入当前工具执行链。因此本期把 `runtime/mcp_runtime.py` 保持为独立模块，后续再由控制面或工具链相关 issue 接入。
+ISSUE-021 的目标是 MCP 资源/工具发现与 stdio transport 调用，不是立即把 MCP runtime 注入当前工具执行链。因此本期把 `extensions/mcp_runtime.py` 保持为独立模块，后续再由控制面或工具链相关 issue 接入。
 
 ### 2. manifest 统一走 `.claw/` 目录
 当前实现使用：
@@ -62,12 +62,12 @@ MCP 是 stdio 协议而不是“任意 JSON 一行一条”，因此当前实现
 
 | 测试文件 | 测试方法/分组 | 验证点 |
 |----------|---------------|--------|
-| `test_mcp_runtime` | local resource（1 个） | manifest 本地资源可发现、可读取 |
-| `test_mcp_runtime` | stdio resource/tool（1 个） | stdio server 可列资源、读资源、列工具、调用工具 |
-| `test_mcp_runtime` | invalid server（1 个） | 无效 server 会抛出可追踪的 `MCPTransportError` |
+| `test/extensions/test_mcp_runtime.py` | local resource（1 个） | manifest 本地资源可发现、可读取 |
+| `test/extensions/test_mcp_runtime.py` | stdio resource/tool（1 个） | stdio server 可列资源、读资源、列工具、调用工具 |
+| `test/extensions/test_mcp_runtime.py` | invalid server（1 个） | 无效 server 会抛出可追踪的 `MCPTransportError` |
 
 ## 回归结果
 
 定向验证：
 
-- `python -m unittest discover -s test/runtime -p "test_mcp_runtime.py" -v` → 3/3 OK
+- `python -m unittest discover -s test/extensions -p "test_mcp_runtime.py" -v` → 3/3 OK

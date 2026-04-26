@@ -21,10 +21,10 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from budget.token_estimator import ContextTokenEstimator
 from core_contracts.protocol import JSONDict
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError, OpenAIResponseError
-from .context_budget import ContextTokenEstimator
 
 # 标记“更早历史已被压缩”的 reminder 正文前缀。
 _COMPACT_BOUNDARY_PREFIX = '<system-reminder>\nEarlier conversation history was compacted to save context.'

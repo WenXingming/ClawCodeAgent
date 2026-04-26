@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib import error
 
-from runtime.search_runtime import SearchQueryError, SearchRuntime
+from extensions.search_runtime import SearchQueryError, SearchRuntime
 
 
 class _FakeHTTPResponse:
@@ -90,7 +90,7 @@ class SearchRuntimeTests(unittest.TestCase):
         self.assertEqual(reloaded.current_provider().provider_id, 'secondary-search')
         self.assertEqual(persisted['active_provider_id'], 'secondary-search')
 
-    @patch('runtime.search_runtime.request.urlopen')
+    @patch('extensions.search_runtime.request.urlopen')
     def test_search_returns_structured_results(self, mocked_urlopen) -> None:
         mocked_urlopen.return_value = _FakeHTTPResponse(
             {
@@ -134,7 +134,7 @@ class SearchRuntimeTests(unittest.TestCase):
         self.assertEqual(response.results[0].provider_id, 'workspace-search')
         self.assertEqual(response.results[1].rank, 2)
 
-    @patch('runtime.search_runtime.request.urlopen')
+    @patch('extensions.search_runtime.request.urlopen')
     def test_search_retries_failed_query_and_raises_controlled_error(self, mocked_urlopen) -> None:
         mocked_urlopen.side_effect = [
             error.URLError('temporary outage'),

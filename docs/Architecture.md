@@ -4,12 +4,43 @@
 
 - 本文档只描述根目录 `src/` 下当前生效的代码结构。
 - 已排除工作区内嵌的 `claw-code-agent/` 目录。
-- 根目录 `src/` 现在是源码根，不再作为 `src` 包名参与导入；跨目录依赖统一使用顶层绝对导入，如 `from core_contracts.config import AgentRuntimeConfig`。
-- 本文档不再重复 project tree 的逐文件结构；重点是先讲清包/模块容器关系，再补少量真正影响理解的跨层依赖。
+- 根目录 `src/` 是源码根，不作为 `src` 包名参与导入；跨目录依赖统一使用顶层绝对导入。
+- 本轮重构后，旧 `runtime/` 与预算相关旧 `context` 入口不再作为稳定导入路径保留。
 
-## 主视图：项目模块架构和依赖关系
+## 当前结构
 
-逐文件结构请直接看 project tree；下面这张主图把模块分组和关键依赖放在一起，既保留容器关系，也避免把纯转发节点画进去。
+```text
+src/
+|- main.py
+|- control_plane/
+|  |- cli.py
+|  '- slash_commands.py
+|- orchestration/
+|  '- agent_runtime.py
+|- planning/
+|  |- task_runtime.py
+|  |- plan_runtime.py
+|  '- workflow_runtime.py
+|- extensions/
+|  |- plugin_runtime.py
+|  |- hook_policy_runtime.py
+|  |- search_runtime.py
+|  '- mcp_runtime.py
+|- budget/
+|  |- budget_snapshot.py
+|  |- token_estimator.py
+|  |- budget_evaluator.py
+|  '- budget_guard.py
+|- context/
+|  |- context_snipper.py
+|  '- context_compactor.py
+|- session/
+|- tools/
+|- openai_client/
+'- core_contracts/
+```
+
+## 主视图
 
 ```mermaid
 %%{init: {
@@ -27,177 +58,204 @@
 
 graph TB
     accTitle: ClawCodeAgent Module Architecture and Dependencies
-    accDescr: Clean layered architecture with minimized edge crossings.
+    accDescr: Clean layered architecture with package boundaries for control plane, orchestration, planning, extensions, budget and context.
 
-    %% ================= Top =================
     main(["🧭 main.py"])
 
-    %% ================= Control Plane =================
-    subgraph ControlPlane [control_plane package / CLI 与本地控制面]
+    subgraph ControlPlane[control_plane package / CLI 与本地控制面]
         direction TB
         n_cli(["🧭 control_plane/cli.py"])
         n_slash(["⌨️ control_plane/slash_commands.py"])
         style ControlPlane fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    %% ================= Runtime =================
-    subgraph Runtime [runtime package / 主循环编排]
+    subgraph Orchestration[orchestration package / 主循环编排]
         direction TB
-        n_hook_policy_runtime(["🛡️ runtime/hook_policy_runtime.py"])
-        n_plugin_runtime(["🧩 runtime/plugin_runtime.py"])
-        n_task_runtime(["📋 runtime/task_runtime.py"])
-        n_plan_runtime(["🗺️ runtime/plan_runtime.py"])
-        n_workflow_runtime(["🧭 runtime/workflow_runtime.py"])
-        n_search_runtime(["🔎 runtime/search_runtime.py"])
-        n_mcp_runtime(["🛰️ runtime/mcp_runtime.py"])
-        n_runtime(["⚙️ runtime/agent_runtime.py"])
-        style Runtime fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+        n_agent(["⚙️ orchestration/agent_runtime.py"])
+        style Orchestration fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    %% ================= Core Infra（关键：上移） =================
-    subgraph External [模型接入]
+    subgraph Extensions[extensions package / 工作区扩展能力]
         direction TB
-        n_openai_client(["☁️ openai_client/openai_client.py"])
-        style External fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+        n_hook_policy(["🛡️ extensions/hook_policy_runtime.py"])
+        n_plugin(["🧩 extensions/plugin_runtime.py"])
+        n_search(["🔎 extensions/search_runtime.py"])
+        n_mcp(["🛰️ extensions/mcp_runtime.py"])
+        style Extensions fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    %% ================= Context（左） =================
-    subgraph ContextPkg [context package]
+    subgraph Planning[planning package / 任务与计划状态机]
         direction TB
-        n_budget_guard(["🛡️ budget_guard.py"])
-        n_snip(["✂️ context_snipper.py"])
-        n_compact(["🗜️ context_compactor.py"])
-        n_token_budget(["🔢 context_budget.py"])
+        n_task(["📋 planning/task_runtime.py"])
+        n_plan(["🗺️ planning/plan_runtime.py"])
+        n_workflow(["🧭 planning/workflow_runtime.py"])
+        style Planning fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    end
+
+    subgraph BudgetPkg[budget package / token 预算与闸门]
+        direction TB
+        n_budget_guard(["🛡️ budget/budget_guard.py"])
+        n_budget_evaluator(["📏 budget/budget_evaluator.py"])
+        n_budget_snapshot(["📸 budget/budget_snapshot.py"])
+        n_token_estimator(["🔢 budget/token_estimator.py"])
+        style BudgetPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    end
+
+    subgraph ContextPkg[context package / 上下文收缩]
+        direction TB
+        n_snip(["✂️ context/context_snipper.py"])
+        n_compact(["🗜️ context/context_compactor.py"])
         style ContextPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    %% ================= Tooling（右） =================
-    subgraph Tooling [tools package / 工具执行与安全]
+    subgraph Tooling[tools package / 工具执行与安全]
         direction TB
         n_tools(["🛠️ tools/agent_tools.py"])
         n_bash_security(["🛡️ tools/bash_security.py"])
         style Tooling fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    %% ================= Session（下） =================
-    subgraph SessionPkg [session package]
+    subgraph SessionPkg[session package / 会话状态与持久化]
         direction TB
-        n_session_state(["🧠 session_state.py"])
-        n_session_store(["💽 session_store.py"])
-        n_session_snapshot(["🧾 session_snapshot.py"])
+        n_session_state(["🧠 session/session_state.py"])
+        n_session_store(["💽 session/session_store.py"])
+        n_session_snapshot(["🧾 session/session_snapshot.py"])
         style SessionPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    %% ================= Contracts（最底） =================
-    subgraph Contracts [共享契约层]
+    subgraph External[模型接入]
         direction TB
-        n_core_contracts(["📄 core_contracts/<br/>(config / protocol / usage / result )"])
+        n_openai_client(["☁️ openai_client/openai_client.py"])
+        style External fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    end
+
+    subgraph Contracts[共享契约层]
+        direction TB
+        n_core_contracts(["📄 core_contracts/<br/>(config / protocol / usage / result)"])
         style Contracts fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    %% ================= 主链路 =================
     main --> n_cli
 
-    n_cli --> n_runtime
+    n_cli --> n_agent
     n_cli --> n_session_store
-    n_runtime --> n_slash
-    n_runtime --> n_hook_policy_runtime
-    n_runtime --> n_plugin_runtime
-    n_runtime --> n_openai_client
-    n_runtime --> n_tools
-    n_runtime --> n_session_state
-    n_runtime --> n_session_store
-    n_runtime --> n_budget_guard
-    n_runtime --> n_snip
-    n_runtime --> n_compact
 
-    %% ================= Slash Control Plane =================
+    n_agent --> n_slash
+    n_agent --> n_hook_policy
+    n_agent --> n_plugin
+    n_agent --> n_openai_client
+    n_agent --> n_tools
+    n_agent --> n_session_state
+    n_agent --> n_session_store
+    n_agent --> n_budget_guard
+    n_agent --> n_budget_evaluator
+    n_agent --> n_snip
+    n_agent --> n_compact
+
     n_slash --> n_session_state
     n_slash --> n_tools
-    n_slash --> n_token_budget
+    n_slash --> n_budget_evaluator
 
-    %% ================= 工具 =================
-    n_plan_runtime --> n_task_runtime
-    n_workflow_runtime --> n_task_runtime
-    n_hook_policy_runtime --> n_tools
-    n_plugin_runtime --> n_tools
+    n_plan --> n_task
+    n_workflow --> n_task
+    n_hook_policy --> n_tools
+    n_plugin --> n_tools
     n_tools --> n_bash_security
 
-    %% ================= Session =================
     n_session_store --> n_session_snapshot
 
-    %% ================= Context =================
-    n_budget_guard --> n_token_budget
-    n_snip --> n_token_budget
-    n_compact --> n_token_budget
-
-    %% ⭐ 关键：缩短跨线（现在是“垂直短边”）
+    n_budget_guard --> n_budget_snapshot
+    n_budget_evaluator --> n_budget_snapshot
+    n_budget_evaluator --> n_token_estimator
+    n_snip --> n_token_estimator
+    n_compact --> n_token_estimator
     n_compact --> n_openai_client
 
-    %% ================= Contracts（全部下沉收敛） =================
     main -.-> n_core_contracts
     n_cli -.-> n_core_contracts
-    n_runtime -.-> n_core_contracts
-    n_hook_policy_runtime -.-> n_core_contracts
-    n_plugin_runtime -.-> n_core_contracts
-    n_task_runtime -.-> n_core_contracts
-    n_plan_runtime -.-> n_core_contracts
-    n_workflow_runtime -.-> n_core_contracts
-    n_search_runtime -.-> n_core_contracts
-    n_mcp_runtime -.-> n_core_contracts
     n_slash -.-> n_core_contracts
-    n_tools -.-> n_core_contracts
-    n_openai_client -.-> n_core_contracts
+    n_agent -.-> n_core_contracts
+    n_hook_policy -.-> n_core_contracts
+    n_plugin -.-> n_core_contracts
+    n_search -.-> n_core_contracts
+    n_mcp -.-> n_core_contracts
+    n_task -.-> n_core_contracts
+    n_plan -.-> n_core_contracts
+    n_workflow -.-> n_core_contracts
+    n_budget_guard -.-> n_core_contracts
+    n_budget_evaluator -.-> n_core_contracts
     n_session_state -.-> n_core_contracts
     n_session_snapshot -.-> n_core_contracts
-    n_budget_guard -.-> n_core_contracts
-    n_compact -.-> n_core_contracts
+    n_tools -.-> n_core_contracts
+    n_openai_client -.-> n_core_contracts
 
-    %% ================= 样式 =================
     style main fill:#343a40,color:#fff,stroke:#1d2124
     style n_cli fill:#6610f2,color:#fff,stroke:#520dc2
-    style n_runtime fill:#007bff,color:#fff,stroke:#0056b3
-    style n_hook_policy_runtime fill:#198754,color:#fff,stroke:#146c43
-    style n_plugin_runtime fill:#0d6efd,color:#fff,stroke:#0a58ca
-    style n_task_runtime fill:#20c997,color:#fff,stroke:#0f8f6b
-    style n_plan_runtime fill:#ff922b,color:#fff,stroke:#d97706
-    style n_workflow_runtime fill:#e8590c,color:#fff,stroke:#c2410c
-    style n_search_runtime fill:#f76707,color:#fff,stroke:#d9480f
-    style n_mcp_runtime fill:#1098ad,color:#fff,stroke:#0c8599
     style n_slash fill:#8a5cf6,color:#fff,stroke:#6f42c1
-    style n_core_contracts fill:#6c757d,color:#fff,stroke:#495057
-    style n_openai_client fill:#17a2b8,color:#fff,stroke:#117a8b
+    style n_agent fill:#007bff,color:#fff,stroke:#0056b3
+    style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
+    style n_plugin fill:#0d6efd,color:#fff,stroke:#0a58ca
+    style n_search fill:#f76707,color:#fff,stroke:#d9480f
+    style n_mcp fill:#1098ad,color:#fff,stroke:#0c8599
+    style n_task fill:#20c997,color:#fff,stroke:#0f8f6b
+    style n_plan fill:#ff922b,color:#fff,stroke:#d97706
+    style n_workflow fill:#e8590c,color:#fff,stroke:#c2410c
+    style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34
+    style n_budget_evaluator fill:#37b24d,color:#fff,stroke:#2b8a3e
+    style n_budget_snapshot fill:#5c940d,color:#fff,stroke:#4c6ef5
+    style n_token_estimator fill:#74b816,color:#fff,stroke:#5c940d
+    style n_snip fill:#2f9e44,color:#fff,stroke:#1b5e20
+    style n_compact fill:#1c7ed6,color:#fff,stroke:#1864ab
+    style n_tools fill:#fd7e14,color:#fff,stroke:#d9480f
     style n_bash_security fill:#ffc107,color:#000,stroke:#d39e00
     style n_session_state fill:#17a2b8,color:#fff,stroke:#117a8b
     style n_session_snapshot fill:#17a2b8,color:#fff,stroke:#117a8b
     style n_session_store fill:#17a2b8,color:#fff,stroke:#117a8b
-    style n_token_budget fill:#28a745,color:#fff,stroke:#1e7e34
-    style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34
-    style n_snip fill:#28a745,color:#fff,stroke:#1e7e34
-    style n_compact fill:#28a745,color:#fff,stroke:#1e7e34
-    style n_tools fill:#fd7e14,color:#fff,stroke:#d9480f
+    style n_openai_client fill:#17a2b8,color:#fff,stroke:#117a8b
+    style n_core_contracts fill:#6c757d,color:#fff,stroke:#495057
 ```
 
-这张图把模块分组和关键依赖放在一起：分组框表示模块归属，实线保留主控制流和关键调用链，虚线只表示对 `core_contracts/` 这个共享底座的契约依赖。当前最重要的几个事实是：
+## 当前边界
 
-- `core_contracts/` 已经成为共享底座，跨模块 dataclass、JSON 协议和配置解析都从这里下沉出去。
-- `openai_client/` 现在是源码根下的命名空间目录，不再依赖 `__init__.py`；具体 HTTP 与 SSE 解析仍然集中在 `openai_client/openai_client.py`。
-- `context/context_compactor.py` 是少数刻意允许跨层调用客户端的模块，因为它需要主动发起摘要压缩模型请求。
-- `main.py` 现在只是极薄的进程入口；真正的 CLI 子命令、chat loop 和控制面装配都下沉到了 `control_plane/cli.py`。
-- `runtime/hook_policy_runtime.py` 在主循环启动前扫描工作区内的 `.claw/policies*.json` manifest，负责合并 deny 规则、safe env 与 budget override；在 tool loop 内还会提供 policy block 决策和 before/after hook 注入描述。
-- `runtime/plugin_runtime.py` 在主循环启动前扫描工作区内的 `.claw/plugins*.json` manifest，注册 alias/virtual tool，并产出可供 `/tools` 渲染的插件摘要；在 tool loop 内还可为插件提供 before/after hook 与 block 规则。
-- `runtime/task_runtime.py` 是独立的工作区本地任务状态机，负责 `.claw/tasks.json` 的持久化、合法状态流转、依赖阻塞/释放与 actionable next tasks 选择；当前已作为 `plan_runtime` 的同步目标。
-- `runtime/plan_runtime.py` 负责 `.claw/plan.json` 的持久化、计划渲染，以及把 `PlanStep` 列表同步到 `TaskRuntime`；它不直接接入 agent 主循环，后续主要由 plan/workflow/control-plane issue 消费。
-- `runtime/workflow_runtime.py` 负责发现 `.claw/workflows*.json` manifest，顺序执行一组 Task Runtime 操作，并把运行历史写入 `.claw/workflow_runs.json`；它当前聚焦本地顺序执行和可诊断历史记录，不做分布式调度。
-- `runtime/search_runtime.py` 负责发现 `.claw/search*.json` provider manifest 和环境变量 provider，维护 `.claw/search_state.json` 里的 active provider，并执行至少一种真实 HTTP 搜索后端；它当前聚焦单 provider 查询与失败重试，不做多源融合排序。
-- `runtime/mcp_runtime.py` 负责发现 `.claw/mcp*.json` manifest、本地 manifest 资源与 stdio MCP server profile，并通过一次性 stdio child-process 请求完成 `initialize`、`resources/list/read`、`tools/list/call`；它当前聚焦本地资源链路和可追踪 transport 错误，不做远端 MCP 网关。
-- `control_plane/slash_commands.py` 作为本地控制面，挂在 `runtime/agent_runtime.py` 前面做 prompt 预分流；它读取 session、tool registry 与 token 预算投影，但不会触发模型调用。
+- `orchestration/agent_runtime.py` 现在只保留主循环编排职责：模型调用、工具回填、预算预检、snip/compact 触发以及会话保存。
+- `budget/` 负责 token 预算的对象模型和闸门逻辑：`TokenBudgetSnapshot`、统一估算器、预算投影器和运行时预算检查都集中在这里。
+- `context/` 只保留上下文收缩行为：`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 reactive compact。
+- `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
+- `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、MCP server 都从工作区 `.claw/` manifest 或环境变量发现并对外提供独立 API。
+- `control_plane/` 负责 CLI 和 slash 命令；`slash_commands.py` 依赖预算投影和工具注册表，但不会触发模型调用。
+- `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
+
+这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界名称更明确了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`，预算能力也从 `context` 中抽出到 `budget`。
+
+## 测试镜像
+
+```text
+test/
+|- test_main.py
+|- test_main_chat.py
+|- test_all.py
+|- control_plane/
+|- orchestration/
+|- planning/
+|- extensions/
+|- budget/
+|- context/
+|- session/
+|- tools/
+|- openai_client/
+'- core_contracts/
+```
+
+- `test/orchestration/` 对应主循环集成测试。
+- `test/planning/` 对应 task/plan/workflow 状态机测试。
+- `test/extensions/` 对应 plugin/policy/search/mcp 测试，并承接相关 patch 目标。
+- `test/budget/` 对应预算快照、估算、评估与闸门测试。
+- `test/context/` 现在只保留 `test_context_snipper.py` 与 `test_context_compactor.py`。
 
 ## 推荐阅读顺序
 
-1. 先看 `core_contracts/`，建立共享契约层与配置/协议对象的边界感。
-2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧两个外部交互面。
-3. 再看 `session/` 与 `context/`，理解状态恢复、预算治理、snip、compact 的局部职责。
-4. 再看 `runtime/task_runtime.py`、`runtime/plan_runtime.py`、`runtime/workflow_runtime.py`、`runtime/search_runtime.py`、`runtime/mcp_runtime.py`、`runtime/hook_policy_runtime.py`、`runtime/plugin_runtime.py` 与 `runtime/agent_runtime.py`，理解工作区 task/plan/workflow/search/MCP/policy/plugin 如何各自管理状态、同步关系、运行历史、provider 状态、transport 错误、预算、工具注册和 tool loop 行为。
-5. 再看 `control_plane/slash_commands.py` 与 `control_plane/cli.py`，理解 CLI 子命令、chat loop 和本地控制面如何装配到 runtime 上。
-6. 最后看 `main.py`，确认顶层进程入口只是一个薄包装层。
+1. 先看 `core_contracts/`，建立共享契约层边界。
+2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧的外部交互面。
+3. 再看 `budget/` 与 `context/`，理解预算投影、上下文剪裁和摘要压缩的职责切分。
+4. 再看 `planning/` 与 `extensions/`，理解工作区本地状态和外部扩展能力各自如何发现、持久化和暴露 API。
+5. 最后看 `orchestration/agent_runtime.py`、`control_plane/cli.py` 和 `main.py`，理解这些能力如何被装配成完整入口。

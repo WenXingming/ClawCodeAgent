@@ -4,11 +4,11 @@
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `src/runtime/hook_policy_runtime.py` | 新建 | 实现 policy manifest 发现、trusted 过滤、deny/safe env/budget 合并 |
-| `src/runtime/agent_runtime.py` | 修改 | `LocalCodingAgent` 初始化时加载 policy runtime，并应用 deny 过滤与 budget override |
+| `src/extensions/hook_policy_runtime.py` | 新建 | 实现 policy manifest 发现、trusted 过滤、deny/safe env/budget 合并 |
+| `src/orchestration/agent_runtime.py` | 修改 | `LocalCodingAgent` 初始化时加载 policy runtime，并应用 deny 过滤与 budget override |
 | `src/tools/agent_tools.py` | 修改 | `ToolExecutionContext` 新增 `safe_env`，bash 子进程显式透传环境变量 |
-| `test/runtime/test_hook_policy_runtime.py` | 新建 | 覆盖 trusted 合并、deny 过滤、safe env 与 budget override 聚合 |
-| `test/runtime/test_agent_runtime.py` | 修改 | 增加 policy deny 与 budget override 的主循环集成测试 |
+| `test/extensions/test_hook_policy_runtime.py` | 新建 | 覆盖 trusted 合并、deny 过滤、safe env 与 budget override 聚合 |
+| `test/orchestration/test_agent_runtime.py` | 修改 | 增加 policy deny 与 budget override 的主循环集成测试 |
 | `test/tools/test_agent_tools_shell.py` | 修改 | 增加 safe env 传入 bash 子进程的测试 |
 | `README.md` | 修改 | 补充工作区 policy manifest 发现路径、字段示例与合并规则 |
 | `docs/Architecture.md` | 修改 | 写回 hook policy runtime 在当前架构中的位置 |
@@ -39,17 +39,17 @@ manifest 缺省 `trusted=true`；当 `trusted=false` 时会被跳过，并记录
 
 | 测试文件 | 测试方法/分组 | 验证点 |
 |----------|---------------|--------|
-| `test_hook_policy_runtime` | merge + filter（2 个） | trusted manifest 合并、untrusted 跳过、deny 过滤、safe env 与 budget override 聚合 |
-| `test_agent_runtime` | policy budget / deny（2 个） | budget override 在首次模型调用前生效；deny 规则过滤实际 tool registry |
+| `test/extensions/test_hook_policy_runtime.py` | merge + filter（2 个） | trusted manifest 合并、untrusted 跳过、deny 过滤、safe env 与 budget override 聚合 |
+| `test/orchestration/test_agent_runtime.py` | policy budget / deny（2 个） | budget override 在首次模型调用前生效；deny 规则过滤实际 tool registry |
 | `test_agent_tools_shell` | `test_bash_passes_safe_env_to_subprocess` | safe env 确实进入 bash 子进程 `env` |
 
 ## 回归结果
 
 定向验证：
 
-- `python -m unittest discover -s test/runtime -p "test_hook_policy_runtime.py" -v` → 2/2 OK
+- `python -m unittest discover -s test/extensions -p "test_hook_policy_runtime.py" -v` → 2/2 OK
 - `python -m unittest discover -s test/tools -p "test_agent_tools_shell.py" -v` → 7/7 OK
-- `python -m unittest discover -s test/runtime -p "test_agent_runtime.py" -v` → 26/26 OK
+- `python -m unittest discover -s test/orchestration -p "test_agent_runtime.py" -v` → 26/26 OK
 - `python -m unittest discover -s test -v` → 195/195 OK
 
 

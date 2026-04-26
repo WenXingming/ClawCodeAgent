@@ -4,18 +4,21 @@
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `src/context/__init__.py` | 新建 | 建立 context 子包统一导出入口 |
-| `src/context/context_budget.py` | 新建 | `TokenBudgetSnapshot`、`ContextTokenEstimator` 与 `ContextBudgetEvaluator` |
-| `src/context/budget_guard.py` | 新建 | `BudgetGuard` 五维预算闸门与私有 `_check_*` 子方法 |
-| `src/runtime/agent_runtime.py` | 修改 | `_execute_loop` 接入 token / cost / tool_calls / model_calls / session_turns 闸门 |
-| `test/context/test_token_budget.py` | 新建 | 15 个 token 估算与预算快照单测 |
-| `test/runtime/test_agent_runtime.py` | 追加 | 5 个预算闸门集成测试 |
+| `src/budget/budget_snapshot.py` | 新建 | `TokenBudgetSnapshot` 预算快照对象 |
+| `src/budget/token_estimator.py` | 新建 | `ContextTokenEstimator` 与统一 token 估算逻辑 |
+| `src/budget/budget_evaluator.py` | 新建 | `ContextBudgetEvaluator` 与预算投影 |
+| `src/budget/budget_guard.py` | 新建 | `BudgetGuard` 五维预算闸门与私有 `_check_*` 子方法 |
+| `src/orchestration/agent_runtime.py` | 修改 | `_execute_loop` 接入 token / cost / tool_calls / model_calls / session_turns 闸门 |
+| `test/budget/test_token_estimator.py` | 新建 | token 估算单测 |
+| `test/budget/test_budget_evaluator.py` | 新建 | 预算快照与投影单测 |
+| `test/budget/test_budget_guard.py` | 新建 | 预算闸门单测 |
+| `test/orchestration/test_agent_runtime.py` | 追加 | 5 个预算闸门集成测试 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-009 实施决策归档 |
 
 ## 关键设计决策
 
 ### 1. token 估算采用 char/4 启发式
-`context_budget.py` 采用 `1 token ≈ 4 chars` 的近似规则；每条消息额外计入结构开销，
+`token_estimator.py` 采用 `1 token ≈ 4 chars` 的近似规则；每条消息额外计入结构开销，
 工具 schema 先序列化再估算。这样可在不引入真实 tokenizer 依赖的前提下，稳定完成调用前预检。
 
 ### 2. 明确区分软超限与硬超限
@@ -63,14 +66,14 @@
 
 | 测试文件 | 测试方法/分组 | 验证点 |
 |----------|---------------|--------|
-| `test_token_budget` | message/token 估算基础（4 个） | 空消息、内容长度、多模态 list、非字符串内容的估算路径正确 |
-| `test_token_budget` | messages/tools 聚合估算（4 个） | 空消息列表、多消息累积、空工具、非空工具 schema 投影正确 |
-| `test_token_budget` | TokenBudgetSnapshot 语义（7 个） | 无上限、不过限、软超限、硬超限、双超限、snapshot 投影字段、soft limit 下限为 0 |
-| `test_agent_runtime` | `test_run_stops_on_token_limit` | token 硬超限在模型调用前拦截 |
-| `test_agent_runtime` | `test_run_stops_on_cost_limit` | 累计成本超限在模型调用前拦截 |
-| `test_agent_runtime` | `test_run_stops_on_tool_call_limit` | 第一个工具执行后即触发 tool_call_limit |
-| `test_agent_runtime` | `test_run_stops_on_model_call_limit` | 第 2 轮开始前拦截第二次模型调用 |
-| `test_agent_runtime` | `test_run_stops_on_session_turns_limit_with_offset` | resume 场景会计入历史 turns 偏移 |
+| `test/budget/test_token_estimator.py` | message/token 估算基础 | 空消息、内容长度、多模态 list、非字符串内容的估算路径正确 |
+| `test/budget/test_token_estimator.py` | messages/tools 聚合估算 | 空消息列表、多消息累积、空工具、非空工具 schema 投影正确 |
+| `test/budget/test_budget_evaluator.py` | TokenBudgetSnapshot 语义 | 无上限、不过限、软超限、硬超限、双超限、snapshot 投影字段、soft limit 下限为 0 |
+| `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_token_limit` | token 硬超限在模型调用前拦截 |
+| `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_cost_limit` | 累计成本超限在模型调用前拦截 |
+| `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_tool_call_limit` | 第一个工具执行后即触发 tool_call_limit |
+| `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_model_call_limit` | 第 2 轮开始前拦截第二次模型调用 |
+| `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_session_turns_limit_with_offset` | resume 场景会计入历史 turns 偏移 |
 
 ## 回归结果
 

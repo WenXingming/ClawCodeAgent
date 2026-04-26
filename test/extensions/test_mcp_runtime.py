@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runtime.mcp_runtime import MCPRuntime, MCPTransportError
+from extensions.mcp_runtime import MCPRuntime, MCPTransportError
 
 
 class MCPRuntimeTests(unittest.TestCase):

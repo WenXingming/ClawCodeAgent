@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from runtime.task_runtime import TaskRuntime, TaskStatus
-from runtime.workflow_runtime import WorkflowRuntime, WorkflowRunStatus
+from planning.task_runtime import TaskRuntime, TaskStatus
+from planning.workflow_runtime import WorkflowRuntime, WorkflowRunStatus
 
 
 class WorkflowRuntimeTests(unittest.TestCase):

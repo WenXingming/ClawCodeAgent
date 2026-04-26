@@ -61,9 +61,9 @@
 执行命令：
 
 ```powershell
-python -m unittest test.openai_client.test_openai_client_streaming -v
-python -m unittest test.openai_client.test_openai_client -v
-python -m unittest test.core_contracts.test_core_contracts -v
+python -m unittest discover -s test/openai_client -p "test_openai_client_streaming.py" -v
+python -m unittest discover -s test/openai_client -p "test_openai_client.py" -v
+python -m unittest discover -s test/core_contracts -p "test_core_contracts.py" -v
 python -m unittest discover -s test -v
 ```
 

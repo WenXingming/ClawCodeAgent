@@ -14,7 +14,7 @@ $env:OPENAI_BASE_URL = "http://127.0.0.1:8000/v1"
 $env:OPENAI_API_KEY = "your-api-key"
 ```
 
-`src/` 现在是源码根目录，不再作为 `src` 包名参与导入。代码里应使用 `from core_contracts...`、`from runtime...` 这类顶层绝对导入。
+`src/` 现在是源码根目录，不再作为 `src` 包名参与导入。代码里应使用 `from core_contracts...`、`from orchestration...`、`from planning...`、`from extensions...`、`from budget...` 这类顶层绝对导入。
 
 ## 3. 运行一次最小实验
 
@@ -220,7 +220,7 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <sessi
 ```python
 from pathlib import Path
 
-from runtime.task_runtime import TaskRuntime
+from planning.task_runtime import TaskRuntime
 
 runtime = TaskRuntime.from_workspace(Path('.'))
 runtime.create_task('task-001', '实现 Task Runtime')
@@ -263,7 +263,7 @@ print([task.task_id for task in runtime.next_tasks()])
 ```python
 from pathlib import Path
 
-from runtime.plan_runtime import PlanRuntime, PlanStep
+from planning.plan_runtime import PlanRuntime, PlanStep
 
 runtime = PlanRuntime.from_workspace(Path('.'))
 runtime.update_plan(
@@ -373,7 +373,7 @@ print(runtime.render_plan())
 ```python
 from pathlib import Path
 
-from runtime.search_runtime import SearchRuntime
+from extensions.search_runtime import SearchRuntime
 
 runtime = SearchRuntime.from_workspace(Path('.'))
 runtime.activate_provider('workspace-search')
@@ -435,7 +435,7 @@ print(response.results[0].title)
 ```python
 from pathlib import Path
 
-from runtime.mcp_runtime import MCPRuntime
+from extensions.mcp_runtime import MCPRuntime
 
 runtime = MCPRuntime.from_workspace(Path('.'))
 print(runtime.list_resources())
@@ -463,7 +463,7 @@ print(tool_result.content)
 
 ```python
 from core_contracts.config import AgentRuntimeConfig, BudgetConfig
-from runtime.agent_runtime import LocalCodingAgent
+from orchestration.agent_runtime import LocalCodingAgent
 
 config = AgentRuntimeConfig(
     cwd='.',

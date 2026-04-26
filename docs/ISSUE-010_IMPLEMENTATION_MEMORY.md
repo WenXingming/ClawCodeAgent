@@ -6,16 +6,16 @@
 |------|----------|------|
 | `src/context/context_snipper.py` | 新建 | `SnipResult`、`ContextSnipper` 与 tombstone 剪裁逻辑 |
 | `src/context/__init__.py` | 修改 | 导出 `SnipResult` 与 `ContextSnipper` |
-| `src/runtime/agent_runtime.py` | 修改 | 在 soft_over 时接入 `ContextSnipper.snip()`，并追加 `snip_boundary` 事件 |
+| `src/orchestration/agent_runtime.py` | 修改 | 在 soft_over 时接入 `ContextSnipper.snip()`，并追加 `snip_boundary` 事件 |
 | `docs/Architecture.md` | 修改 | ContextPkg 中补充 `context_snipper.py` 节点与依赖关系 |
-| `test/context/test_snip.py` | 新建 | 20 个 snip 单测 |
-| `test/runtime/test_agent_runtime.py` | 追加 | 2 个 soft_over / non-soft_over 集成测试 |
+| `test/context/test_context_snipper.py` | 新建 | 20 个 snip 单测 |
+| `test/orchestration/test_agent_runtime.py` | 追加 | 2 个 soft_over / non-soft_over 集成测试 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-010 实施决策归档 |
 
 ## 关键设计决策
 
 ### 1. snip 只由 `is_soft_over` 触发
-`runtime/agent_runtime.py` 在每轮 token preflight 后检查 `snapshot.is_soft_over`；
+`orchestration/agent_runtime.py` 在每轮 token preflight 后检查 `snapshot.is_soft_over`；
 仅当软超限时才执行 `ContextSnipper.snip()`，避免在正常上下文压力下过早丢弃历史内容。
 
 ### 2. 保留区间固定为“前缀 system + 尾部最近 N 条”
@@ -49,11 +49,11 @@
 
 | 测试文件 | 测试方法/分组 | 验证点 |
 |----------|---------------|--------|
-| `test_snip` | `_is_snippable` 候选判定（8 个） | tool、system、user、短/长 assistant、tool_calls assistant、阈值边界、tombstone 去重 |
-| `test_snip` | `_make_tombstone` 行为（5 个） | 保留协议字段、`<system-reminder>` 格式、tool_calls 保留、完整原文不泄漏、预览截断 |
-| `test_snip` | `ContextSnipper.snip` 中间段剪裁（7 个） | 空消息、无候选、middle snip、tail 保留、prefix 保留、重复 tombstone 跳过、tokens_removed 非负 |
-| `test_agent_runtime` | `test_snip_triggered_on_soft_over` | soft_over 时产生 `snip_boundary`，并记录 `snipped_count/tokens_removed` |
-| `test_agent_runtime` | `test_no_snip_when_not_soft_over` | 不触发 soft_over 时不会追加 snip 事件 |
+| `test/context/test_context_snipper.py` | `_is_snippable` 候选判定（8 个） | tool、system、user、短/长 assistant、tool_calls assistant、阈值边界、tombstone 去重 |
+| `test/context/test_context_snipper.py` | `_make_tombstone` 行为（5 个） | 保留协议字段、`<system-reminder>` 格式、tool_calls 保留、完整原文不泄漏、预览截断 |
+| `test/context/test_context_snipper.py` | `ContextSnipper.snip` 中间段剪裁（7 个） | 空消息、无候选、middle snip、tail 保留、prefix 保留、重复 tombstone 跳过、tokens_removed 非负 |
+| `test/orchestration/test_agent_runtime.py` | `test_snip_triggered_on_soft_over` | soft_over 时产生 `snip_boundary`，并记录 `snipped_count/tokens_removed` |
+| `test/orchestration/test_agent_runtime.py` | `test_no_snip_when_not_soft_over` | 不触发 soft_over 时不会追加 snip 事件 |
 
 ## 回归结果
 

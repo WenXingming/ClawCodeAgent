@@ -14,8 +14,7 @@
 
 1. 在根目录 `src` 新建契约模块：
    - `src/core_contracts/`
-2. 新建包初始化文件：
-   - `src/__init__.py`
+2. 当前目录结构下不再依赖源码根聚合导出，公开契约直接从 `src/core_contracts/` 导入。
 3. 在根目录 `test` 新建测试：
    - `test/core_contracts/test_core_contracts.py`
    - `test/__init__.py`
@@ -123,7 +122,7 @@ python -m unittest discover -s test -v
 
 1. `src/core_contracts/`
 2. `test/core_contracts/test_core_contracts.py`
-3. `src/__init__.py`
+3. 当前结构已不再保留源码根聚合入口
 4. `test/__init__.py`
 
 说明：
@@ -151,7 +150,7 @@ python -m unittest discover -s test -v
 回归验证：
 
 ```powershell
-python -m unittest test.core_contracts.test_core_contracts -v
+python -m unittest discover -s test/core_contracts -p "test_core_contracts.py" -v
 python -m unittest discover -s test -v
 ```
 

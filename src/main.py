@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from control_plane.cli import main as _control_plane_main
 from openai_client.openai_client import OpenAIClient
-from runtime.agent_runtime import LocalCodingAgent
+from orchestration.agent_runtime import LocalCodingAgent
 from session.session_store import AgentSessionStore
 
 

@@ -27,8 +27,8 @@ from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExe
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
-from runtime.hook_policy_runtime import HookPolicyRuntime
-from runtime.plugin_runtime import PluginRuntime
+from extensions.hook_policy_runtime import HookPolicyRuntime
+from extensions.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore

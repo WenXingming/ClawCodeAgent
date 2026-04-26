@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from .context_budget import ContextTokenEstimator
+from budget.token_estimator import ContextTokenEstimator
 
 @dataclass(frozen=True)
 class SnipResult:
