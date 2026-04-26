@@ -22,7 +22,7 @@ from tools.agent_tools import AgentTool
 class ParsedSlashCommand:
     """表示一次成功解析的 slash 输入。
 
-    外部通常先通过 SlashCommandDispatcher.parse() 获取该对象，
+    外部通常先通过 SlashCommandDispatcher.parse_slash_command() 获取该对象，
     然后再交给分发器或具体处理器执行。
     """
 
@@ -78,12 +78,12 @@ class SlashCommandDispatcher:
     """本地 slash 命令的面向对象分发器。
 
     工作流分为三步：
-    1. parse() 把原始输入转换为 ParsedSlashCommand。
-    2. dispatch() 按命令名查找 SlashCommandSpec 并执行处理器。
+    1. parse_slash_command() 把原始输入转换为 ParsedSlashCommand。
+    2. dispatch_slash_command() 按命令名查找 SlashCommandSpec 并执行处理器。
     3. 处理器从 SlashCommandContext 读取会话、预算、权限与工具信息，返回 SlashCommandResult。
 
-    外部推荐直接复用默认分发器暴露的兼容函数；如果需要注入自定义预算评估器，
-    也可以显式实例化本类并调用其公有方法。
+    外部可直接实例化本类并调用其公有方法；如果需要注入自定义预算评估器，
+    可在构造时显式传入。
     """
 
     def __init__(self, budget_evaluator: ContextBudgetEvaluator | None = None) -> None:
@@ -99,7 +99,7 @@ class SlashCommandDispatcher:
         self._specs = self._build_specs()  # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，按帮助输出顺序保存。
         self._spec_index = self._build_spec_index(self._specs)  # dict[str, SlashCommandSpec]: 命令名到规格的查找索引。
 
-    def parse(self, input_text: str) -> ParsedSlashCommand | None:
+    def parse_slash_command(self, input_text: str) -> ParsedSlashCommand | None:
         """从原始输入中提取 slash 命令。
 
         Args:
@@ -120,7 +120,7 @@ class SlashCommandDispatcher:
             raw_input=input_text,
         )
 
-    def dispatch(
+    def dispatch_slash_command(
         self,
         context: SlashCommandContext,
         input_text: str,
@@ -134,7 +134,7 @@ class SlashCommandDispatcher:
         Returns:
             SlashCommandResult: 分流结果，描述是否已处理以及后续是否继续 query。
         """
-        parsed = self.parse(input_text)
+        parsed = self.parse_slash_command(input_text)
         if parsed is None:
             return SlashCommandResult(
                 handled=False,
@@ -142,13 +142,13 @@ class SlashCommandDispatcher:
                 prompt=input_text,
             )
 
-        spec = self.find(parsed.command_name)
+        spec = self.find_slash_command(parsed.command_name)
         if spec is None:
             return self._build_unknown_command_result(parsed.command_name)
 
         return spec.handler(context, parsed)
 
-    def get_specs(self) -> tuple[SlashCommandSpec, ...]:
+    def get_slash_command_specs(self) -> tuple[SlashCommandSpec, ...]:
         """返回当前分发器支持的 slash 命令规格列表。
 
         Returns:
@@ -156,7 +156,7 @@ class SlashCommandDispatcher:
         """
         return self._specs
 
-    def find(self, command_name: str) -> SlashCommandSpec | None:
+    def find_slash_command(self, command_name: str) -> SlashCommandSpec | None:
         """按名称查找 slash 命令规格。
 
         Args:
@@ -180,6 +180,7 @@ class SlashCommandDispatcher:
             SlashCommandSpec(names=('permissions',), description='Show current tool permissions.', handler=self._handle_permissions),
             SlashCommandSpec(names=('tools',), description='List registered local tools.', handler=self._handle_tools),
             SlashCommandSpec(names=('clear',), description='Fork a new cleared session snapshot.', handler=self._handle_clear),
+            SlashCommandSpec(names=('exit', 'quit'), description='Stop local interaction and return to caller.', handler=self._handle_exit),
         )
 
     def _handle_help(
@@ -198,7 +199,7 @@ class SlashCommandDispatcher:
         """
         del context, parsed
         lines = ['Slash Commands', '==============', '']
-        for spec in self.get_specs():
+        for spec in self.get_slash_command_specs():
             lines.append(f'/{spec.names[0]} - {spec.description}')
         return SlashCommandResult(
             handled=True,
@@ -409,6 +410,29 @@ class SlashCommandDispatcher:
             metadata={'had_history': had_history},
         )
 
+    def _handle_exit(
+        self,
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        """处理退出别名命令，通知上层结束本地交互。
+
+        Args:
+            context (SlashCommandContext): 命令执行上下文；当前命令不读取其中内容。
+            parsed (ParsedSlashCommand): 已解析命令；用于保留用户输入的别名（exit/quit）。
+
+        Returns:
+            SlashCommandResult: 包含退出提示的本地处理结果。
+        """
+        del context
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name=parsed.command_name,
+            output='Exiting local session interaction.',
+            metadata={'exit_requested': True},
+        )
+
     def _build_unknown_command_result(self, command_name: str) -> SlashCommandResult:
         """为未知 slash 命令构造统一错误结果。
 
@@ -448,54 +472,3 @@ class SlashCommandDispatcher:
                 index[name] = spec
         return index
 
-
-_DEFAULT_DISPATCHER = SlashCommandDispatcher()
-
-
-def parse_slash_command(input_text: str) -> ParsedSlashCommand | None:
-    """通过默认分发器解析 slash 命令。
-
-    Args:
-        input_text (str): 用户提交的原始输入文本。
-
-    Returns:
-        ParsedSlashCommand | None: 成功时返回解析结果；普通 prompt 返回 None。
-    """
-    return _DEFAULT_DISPATCHER.parse(input_text)
-
-
-def dispatch_slash_command(
-    context: SlashCommandContext,
-    input_text: str,
-) -> SlashCommandResult:
-    """通过默认分发器执行 slash 分流。
-
-    Args:
-        context (SlashCommandContext): 命令执行上下文。
-        input_text (str): 用户输入文本。
-
-    Returns:
-        SlashCommandResult: 分流结果（是否处理、是否继续常规查询等）。
-    """
-    return _DEFAULT_DISPATCHER.dispatch(context, input_text)
-
-
-def get_slash_command_specs() -> tuple[SlashCommandSpec, ...]:
-    """通过默认分发器返回当前支持的 slash 命令列表。
-
-    Returns:
-        tuple[SlashCommandSpec, ...]: 按帮助输出顺序排列的命令规格。
-    """
-    return _DEFAULT_DISPATCHER.get_specs()
-
-
-def find_slash_command(command_name: str) -> SlashCommandSpec | None:
-    """通过默认分发器按名称查找 slash 命令。
-
-    Args:
-        command_name (str): 待查找的命令名。
-
-    Returns:
-        SlashCommandSpec | None: 找到时返回规格对象，否则返回 None。
-    """
-    return _DEFAULT_DISPATCHER.find(command_name)
