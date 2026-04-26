@@ -30,19 +30,16 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest='command')
     subparsers.required = True
 
-    agent_parser = subparsers.add_parser('agent', help='Run a single agent task.')
+    agent_parser = subparsers.add_parser('agent', help='Start an interactive agent session (new session).')
     _add_common_agent_args(agent_parser)
-    agent_parser.add_argument('prompt', nargs='+', help='User prompt to run.')
 
-    chat_parser = subparsers.add_parser('agent-chat', help='Start an interactive agent chat loop.')
+    chat_parser = subparsers.add_parser('agent-chat', help='Start an interactive agent chat loop (alias for agent).')
     _add_common_agent_args(chat_parser)
     chat_parser.add_argument('--session-id', default='', help='Resume an existing session inside the chat loop.')
-    chat_parser.add_argument('prompt', nargs='*', help='Optional initial prompt to run before the chat loop.')
 
-    resume_parser = subparsers.add_parser('agent-resume', help='Resume a saved session with a new prompt.')
+    resume_parser = subparsers.add_parser('agent-resume', help='Resume a saved session interactively.')
     _add_common_agent_args(resume_parser)
     resume_parser.add_argument('session_id', help='Saved session ID to resume.')
-    resume_parser.add_argument('prompt', nargs='+', help='User prompt to continue with.')
 
     return parser
 
@@ -208,24 +205,20 @@ def main(
 
     try:
         if args.command == 'agent':
-            result = _run_agent_command(
+            return _run_agent_command(
                 args,
                 openai_client_cls=openai_client_cls,
                 agent_cls=agent_cls,
                 session_store_cls=session_store_cls,
             )
-            print(result.final_output)
-            return 0
 
         if args.command == 'agent-resume':
-            result = _run_agent_resume_command(
+            return _run_agent_resume_command(
                 args,
                 openai_client_cls=openai_client_cls,
                 agent_cls=agent_cls,
                 session_store_cls=session_store_cls,
             )
-            print(result.final_output)
-            return 0
 
         if args.command == 'agent-chat':
             return _run_agent_chat_command(
@@ -247,25 +240,22 @@ def _run_agent_command(
     openai_client_cls: type[OpenAIClient],
     agent_cls: type[LocalCodingAgent],
     session_store_cls: type[AgentSessionStore],
-) -> AgentRunResult:
-    """内部方法：执行 `_run_agent_command` 相关逻辑。
-    Args:
-        args (argparse.Namespace): 参数 `args`。
-        openai_client_cls (type[OpenAIClient]): 参数 `openai_client_cls`。
-        agent_cls (type[LocalCodingAgent]): 参数 `agent_cls`。
-        session_store_cls (type[AgentSessionStore]): 参数 `session_store_cls`。
-    Returns:
-        AgentRunResult: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    agent, _ = _build_agent_from_args(
+) -> int:
+    """执行 `agent` 子命令：构造新会话并进入交互循环。"""
+    agent, runtime_config = _build_agent_from_args(
         args,
         openai_client_cls=openai_client_cls,
         agent_cls=agent_cls,
         session_store_cls=session_store_cls,
     )
-    return agent.run(_join_prompt_parts(args.prompt))
+    current_session_directory = _normalize_optional_path(args.session_directory) or runtime_config.session_directory.resolve()
+    return _run_interactive_loop(
+        agent,
+        current_session_id=None,
+        current_session_directory=current_session_directory,
+        pending_session_snapshot=None,
+        session_store_cls=session_store_cls,
+    )
 
 
 def _run_agent_resume_command(
@@ -274,16 +264,22 @@ def _run_agent_resume_command(
     openai_client_cls: type[OpenAIClient],
     agent_cls: type[LocalCodingAgent],
     session_store_cls: type[AgentSessionStore],
-) -> AgentRunResult:
-    """执行 agent-resume 子命令并返回运行结果。"""
-    agent, session_snapshot, _ = _build_resumed_agent(
+) -> int:
+    """执行 `agent-resume` 子命令：加载存档会话并进入交互循环。"""
+    agent, pending_session_snapshot, current_session_directory = _build_resumed_agent(
         args,
         session_id=args.session_id,
         openai_client_cls=openai_client_cls,
         agent_cls=agent_cls,
         session_store_cls=session_store_cls,
     )
-    return agent.resume(_join_prompt_parts(args.prompt), session_snapshot)
+    return _run_interactive_loop(
+        agent,
+        current_session_id=args.session_id,
+        current_session_directory=current_session_directory,
+        pending_session_snapshot=pending_session_snapshot,
+        session_store_cls=session_store_cls,
+    )
 
 
 def _run_agent_chat_command(
@@ -293,7 +289,7 @@ def _run_agent_chat_command(
     agent_cls: type[LocalCodingAgent],
     session_store_cls: type[AgentSessionStore],
 ) -> int:
-    """执行交互式聊天命令。"""
+    """执行 `agent-chat` 子命令（与 agent/agent-resume 共用同一交互循环）。"""
     current_session_id = _normalize_optional_text(args.session_id)
     current_session_directory = _normalize_optional_path(args.session_directory)
     pending_session_snapshot: AgentSessionSnapshot | None = None
@@ -315,24 +311,24 @@ def _run_agent_chat_command(
         )
         current_session_directory = current_session_directory or runtime_config.session_directory.resolve()
 
-    initial_prompt = _join_optional_prompt_parts(args.prompt)
-    if initial_prompt:
-        result = _execute_chat_turn(
-            agent,
-            prompt=initial_prompt,
-            current_session_id=current_session_id,
-            current_session_directory=current_session_directory,
-            session_snapshot=pending_session_snapshot,
-            session_store_cls=session_store_cls,
-        )
-        pending_session_snapshot = None
-        _render_chat_result(result, previous_session_id=current_session_id)
-        current_session_id, current_session_directory = _advance_chat_state(
-            result,
-            current_session_id=current_session_id,
-            current_session_directory=current_session_directory,
-        )
+    return _run_interactive_loop(
+        agent,
+        current_session_id=current_session_id,
+        current_session_directory=current_session_directory,
+        pending_session_snapshot=pending_session_snapshot,
+        session_store_cls=session_store_cls,
+    )
 
+
+def _run_interactive_loop(
+    agent: LocalCodingAgent,
+    *,
+    current_session_id: str | None,
+    current_session_directory: Path | None,
+    pending_session_snapshot: AgentSessionSnapshot | None,
+    session_store_cls: type[AgentSessionStore],
+) -> int:
+    """通用多轮交互循环，供 agent / agent-resume / agent-chat 共用。"""
     while True:
         try:
             prompt = input('agent> ')

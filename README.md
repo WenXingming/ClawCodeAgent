@@ -19,36 +19,33 @@ $env:OPENAI_API_KEY = "your-api-key"
 ## 3. 运行一次最小实验
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent "请读取当前目录结构并简要总结"
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent
 ```
+
+启动后在 `agent> ` 提示符处输入问题，按 Enter 发送；输入 `.exit` 或 `.quit` 退出。
 
 ## 4. 常用参数示例
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent \
-  --cwd . \
-  --max-turns 8 \
-  --allow-file-write \
-  "请在当前目录创建一个 demo.txt 并写入 hello"
-
-# powershell 里反斜杠并不作为续行符，因此需要把参数写在一行，或使用反引号 ` 作为续行符：
+# 指定工作目录、最大轮数与写文件权限后进入交互
 C:/ProgramData/anaconda3/python.exe ./src/main.py agent `
   --cwd . `
   --max-turns 8 `
-  --allow-file-write `
-  "请在当前目录创建一个 demo.txt 并写入 hello"
+  --allow-file-write
 
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent --cwd . --max-turns 8 --allow-file-write "请在当前目录创建一个 demo.txt 并写入 hello"
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent --cwd . --max-turns 8 --allow-file-write
 ```
 
 ## 5. 交互式聊天（agent-chat）
+
+`agent-chat` 与 `agent` 完全等价，均进入多轮交互循环。推荐在需要指定 `--session-id` 直接续接历史会话时使用：
 
 ```powershell
 # 新会话进入交互模式
 C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat
 
-# 带一条初始问题进入交互模式
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat "先帮我看当前目录结构"
+# 直接续接指定 session_id（无需单独执行 agent-resume）
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <session_id>
 ```
 
 进入循环后可继续输入新问题；输入 `.exit` 或 `.quit` 退出。
@@ -56,14 +53,14 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat "先帮我看当前
 ## 6. 续跑已保存会话（agent-resume）
 
 每次运行后会在 `.port_sessions/agent/` 目录生成一个 `<session_id>.json` 文件。  
-使用 `agent-resume` 可从上次结束的上下文继续执行：
+使用 `agent-resume` 可从上次结束的上下文继续执行，启动后同样进入多轮交互循环：
 
 ```powershell
 # 查找 session_id（从上次运行的输出或会话目录获得）
 Get-ChildItem .port_sessions\agent\
 
-# Resume（默认继承上次保存的 model/runtime 配置，也可显式覆盖部分参数）
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id> "继续上次任务"
+# 进入 Resume 交互循环（默认继承上次保存的 model/runtime 配置，也可显式覆盖部分参数）
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id>
 ```
 
 **常见错误**
@@ -72,13 +69,14 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id> "继
 
 ## 7. 本地 Slash 控制面命令
 
-以下命令通过 `agent`、`agent-resume` 或 `agent-chat` 的 prompt 入口传入，但会在本地先行分流，不触发模型调用：
+以下命令在 `agent> ` 提示符处直接输入，会在本地先行分流，不触发模型调用：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent "/help"
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id> "/status"
-C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <session_id>
-# 在 chat 里输入 /help、/status、/clear
+# 进入任意命令后在提示符处输入 slash 命令
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent
+agent> /help
+agent> /status
+agent> /clear
 ```
 
 当前支持的高频本地命令：

@@ -106,10 +106,11 @@ class MainEntryTests(unittest.TestCase):
                 clear=False,
             ),
             patch('main.LocalCodingAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['你好', '.exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['agent', '你好'])
+                code = main(['agent'])
 
         self.assertEqual(code, 0)
         self.assertIn('echo:你好', stdout.getvalue())
@@ -121,7 +122,7 @@ class MainEntryTests(unittest.TestCase):
         with patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': ''}, clear=False):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
-                code = main(['agent', '你好'])
+                code = main(['agent'])
 
         self.assertEqual(code, 2)
         self.assertIn('Missing required api_key', stderr.getvalue())
@@ -137,10 +138,11 @@ class MainEntryTests(unittest.TestCase):
                 clear=False,
             ),
             patch('main.LocalCodingAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['.exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['agent', '--allow-file-write', '--allow-shell', '--allow-destructive-shell', '测试'])
+                code = main(['agent', '--allow-file-write', '--allow-shell', '--allow-destructive-shell'])
 
         self.assertEqual(code, 0)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_file_write)
@@ -158,7 +160,7 @@ class MainEntryTests(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
-                code = main(['agent', '--allow-destructive-shell', '测试'])
+                code = main(['agent', '--allow-destructive-shell'])
 
         self.assertEqual(code, 2)
         self.assertIn('allow_destructive_shell requires --allow-shell', stderr.getvalue())
@@ -190,10 +192,11 @@ class MainEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['续跑问题', '.exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['agent-resume', 'resume-test-001', '续跑问题'])
+                code = main(['agent-resume', 'resume-test-001'])
 
         self.assertEqual(code, 0)
         self.assertIn('resumed:续跑问题', stdout.getvalue())
@@ -220,6 +223,7 @@ class MainEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['.exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -232,7 +236,6 @@ class MainEntryTests(unittest.TestCase):
                     '--allow-shell',
                     '--no-allow-file-write',
                     'resume-test-001',
-                    '继续任务',
                 ])
 
         self.assertEqual(code, 0)
@@ -243,7 +246,7 @@ class MainEntryTests(unittest.TestCase):
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_shell_commands)
         self.assertFalse(_FakeAgent.last_runtime.permissions.allow_file_write)
 
-    def test_agent_resume_trailing_flag_after_prompt_still_applies(self) -> None:
+    def test_agent_resume_trailing_flag_after_session_id_applies(self) -> None:
         stored = self._make_session_snapshot()
 
         def _load_snapshot(session_id, directory):
@@ -252,13 +255,13 @@ class MainEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['请把春江花月夜全文写入文件', '.exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 code = main([
                     'agent-resume',
                     'resume-test-001',
-                    '请把春江花月夜全文写入文件',
                     '--allow-file-write',
                 ])
 
@@ -277,13 +280,13 @@ class MainEntryTests(unittest.TestCase):
         with patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
-                code = main(['agent-resume', 'xyz', '续跑'])
+                code = main(['agent-resume', 'xyz'])
 
         self.assertEqual(code, 2)
         self.assertIn('Session not found', stderr.getvalue())
 
     def test_agent_subcommand_still_runs_normally(self) -> None:
-        """agent 子命令应走 run 路径。"""
+        """agent 子命令应走 run 路径，并支持多轮输入。"""
         with (
             patch.dict(
                 os.environ,
@@ -291,10 +294,11 @@ class MainEntryTests(unittest.TestCase):
                 clear=False,
             ),
             patch('main.LocalCodingAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['普通问题', '.exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['agent', '普通问题'])
+                code = main(['agent'])
 
         self.assertEqual(code, 0)
         self.assertIn('echo:普通问题', stdout.getvalue())

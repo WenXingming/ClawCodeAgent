@@ -102,11 +102,11 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['.exit']),
+            patch('builtins.input', side_effect=['第一轮', '.exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
-                code = main(['agent-chat', '第一轮'])
+                code = main(['agent-chat'])
 
         self.assertEqual(code, 0)
         self.assertEqual(_ChatFakeAgent.run_prompts, ['第一轮'])
@@ -207,6 +207,92 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(load_calls, ['old-session', 'cleared-002'])
         self.assertEqual(_ChatFakeAgent.resume_calls, [('/clear', 'old-session'), ('继续处理', 'cleared-002')])
         self.assertIn('Cleared session id: cleared-002', stdout.getvalue())
+
+    # ------------------------------------------------------------------
+    # agent / agent-resume 与 agent-chat 共用同一交互循环
+    # ------------------------------------------------------------------
+
+    def test_agent_enters_interactive_loop(self) -> None:
+        """agent 命令应直接进入交互循环；第一轮走 run，后续轮次自动切换为 resume。"""
+        stored_snapshot = self._make_session_snapshot('chat-session-001')
+
+        def _load_session(session_id, directory=None):
+            return stored_snapshot
+
+        with (
+            patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=['第一轮', '第二轮', '.exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent'])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(_ChatFakeAgent.run_prompts, ['第一轮'])
+        self.assertEqual(_ChatFakeAgent.resume_calls, [('第二轮', 'chat-session-001')])
+        self.assertIn('run:第一轮', stdout.getvalue())
+        self.assertIn('resumed:第二轮', stdout.getvalue())
+
+    def test_agent_enters_interactive_loop_eof(self) -> None:
+        """agent 命令在 EOF 时应正常退出，返回码为 0。"""
+        with (
+            patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
+            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=EOFError),
+        ):
+            code = main(['agent'])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(_ChatFakeAgent.run_prompts, [])
+
+    def test_agent_resume_enters_interactive_loop(self) -> None:
+        """agent-resume 命令应加载存档会话并进入多轮交互循环。"""
+        stored = self._make_session_snapshot('resume-loop-001')
+        load_calls: list[str] = []
+
+        def _load_session(session_id, directory=None):
+            load_calls.append(session_id)
+            return stored
+
+        with (
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=['第一轮续跑', '第二轮续跑', '.quit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent-resume', 'resume-loop-001'])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(_ChatFakeAgent.run_prompts, [])
+        self.assertEqual(
+            _ChatFakeAgent.resume_calls,
+            [('第一轮续跑', 'resume-loop-001'), ('第二轮续跑', 'resume-loop-001')],
+        )
+        self.assertIn('resumed:第一轮续跑', stdout.getvalue())
+        self.assertIn('resumed:第二轮续跑', stdout.getvalue())
+
+    def test_agent_resume_skips_empty_input(self) -> None:
+        """agent-resume 命令在空输入时应跳过，不触发 agent.resume。"""
+        stored = self._make_session_snapshot('resume-empty-001')
+
+        def _load_session(session_id, directory=None):
+            return stored
+
+        with (
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=['', '   ', '有效输入', '.exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent-resume', 'resume-empty-001'])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(_ChatFakeAgent.resume_calls), 1)
+        self.assertEqual(_ChatFakeAgent.resume_calls[0][0], '有效输入')
 
 
 if __name__ == '__main__':
