@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -957,6 +959,51 @@ def _request_stdio(
     Raises:
         Exception: 按调用链透传的异常。
     """
+    last_error: MCPTransportError | None = None
+    for transport_mode in ('framed', 'jsonl'):
+        try:
+            return _request_stdio_with_mode(
+                server,
+                method,
+                params,
+                timeout_seconds=timeout_seconds,
+                transport_mode=transport_mode,
+            )
+        except MCPTransportError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise MCPTransportError(server_name=server.name, method=method, detail='Unknown stdio transport failure')
+
+
+def _request_stdio_with_mode(
+    server: MCPServerProfile,
+    method: str,
+    params: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    transport_mode: str,
+) -> dict[str, Any]:
+    """内部方法：按给定 stdio 编码模式发起 MCP 请求。"""
+    if transport_mode == 'framed':
+        return _request_stdio_framed(server, method, params, timeout_seconds=timeout_seconds)
+    if transport_mode == 'jsonl':
+        return _request_stdio_jsonl(server, method, params, timeout_seconds=timeout_seconds)
+    raise MCPTransportError(
+        server_name=server.name,
+        method=method,
+        detail=f'Unsupported stdio transport mode: {transport_mode}',
+    )
+
+
+def _request_stdio_framed(
+    server: MCPServerProfile,
+    method: str,
+    params: dict[str, Any],
+    *,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """内部方法：使用 Content-Length framing 请求 MCP。"""
     command = [server.command, *server.args]
     env = os.environ.copy()
     env.update(server.env)
@@ -1070,6 +1117,221 @@ def _request_stdio(
     if not isinstance(result, dict):
         return {}
     return result
+
+
+def _request_stdio_jsonl(
+    server: MCPServerProfile,
+    method: str,
+    params: dict[str, Any],
+    *,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """内部方法：使用 JSONL stdio 兼容模式请求 MCP。"""
+    command = [server.command, *server.args]
+    env = os.environ.copy()
+    env.update(server.env)
+
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(server.cwd) if server.cwd is not None else None,
+            env=env,
+        )
+    except OSError as exc:
+        raise MCPTransportError(
+            server_name=server.name,
+            method=method,
+            detail=f'Failed to spawn MCP server: {exc}',
+        ) from exc
+
+    try:
+        _write_jsonl_message(
+            process,
+            {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'initialize',
+                'params': {
+                    'protocolVersion': MCP_PROTOCOL_VERSION,
+                    'capabilities': {},
+                    'clientInfo': {
+                        'name': 'claw-code-agent',
+                        'version': '0.1.0',
+                    },
+                },
+            },
+            server_name=server.name,
+            method=method,
+        )
+        initialize_response = _read_jsonl_response_for_id(
+            process,
+            request_id=1,
+            timeout_seconds=timeout_seconds,
+            server_name=server.name,
+            method=method,
+        )
+
+        initialize_error = initialize_response.get('error') if isinstance(initialize_response, dict) else None
+        if isinstance(initialize_error, dict):
+            raise MCPTransportError(
+                server_name=server.name,
+                method='initialize',
+                detail=str(initialize_error.get('message') or initialize_error),
+                stderr=_collect_stderr(process),
+                exit_code=process.returncode,
+            )
+
+        _write_jsonl_message(
+            process,
+            {
+                'jsonrpc': '2.0',
+                'method': 'notifications/initialized',
+                'params': {},
+            },
+            server_name=server.name,
+            method=method,
+        )
+        _write_jsonl_message(
+            process,
+            {
+                'jsonrpc': '2.0',
+                'id': 2,
+                'method': method,
+                'params': params,
+            },
+            server_name=server.name,
+            method=method,
+        )
+        response = _read_jsonl_response_for_id(
+            process,
+            request_id=2,
+            timeout_seconds=timeout_seconds,
+            server_name=server.name,
+            method=method,
+        )
+    finally:
+        if process.stdin is not None and not process.stdin.closed:
+            process.stdin.close()
+        if process.poll() is None:
+            process.terminate()
+
+    response_error = response.get('error') if isinstance(response, dict) else None
+    if isinstance(response_error, dict):
+        raise MCPTransportError(
+            server_name=server.name,
+            method=method,
+            detail=str(response_error.get('message') or response_error),
+            stderr=_collect_stderr(process),
+            exit_code=process.returncode,
+        )
+
+    result = response.get('result') if isinstance(response, dict) else None
+    if not isinstance(result, dict):
+        return {}
+    return result
+
+
+def _write_jsonl_message(
+    process: subprocess.Popen[bytes],
+    payload: dict[str, Any],
+    *,
+    server_name: str,
+    method: str,
+) -> None:
+    """内部方法：向 JSONL stdio 进程写入一条请求。"""
+    if process.stdin is None:
+        raise MCPTransportError(server_name=server_name, method=method, detail='Missing stdio stdin pipe')
+    body = json.dumps(payload, ensure_ascii=True).encode('utf-8') + b'\n'
+    process.stdin.write(body)
+    process.stdin.flush()
+
+
+def _read_jsonl_response_for_id(
+    process: subprocess.Popen[bytes],
+    *,
+    request_id: int,
+    timeout_seconds: float,
+    server_name: str,
+    method: str,
+) -> dict[str, Any]:
+    """内部方法：从 JSONL stdio 输出中读取指定 id 的响应。"""
+    if process.stdout is None:
+        raise MCPTransportError(server_name=server_name, method=method, detail='Missing stdio stdout pipe')
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise MCPTransportError(
+                server_name=server_name,
+                method=method,
+                detail='Timed out waiting for MCP response',
+                stderr=_collect_stderr(process),
+                exit_code=process.returncode,
+            )
+        raw_line = _readline_with_timeout(process.stdout, remaining)
+        if raw_line is None:
+            raise MCPTransportError(
+                server_name=server_name,
+                method=method,
+                detail='Timed out waiting for MCP response',
+                stderr=_collect_stderr(process),
+                exit_code=process.returncode,
+            )
+        if not raw_line:
+            raise MCPTransportError(
+                server_name=server_name,
+                method=method,
+                detail='MCP server closed stdout before response',
+                stderr=_collect_stderr(process),
+                exit_code=process.returncode,
+            )
+        line = raw_line.decode('utf-8', errors='replace').strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get('id') == request_id:
+            return payload
+
+
+def _readline_with_timeout(stream: Any, timeout_seconds: float) -> bytes | None:
+    """内部方法：在超时约束下读取一行。"""
+    holder: dict[str, bytes | BaseException] = {}
+
+    def _worker() -> None:
+        try:
+            holder['line'] = stream.readline()
+        except BaseException as exc:  # noqa: BLE001
+            holder['error'] = exc
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    if thread.is_alive():
+        return None
+    error = holder.get('error')
+    if isinstance(error, BaseException):
+        raise error
+    line = holder.get('line')
+    if isinstance(line, bytes):
+        return line
+    return b''
+
+
+def _collect_stderr(process: subprocess.Popen[bytes]) -> str:
+    """内部方法：收集当前进程 stderr 片段。"""
+    try:
+        _stdout_data, stderr_data = process.communicate(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        _stdout_data, stderr_data = process.communicate()
+    return _decode_stderr(stderr_data)
 
 
 def _encode_mcp_message(payload: dict[str, Any]) -> bytes:
