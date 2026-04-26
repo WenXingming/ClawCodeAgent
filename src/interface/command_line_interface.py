@@ -17,7 +17,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from control_plane.startup_banner import StartupBannerRenderer
+from interface.startup_banner import StartupBannerRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import ModelPricing

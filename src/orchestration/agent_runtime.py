@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from budget.budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
-from control_plane.slash_commands import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
+from interface.slash_commands_interface import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from context.context_compactor import CompactionResult, ContextCompactor
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig

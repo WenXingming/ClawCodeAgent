@@ -6,7 +6,7 @@ from dataclasses import replace
 import unittest
 from pathlib import Path
 
-from control_plane.slash_commands import (
+from interface.slash_commands_interface import (
     SlashCommandContext,
     SlashCommandDispatcher,
 )

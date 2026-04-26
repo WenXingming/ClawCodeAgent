@@ -6,10 +6,10 @@
 |------|----------|------|
 | `src/extensions/plugin_runtime.py` | 新建 | 实现 plugin manifest 发现、alias/virtual tool 注册、冲突记录与摘要渲染 |
 | `src/orchestration/agent_runtime.py` | 修改 | `LocalCodingAgent` 初始化时自动装载工作区插件并合并到 tool registry |
-| `src/control_plane/slash_commands.py` | 修改 | `/tools` 支持渲染插件摘要 |
+| `src/interface/slash_commands_interface.py` | 修改 | `/tools` 支持渲染插件摘要 |
 | `test/extensions/test_plugin_runtime.py` | 新建 | 覆盖 alias 注册、virtual 执行、冲突处理 |
 | `test/orchestration/test_agent_runtime.py` | 修改 | 增加工作区插件被主循环真实调用的集成测试 |
-| `test/control_plane/test_slash_commands.py` | 修改 | 增加 `/tools` 插件摘要渲染测试 |
+| `test/interface/test_slash_commands.py` | 修改 | 增加 `/tools` 插件摘要渲染测试 |
 | `docs/Architecture.md` | 修改 | 写回 plugin runtime 在当前架构中的位置 |
 | `README.md` | 修改 | 补充工作区插件 manifest 发现路径、示例与冲突策略 |
 
@@ -41,7 +41,7 @@ Issue 的 DoD 只要求“插件摘要可渲染”，当前最自然的观测面
 |----------|---------------|--------|
 | `test/extensions/test_plugin_runtime.py` | alias + virtual（2 个） | manifest 发现、alias 注册、virtual 执行、冲突跳过、摘要内容 |
 | `test/orchestration/test_agent_runtime.py` | `test_run_loads_virtual_tool_from_workspace_plugin_manifest` | `LocalCodingAgent` 初始化时真实装载工作区插件，并在主循环里执行插件工具 |
-| `test/control_plane/test_slash_commands.py` | `test_dispatch_tools_renders_plugin_summary_when_present` | `/tools` 输出包含插件摘要区块 |
+| `test/interface/test_slash_commands.py` | `test_dispatch_tools_renders_plugin_summary_when_present` | `/tools` 输出包含插件摘要区块 |
 
 ## 回归结果
 
@@ -49,6 +49,6 @@ Issue 的 DoD 只要求“插件摘要可渲染”，当前最自然的观测面
 
 - `python -m unittest discover -s test/extensions -p "test_plugin_runtime.py" -v` → 2/2 OK
 - `python -m unittest discover -s test/orchestration -p "test_agent_runtime.py" -v` → 插件装载集成场景 OK
-- `python -m unittest discover -s test/control_plane -p "test_slash_commands.py" -v` → `/tools` 插件摘要场景 OK
+- `python -m unittest discover -s test/interface -p "test_slash_commands.py" -v` → `/tools` 插件摘要场景 OK
 - `python -m unittest discover -s test -v` → 190/190 OK
 

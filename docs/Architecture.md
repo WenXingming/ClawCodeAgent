@@ -12,9 +12,9 @@
 ```text
 src/
 |- main.py
-|- control_plane/
-|  |- cli.py
-|  '- slash_commands.py
+|- interface/
+|  |- command_line_interface.py
+|  '- slash_commands_interface.py
 |- orchestration/
 |  '- agent_runtime.py
 |- planning/
@@ -62,10 +62,10 @@ graph TB
 
     main(["🧭 main.py"])
 
-    subgraph ControlPlane[control_plane package / CLI 与本地控制面]
+    subgraph ControlPlane[interface package / CLI 与本地控制面]
         direction TB
-        n_cli(["🧭 control_plane/cli.py"])
-        n_slash(["⌨️ control_plane/slash_commands.py"])
+        n_cli(["🧭 interface/command_line_interface.py"])
+        n_slash(["⌨️ interface/slash_commands_interface.py"])
         style ControlPlane fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -222,7 +222,7 @@ graph TB
 - `context/` 只保留上下文收缩行为：`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 reactive compact。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
 - `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、MCP server 都从工作区 `.claw/` manifest 或环境变量发现并对外提供独立 API。
-- `control_plane/` 负责 CLI 和 slash 命令；`slash_commands.py` 依赖预算投影和工具注册表，但不会触发模型调用。
+- `interface/` 负责 CLI 和 slash 命令；`slash_commands_interface.py` 依赖预算投影和工具注册表，但不会触发模型调用。
 - `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
 
 这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界名称更明确了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`，预算能力也从 `context` 中抽出到 `budget`。
@@ -234,7 +234,7 @@ test/
 |- test_main.py
 |- test_main_chat.py
 |- test_all.py
-|- control_plane/
+|- interface/
 |- orchestration/
 |- planning/
 |- extensions/
@@ -258,4 +258,4 @@ test/
 2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧的外部交互面。
 3. 再看 `budget/` 与 `context/`，理解预算投影、上下文剪裁和摘要压缩的职责切分。
 4. 再看 `planning/` 与 `extensions/`，理解工作区本地状态和外部扩展能力各自如何发现、持久化和暴露 API。
-5. 最后看 `orchestration/agent_runtime.py`、`control_plane/cli.py` 和 `main.py`，理解这些能力如何被装配成完整入口。
+5. 最后看 `orchestration/agent_runtime.py`、`interface/command_line_interface.py` 和 `main.py`，理解这些能力如何被装配成完整入口。
