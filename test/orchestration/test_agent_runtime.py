@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from unittest import mock
 from uuid import uuid4
 
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.usage import TokenUsage
+from extensions.search_runtime import SearchResult, SearchResponse, SearchProviderProfile
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from orchestration.agent_runtime import LocalCodingAgent
 from session.session_snapshot import AgentSessionSnapshot
@@ -1019,6 +1021,136 @@ class LocalCodingAgentTests(unittest.TestCase):
         self.assertFalse(retry_events[0].get('ok'))
         self.assertEqual(result.stop_reason, 'backend_error')
         self.assertEqual(len(fake_client.calls), 2)
+
+    def test_run_calls_workspace_search_tool_from_main_loop(self) -> None:
+        """验证 workspace_search 工具在主循环被正确调用。"""
+        workspace = _make_test_dir()
+        
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='',
+                tool_calls=(
+                    ToolCall(
+                        id='call-1',
+                        name='workspace_search',
+                        arguments={'query': 'hello'},
+                    ),
+                ),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=2, output_tokens=3),
+            ),
+            OneTurnResponse(
+                content='搜索完成',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=5, output_tokens=2),
+            ),
+        ])
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        
+        # Mock 搜索 runtime，让它有一个 provider 以便工具被注册
+        mock_provider = SearchProviderProfile(
+            provider_id='test_provider',
+            provider='test',
+            title='Test Provider',
+            base_url='http://test.com',
+            source_path=Path('test.json'),
+        )
+        agent.search_runtime.providers = [mock_provider]
+        
+        # 重新注册工具以应用模拟的 provider
+        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        
+        # Mock 搜索方法以返回结果对象
+        mock_result = SearchResult(
+            title='test',
+            url='http://test.com',
+            snippet='test snippet',
+            provider_id='test_provider',
+            rank=1,
+        )
+        mock_response = SearchResponse(
+            provider=mock_provider,
+            query='hello',
+            results=(mock_result,),
+            attempts=1,
+        )
+        agent.search_runtime.search = mock.Mock(return_value=mock_response)
+        
+        result = agent.run('搜索一下内容')
+        
+        # 验证：工具被调用且工作流完整
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.stop_reason, 'stop')
+        self.assertEqual(result.final_output, '搜索完成')
+        agent.search_runtime.search.assert_called_once()
+
+    def test_run_calls_mcp_tools_from_main_loop(self) -> None:
+        """验证 MCP 工具（list_resources, call_tool）在主循环被正确调用。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='',
+                tool_calls=(
+                    ToolCall(
+                        id='call-1',
+                        name='mcp_list_resources',
+                        arguments={'query': 'test'},
+                    ),
+                ),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=2, output_tokens=3),
+            ),
+            OneTurnResponse(
+                content='MCP 查询完成',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=5, output_tokens=2),
+            ),
+        ])
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        
+        # Mock MCP runtime 让它有资源以便工具被注册
+        agent.mcp_runtime.resources = [mock.Mock(uri='test://resource')]
+        agent.mcp_runtime.list_resources = mock.Mock(return_value=[])
+        
+        # 重新注册工具以应用模拟的资源
+        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        
+        result = agent.run('查询 MCP 资源')
+        
+        # 验证：MCP 工具被调用
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.stop_reason, 'stop')
+        self.assertEqual(result.final_output, 'MCP 查询完成')
+        # 验证工具至少被调用了一次
+        self.assertGreaterEqual(agent.mcp_runtime.list_resources.call_count, 1)
+
+    def test_workspace_search_and_mcp_tools_registered_when_configured(self) -> None:
+        """验证当配置了 search providers 和 MCP 资源时，对应工具会被注册。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([])
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        
+        # 配置 search provider 和 MCP 资源
+        mock_search_provider = mock.Mock()
+        mock_search_provider.provider_id = 'test_provider'
+        agent.search_runtime.providers = [mock_search_provider]
+        
+        mock_mcp_resource = mock.Mock()
+        agent.mcp_runtime.resources = [mock_mcp_resource]
+        
+        # 重新注册工具
+        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        
+        # 验证工具被注册
+        self.assertIn('workspace_search', agent.tool_registry)
+        self.assertIn('mcp_list_resources', agent.tool_registry)
+        self.assertIn('mcp_read_resource', agent.tool_registry)
+        self.assertIn('mcp_list_tools', agent.tool_registry)
+        self.assertIn('mcp_call_tool', agent.tool_registry)
 
 
 if __name__ == '__main__':

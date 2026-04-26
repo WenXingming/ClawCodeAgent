@@ -14,6 +14,7 @@ ISSUE-008 扩展：
 
 from __future__ import annotations
 
+from typing import Any
 from dataclasses import dataclass, field
 from uuid import uuid4
 
@@ -26,13 +27,15 @@ from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
+from extensions.mcp_runtime import MCPRuntime, MCPTransportError
+from extensions.search_runtime import SearchQueryError, SearchRuntime
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
 from extensions.hook_policy_runtime import HookPolicyRuntime
 from extensions.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
-from tools.agent_tools import AgentTool, build_tool_context, default_tool_registry, execute_tool
+from tools.agent_tools import AgentTool, ToolExecutionError, build_tool_context, default_tool_registry, execute_tool
 
 
 _MAX_REACTIVE_COMPACT_RETRIES = 2
@@ -49,16 +52,305 @@ class LocalCodingAgent:
     budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
+    search_runtime: SearchRuntime = field(init=False)
+    mcp_runtime: MCPRuntime = field(init=False)
     plugin_runtime: PluginRuntime = field(init=False)
     hook_policy_runtime: HookPolicyRuntime = field(init=False)
 
     def __post_init__(self) -> None:
+        self.search_runtime = SearchRuntime.from_workspace(self.runtime_config.cwd)
+        self.mcp_runtime = MCPRuntime.from_workspace(self.runtime_config.cwd)
+        self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
         self.plugin_runtime = PluginRuntime.from_workspace(self.runtime_config.cwd, self.tool_registry)
         self.tool_registry = self.plugin_runtime.merge_tool_registry(self.tool_registry)
         self.hook_policy_runtime = HookPolicyRuntime.from_workspace(self.runtime_config.cwd)
         self.tool_registry = self.hook_policy_runtime.filter_tool_registry(self.tool_registry)
         self.runtime_config = self.hook_policy_runtime.apply_runtime_config(self.runtime_config)
         self.context_compactor = ContextCompactor(self.client)
+
+    def _register_workspace_runtime_tools(
+        self,
+        tool_registry: dict[str, AgentTool],
+    ) -> dict[str, AgentTool]:
+        merged_registry = dict(tool_registry)
+
+        if self.search_runtime.providers:
+            merged_registry['workspace_search'] = AgentTool(
+                name='workspace_search',
+                description='Search the configured workspace search provider and return structured web results.',
+                parameters={
+                    'type': 'object',
+                    'properties': {
+                        'query': {'type': 'string'},
+                        'provider_id': {'type': 'string'},
+                        'max_results': {'type': 'integer', 'minimum': 1, 'maximum': 20},
+                        'max_retries': {'type': 'integer', 'minimum': 0, 'maximum': 3},
+                    },
+                    'required': ['query'],
+                },
+                handler=self._run_workspace_search,
+            )
+
+        if self.mcp_runtime.resources or self.mcp_runtime.servers:
+            merged_registry.update(
+                {
+                    'mcp_list_resources': AgentTool(
+                        name='mcp_list_resources',
+                        description='List MCP resources discovered from local manifests and configured MCP servers.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'query': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+                            },
+                        },
+                        handler=self._run_mcp_list_resources,
+                    ),
+                    'mcp_read_resource': AgentTool(
+                        name='mcp_read_resource',
+                        description='Read a specific MCP resource by URI.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'uri': {'type': 'string'},
+                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
+                            },
+                            'required': ['uri'],
+                        },
+                        handler=self._run_mcp_read_resource,
+                    ),
+                    'mcp_list_tools': AgentTool(
+                        name='mcp_list_tools',
+                        description='List tools exposed by configured MCP servers.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'query': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+                            },
+                        },
+                        handler=self._run_mcp_list_tools,
+                    ),
+                    'mcp_call_tool': AgentTool(
+                        name='mcp_call_tool',
+                        description='Call a tool exposed by an MCP server with JSON object arguments.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'tool_name': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'arguments': {
+                                    'type': 'object',
+                                    'additionalProperties': True,
+                                },
+                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
+                            },
+                            'required': ['tool_name'],
+                        },
+                        handler=self._run_mcp_call_tool,
+                    ),
+                }
+            )
+
+        return merged_registry
+
+    def _run_workspace_search(
+        self,
+        arguments: JSONDict,
+        context,
+    ) -> str | tuple[str, JSONDict]:
+        query = self._require_tool_string(arguments, 'query')
+        provider_id = self._optional_tool_string(arguments, 'provider_id')
+        max_results = self._optional_tool_int(arguments, 'max_results', min_value=1, max_value=20)
+        max_retries = self._optional_tool_int(arguments, 'max_retries', min_value=0, max_value=3) or 0
+
+        try:
+            response = self.search_runtime.search(
+                query,
+                provider_id=provider_id,
+                max_results=max_results,
+                max_retries=max_retries,
+            )
+        except (SearchQueryError, ValueError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+
+        lines = [
+            '# Search Results',
+            '',
+            f'- Provider: {response.provider.provider_id}',
+            f'- Query: {response.query}',
+            f'- Attempts: {response.attempts}',
+            '',
+        ]
+        if not response.results:
+            lines.append('No results returned.')
+        else:
+            for item in response.results:
+                lines.extend(
+                    [
+                        f'{item.rank}. {item.title}',
+                        f'URL: {item.url}',
+                        f'Snippet: {item.snippet}',
+                        '',
+                    ]
+                )
+
+        content = self._truncate_tool_output('\n'.join(lines).rstrip(), context.max_output_chars)
+        return (
+            content,
+            {
+                'provider_id': response.provider.provider_id,
+                'attempts': response.attempts,
+                'result_count': len(response.results),
+            },
+        )
+
+    def _run_mcp_list_resources(
+        self,
+        arguments: JSONDict,
+        context,
+    ) -> str | tuple[str, JSONDict]:
+        query = self._optional_tool_string(arguments, 'query')
+        server_name = self._optional_tool_string(arguments, 'server_name')
+        limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 20
+
+        try:
+            resources = self.mcp_runtime.list_resources(query=query, server_name=server_name, limit=limit)
+        except (MCPTransportError, ValueError, FileNotFoundError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+
+        content = self._truncate_tool_output(
+            self.mcp_runtime.render_resource_index(query=query, limit=limit),
+            context.max_output_chars,
+        )
+        return content, {'resource_count': len(resources), 'server_name': server_name or ''}
+
+    def _run_mcp_read_resource(
+        self,
+        arguments: JSONDict,
+        context,
+    ) -> str | tuple[str, JSONDict]:
+        uri = self._require_tool_string(arguments, 'uri')
+        max_chars = self._resolve_tool_output_limit(arguments, context, key='max_chars')
+
+        try:
+            content = self.mcp_runtime.render_resource(uri, max_chars=max_chars)
+        except (MCPTransportError, ValueError, FileNotFoundError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        return content, {'uri': uri}
+
+    def _run_mcp_list_tools(
+        self,
+        arguments: JSONDict,
+        context,
+    ) -> str | tuple[str, JSONDict]:
+        query = self._optional_tool_string(arguments, 'query')
+        server_name = self._optional_tool_string(arguments, 'server_name')
+        limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 50
+
+        try:
+            tools = self.mcp_runtime.list_tools(query=query, server_name=server_name, limit=limit)
+        except (MCPTransportError, ValueError, FileNotFoundError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+
+        content = self._truncate_tool_output(
+            self.mcp_runtime.render_tool_index(query=query, server_name=server_name, limit=limit),
+            context.max_output_chars,
+        )
+        return content, {'tool_count': len(tools), 'server_name': server_name or ''}
+
+    def _run_mcp_call_tool(
+        self,
+        arguments: JSONDict,
+        context,
+    ) -> str | tuple[str, JSONDict]:
+        tool_name = self._require_tool_string(arguments, 'tool_name')
+        server_name = self._optional_tool_string(arguments, 'server_name')
+        raw_tool_arguments = arguments.get('arguments', {})
+        if raw_tool_arguments is None:
+            raw_tool_arguments = {}
+        if not isinstance(raw_tool_arguments, dict):
+            raise ToolExecutionError('mcp_call_tool.arguments must be a JSON object')
+
+        max_chars = self._resolve_tool_output_limit(arguments, context, key='max_chars')
+
+        try:
+            result = self.mcp_runtime.call_tool(
+                tool_name,
+                arguments=dict(raw_tool_arguments),
+                server_name=server_name,
+                max_chars=max_chars,
+            )
+        except (MCPTransportError, ValueError, FileNotFoundError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+
+        content = self._truncate_tool_output(
+            self.mcp_runtime.render_tool_call(
+                tool_name,
+                arguments=dict(raw_tool_arguments),
+                server_name=server_name,
+                max_chars=max_chars,
+            ),
+            context.max_output_chars,
+        )
+        return content, {'server_name': result.server_name, 'tool_name': result.tool_name, 'is_error': result.is_error}
+
+    @staticmethod
+    def _truncate_tool_output(content: str, max_chars: int) -> str:
+        if len(content) <= max_chars:
+            return content
+        omitted = len(content) - max_chars
+        suffix = f'\n\n... truncated {omitted} characters'
+        keep = max(0, max_chars - len(suffix))
+        return content[:keep] + suffix
+
+    @staticmethod
+    def _require_tool_string(arguments: JSONDict, key: str) -> str:
+        value = arguments.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ToolExecutionError(f'{key} must be a non-empty string')
+        return value.strip()
+
+    @staticmethod
+    def _optional_tool_string(arguments: JSONDict, key: str) -> str | None:
+        value = arguments.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ToolExecutionError(f'{key} must be a string when provided')
+        stripped = value.strip()
+        return stripped or None
+
+    @staticmethod
+    def _optional_tool_int(
+        arguments: JSONDict,
+        key: str,
+        *,
+        min_value: int,
+        max_value: int,
+    ) -> int | None:
+        value = arguments.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ToolExecutionError(f'{key} must be an integer when provided')
+        if value < min_value or value > max_value:
+            raise ToolExecutionError(f'{key} must be between {min_value} and {max_value}')
+        return value
+
+    def _resolve_tool_output_limit(
+        self,
+        arguments: JSONDict,
+        context,
+        *,
+        key: str,
+    ) -> int:
+        requested = self._optional_tool_int(arguments, key, min_value=1, max_value=20000)
+        if requested is None:
+            return context.max_output_chars
+        return min(requested, context.max_output_chars)
 
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务（新会话）。"""
