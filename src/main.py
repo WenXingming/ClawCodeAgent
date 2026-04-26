@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from control_plane.command_line_interface import main as _control_plane_main
+from control_plane.command_line_interface import CLI
 from openai_client.openai_client import OpenAIClient
 from orchestration.agent_runtime import LocalCodingAgent
 from session.session_store import AgentSessionStore
@@ -27,12 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         int: 进程退出码（0=成功，非0=失败）
     """
-    return _control_plane_main(
-        argv,
+    cli = CLI(
         openai_client_cls=OpenAIClient,
         agent_cls=LocalCodingAgent,
         session_store_cls=AgentSessionStore,
     )
+    return cli.main(argv)
 
 
 if __name__ == '__main__':

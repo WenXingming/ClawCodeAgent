@@ -872,33 +872,3 @@ class CLI:
         return prompt or None
 
 
-# ----------------------------------------------------------------------
-# 模块级兼容入口（保持对 src/main.py 的稳定导入契约）
-# ----------------------------------------------------------------------
-
-def main(
-    argv: list[str] | None = None,
-    *,
-    openai_client_cls: type[OpenAIClient] = OpenAIClient,
-    agent_cls: type[LocalCodingAgent] = LocalCodingAgent,
-    session_store_cls: type[AgentSessionStore] = AgentSessionStore,
-) -> int:
-    """模块级兼容入口，委托给 CLI 类执行。
-
-    保留当前模块对外的稳定函数签名，使上层入口与测试无需感知面向对象重构。
-    实际工作完全委托给 CLI 实例。
-
-    Args:
-        argv (list[str] | None): 命令行参数列表；为 None 时使用进程原始参数。
-        openai_client_cls (type[OpenAIClient]): 模型客户端类型注入点，供测试替换。
-        agent_cls (type[LocalCodingAgent]): 代理类型注入点，供测试替换。
-        session_store_cls (type[AgentSessionStore]): 会话存储类型注入点，供测试替换。
-    Returns:
-        int: CLI 进程退出码。
-    """
-    cli = CLI(
-        openai_client_cls=openai_client_cls,
-        agent_cls=agent_cls,
-        session_store_cls=session_store_cls,
-    )
-    return cli.main(argv)
