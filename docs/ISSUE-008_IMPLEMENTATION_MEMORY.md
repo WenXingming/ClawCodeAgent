@@ -1,4 +1,4 @@
-# ISSUE-008 实现记忆文档
+﻿# ISSUE-008 实现记忆文档
 
 ## 交付概览
 
@@ -6,10 +6,10 @@
 |------|----------|------|
 | `src/session/session_state.py` | 新增方法 | `from_persisted(messages, transcript, tool_call_count)` |
 | `src/session/session_store.py` | 修改 | `FileNotFoundError` → `ValueError`，与损坏文件语义统一 |
-| `src/orchestration/agent_runtime.py` | 重构 | `run` 瘦身 + 新增 `resume` + 提取 `_execute_loop` |
+| `src/orchestration/local_agent.py` | 重构 | `run` 瘦身 + 新增 `resume` + 提取 `_execute_loop` |
 | `src/main.py` | 修改 | `--session-id` 参数 + resume 执行分支 |
 | `test/session/test_session_state.py` | 新建 | 4 个 from_persisted 单测 |
-| `test/orchestration/test_agent_runtime.py` | 追加 | 4 个 resume 集成测试 |
+| `test/orchestration/test_local_agent.py` | 追加 | 4 个 resume 集成测试 |
 | `test/test_main.py` | 追加 | 3 个 CLI resume 路径测试 |
 | `README.md` | 追加 | Resume 使用示例与常见错误 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-008 实施决策 |
@@ -46,10 +46,10 @@ total_cost_usd = cost_baseline + estimate_cost_usd(usage_delta)
 | test/session/test_session_state.py | test_from_persisted_empty_transcript_falls_back_to_messages | transcript 为空时 fallback |
 | test/session/test_session_state.py | test_from_persisted_preserves_nonempty_transcript | 已有 transcript 不被覆盖 |
 | test/session/test_session_state.py | test_from_persisted_then_append_user_extends_state | 恢复后可继续追加消息 |
-| test/orchestration/test_agent_runtime.py | test_resume_session_id_does_not_drift | session_id 不漂移 |
-| test/orchestration/test_agent_runtime.py | test_resume_accumulates_usage_turns_and_tool_calls | 预算累计正确 |
-| test/orchestration/test_agent_runtime.py | test_resume_model_sees_history_context | 上下文连续可见 |
-| test/orchestration/test_agent_runtime.py | test_resume_backend_error_preserves_session_id_and_saves | 错误时 session_id 保持 |
+| test/orchestration/test_local_agent.py | test_resume_session_id_does_not_drift | session_id 不漂移 |
+| test/orchestration/test_local_agent.py | test_resume_accumulates_usage_turns_and_tool_calls | 预算累计正确 |
+| test/orchestration/test_local_agent.py | test_resume_model_sees_history_context | 上下文连续可见 |
+| test/orchestration/test_local_agent.py | test_resume_backend_error_preserves_session_id_and_saves | 错误时 session_id 保持 |
 | test/test_main.py | test_main_session_id_triggers_resume_not_run | --session-id 走 resume 路径 |
 | test/test_main.py | test_main_resume_missing_session_returns_error | 不存在时 exit=2 + stderr 输出 |
 | test/test_main.py | test_main_without_session_id_still_runs_normally | 无 --session-id 无回归 |
@@ -60,3 +60,4 @@ total_cost_usd = cost_baseline + estimate_cost_usd(usage_delta)
 
 - 测试数：94（原有 83 + 本期新增 11）
 - 结果：全部 OK
+

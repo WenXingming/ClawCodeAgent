@@ -1,4 +1,4 @@
-"""最小命令行入口测试。"""
+﻿"""最小命令行入口测试。"""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ class MainEntryTests(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch('main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalAgent', _FakeAgent),
             patch('builtins.input', side_effect=['你好', '/exit']),
         ):
             stdout = io.StringIO()
@@ -143,7 +143,7 @@ class MainEntryTests(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch('main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalAgent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
             stdout = io.StringIO()
@@ -198,7 +198,7 @@ class MainEntryTests(unittest.TestCase):
 
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
-            patch('main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalAgent', _FakeAgent),
             patch('builtins.input', side_effect=['续跑问题', '/exit']),
         ):
             stdout = io.StringIO()
@@ -230,7 +230,7 @@ class MainEntryTests(unittest.TestCase):
 
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
-            patch('main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalAgent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
             stdout = io.StringIO()
@@ -263,7 +263,7 @@ class MainEntryTests(unittest.TestCase):
 
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
-            patch('main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalAgent', _FakeAgent),
             patch('builtins.input', side_effect=['请把春江花月夜全文写入文件', '/exit']),
         ):
             stdout = io.StringIO()
@@ -303,7 +303,7 @@ class MainEntryTests(unittest.TestCase):
                 {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'},
                 clear=False,
             ),
-            patch('main.LocalCodingAgent', _FakeAgent),
+            patch('main.LocalAgent', _FakeAgent),
             patch('builtins.input', side_effect=['普通问题', '/exit']),
         ):
             stdout = io.StringIO()
@@ -319,3 +319,4 @@ class MainEntryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

@@ -1,4 +1,4 @@
-# ISSUE-006 开发记忆（LocalCodingAgent 最小闭环）
+﻿# ISSUE-006 开发记忆（LocalAgent 最小闭环）
 
 ## 1. 本次目标
 
@@ -21,13 +21,13 @@
    - `append_tool_result(...)`
    - `to_messages(...)`
    - `transcript(...)`
-2. 新增 `src/orchestration/agent_runtime.py`：
-   - `LocalCodingAgent`
+2. 新增 `src/orchestration/local_agent.py`：
+   - `LocalAgent`
    - `run(...)`
    - `_build_openai_tools(...)`
    - `_build_run_result(...)`
-3. 当前调用侧直接从 `src/orchestration/agent_runtime.py` 与 `src/session/session_state.py` 导入公开能力，不再依赖源码根聚合导出。
-4. 新增测试 `test/orchestration/test_agent_runtime.py`，覆盖 ISSUE-006 主场景与边界场景。
+3. 当前调用侧直接从 `src/orchestration/local_agent.py` 与 `src/session/session_state.py` 导入公开能力，不再依赖源码根聚合导出。
+4. 新增测试 `test/orchestration/test_local_agent.py`，覆盖 ISSUE-006 主场景与边界场景。
 
 ### 未实现（按计划故意延后）
 
@@ -68,13 +68,13 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/orchestration -p "test_agent_runtime.py" -v
+C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/orchestration -p "test_local_agent.py" -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test/orchestration/test_agent_runtime.py`：5/5 通过。
+1. `test/orchestration/test_local_agent.py`：5/5 通过。
 2. 全量 `discover`：69/69 通过。
 
 ## 7. 对后续 ISSUE-007/008 的交接建议
@@ -82,3 +82,4 @@ C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 1. ISSUE-007 可在当前 `AgentRunResult` 基础上接入 session 落盘，不影响 run 主循环。
 2. ISSUE-008 的 resume 可以复用 `AgentSessionState` 的消息结构，按恢复状态继续 run。
 3. 若后续要支持工具流式 UI，可在主循环中切换到 `execute_tool_streaming(...)`，不需要重写会话模型。
+

@@ -1,4 +1,4 @@
-"""ISSUE-006 LocalCodingAgent 最小闭环测试。"""
+"""LocalAgent 最小闭环测试。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.usage import TokenUsage
 from extensions.search_runtime import SearchResult, SearchResponse, SearchProviderProfile
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
-from orchestration.agent_runtime import LocalCodingAgent
+from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 
@@ -54,7 +54,7 @@ class _FakeOpenAIClient(OpenAIClient):
         return current
 
 
-class LocalCodingAgentTests(unittest.TestCase):
+class LocalAgentTests(unittest.TestCase):
     """验证 ISSUE-006 主循环最小闭环。"""
 
     def _build_runtime_config(self, workspace: Path, *, max_turns: int = 6) -> AgentRuntimeConfig:
@@ -72,8 +72,8 @@ class LocalCodingAgentTests(unittest.TestCase):
     def _load_session_snapshot(self, workspace: Path, session_id: str) -> AgentSessionSnapshot:
         return AgentSessionStore(workspace / 'sessions').load(session_id)
 
-    def _build_agent(self, fake_client: OpenAIClient, config: AgentRuntimeConfig) -> LocalCodingAgent:
-        return LocalCodingAgent(fake_client, config, AgentSessionStore(config.session_directory))
+    def _build_agent(self, fake_client: OpenAIClient, config: AgentRuntimeConfig) -> LocalAgent:
+        return LocalAgent(fake_client, config, AgentSessionStore(config.session_directory))
 
     def test_run_without_tool_calls_returns_immediately(self) -> None:
         workspace = _make_test_dir()

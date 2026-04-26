@@ -1,4 +1,4 @@
-# Claw Code Agent 最终架构计划与开发路线图
+﻿# Claw Code Agent 最终架构计划与开发路线图
 
 ## 1. 文档目的
 
@@ -14,7 +14,7 @@
 2. 原项目 README、PARITY_CHECKLIST、TESTING_GUIDE。
 3. 当前核心源码主干：main、interface、orchestration、planning、extensions、budget、context、session、tools。
 4. 当前关键扩展与状态机：plugin、hook_policy、task、plan、workflow、search、mcp。
-5. 当前关键测试：test/orchestration/test_agent_runtime.py、test/extensions/*、test/planning/*、test/test_main.py、test/test_main_chat.py。
+5. 当前关键测试：test/orchestration/test_local_agent.py、test/extensions/*、test/planning/*、test/test_main.py、test/test_main_chat.py。
 
 ## 3. 最终产品目标
 
@@ -49,7 +49,7 @@
 ### 4.1 分层视图
 
 1. 入口层：`src/main.py` + `src/interface/command_line_interface.py`
-2. 核心编排层：`src/orchestration/agent_runtime.py` 的 `LocalCodingAgent`
+2. 核心编排层：`src/orchestration/local_agent.py` 的 `LocalAgent`
 3. 扩展能力层：`src/extensions/`（plugin / hook_policy / search / mcp）
 4. 计划状态机层：`src/planning/`（task / plan / workflow）
 5. 上下文与预算层：`src/context/`（token 估算、预算投影、snip/compact 上下文治理）+ `src/budget/`（`BudgetGuard` 五维执行闸门）；两层形成 `context` → `budget` 的单向依赖
@@ -59,9 +59,9 @@
 ### 4.2 当前核心执行链
 
 1. 解析 CLI 参数并构造 `ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`。
-2. 构建 `OpenAIClient` 与 `LocalCodingAgent`，并注入运行配置与工具注册表。
+2. 构建 `OpenAIClient` 与 `LocalAgent`，并注入运行配置与工具注册表。
 3. 依据是否提供 `--session-id`，选择新会话 run 或 resume 路径。
-4. 进入 turn loop：`ContextManager` 处理 pre-model preflight/snip/compact 与 reactive compact 重试 -> model call。
+4. 进入 turn loop：`BudgetContextOrchestrator` 处理 pre-model preflight/snip/compact 与 reactive compact 重试 -> model call。
 5. 解析 tool calls，执行工具并写回 transcript。
 6. 多处预算检查与 stop_reason 约束。
 7. 结束后持久化 session，并支持后续 resume。
@@ -475,7 +475,7 @@
 
 交付物：bash 工具、安全规则、测试。
 
-#### ISSUE-006 LocalCodingAgent 最小闭环
+#### ISSUE-006 LocalAgent 最小闭环
 
 类型：feature
 
@@ -562,7 +562,7 @@
 **实施决策（已落地）**
 
 - `AgentSessionState.from_persisted(messages, transcript, tool_call_count)` 负责恢复运行态；transcript 为空时从 messages 生成最小回退。
-- `LocalCodingAgent.resume(prompt, stored_session)` 严格继承 `stored_session.model_config` 与 `runtime_config`；usage/turns/tool_calls 从历史基线累计；cost = 历史成本 + 本次 delta，避免历史计费策略变化造成偏差。
+- `LocalAgent.resume(prompt, stored_session)` 严格继承 `stored_session.model_config` 与 `runtime_config`；usage/turns/tool_calls 从历史基线累计；cost = 历史成本 + 本次 delta，避免历史计费策略变化造成偏差。
 - run/resume 共用 `_execute_loop` 私有方法，stop_reason 行为一致。
 - CLI 新增 `--session-id` 参数；有 session_id 时走 load + resume，无时走原有 run 路径。
 - `AgentSessionStore.load()` 现在对 FileNotFoundError 也抛 ValueError，main 统一 except 即可。
@@ -716,12 +716,12 @@
 实现落地决策（2026-04-24）：
 
 - 当前稳定入口为 `src/interface/slash_commands_interface.py`，集中承载 slash parse、命令规格注册和高频本地命令。
-- slash 分流发生在 `LocalCodingAgent.run/resume` 把 prompt 写入 `AgentSessionState` 之前，从根上保证本地命令不污染 `messages` 与 `transcript`。
+- slash 分流发生在 `LocalAgent.run/resume` 把 prompt 写入 `AgentSessionState` 之前，从根上保证本地命令不污染 `messages` 与 `transcript`。
 - 本地 slash 命令统一返回 `stop_reason='slash_command'`，并写入 `slash_command` event；只记录 event，不写入 transcript。
 - `/context` 复用 `ContextBudgetEvaluator.evaluate(messages, tools, max_input_tokens)` 做本地上下文投影，展示当前 messages、transcript、tool_calls 与 projected tokens。
 - `/clear` 采用 fork 语义：不覆盖旧 session 文件，而是生成新的 cleared `session_id` 并保存空会话快照；输出中同时提示旧 session_id 与新 session_id。
 - 首版不改 `src/main.py` 参数面；slash 命令仍通过现有 `prompt` 入口传入，ISSUE-013 再处理 CLI 子命令扩展。
-- 测试面拆为 `test/interface/test_slash_commands.py` 单测与 `test/orchestration/test_agent_runtime.py` 集成测试，覆盖 `/help`、`/status`、`/clear` 的 no-model-call 路径。
+- 测试面拆为 `test/interface/test_slash_commands.py` 单测与 `test/orchestration/test_local_agent.py` 集成测试，覆盖 `/help`、`/status`、`/clear` 的 no-model-call 路径。
 
 #### ISSUE-013 CLI 命令面（agent/chat/resume）
 
@@ -1141,4 +1141,5 @@
 2. 每个 ISSUE 合并前必须附带对应测试与简短变更说明。
 3. 若 ISSUE 涉及 schema 变更，必须同步更新序列化兼容策略。
 4. 遇到高风险改动（预算、权限、压缩）先补测试再改实现。
+
 

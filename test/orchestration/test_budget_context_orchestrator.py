@@ -1,4 +1,4 @@
-"""ContextManager 单元测试。"""
+"""BudgetContextOrchestrator 单元测试。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from uuid import uuid4
 from context.context_budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from context.context_compactor import ContextCompactor
-from context.context_management import ContextManager
+from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.protocol import OneTurnResponse, ToolCall
@@ -51,7 +51,7 @@ class _FakeOpenAIClient(OpenAIClient):
         return current
 
 
-class ContextManagerTests(unittest.TestCase):
+class BudgetContextOrchestratorTests(unittest.TestCase):
 
     def _build_runtime_config(self, workspace: Path) -> AgentRuntimeConfig:
         return AgentRuntimeConfig(
@@ -85,7 +85,7 @@ class ContextManagerTests(unittest.TestCase):
         )
         session_state.append_user('继续')
 
-        management = ContextManager(
+        orchestrator = BudgetContextOrchestrator(
             budget_evaluator=ContextBudgetEvaluator(),
             context_snipper=ContextSnipper(),
             context_compactor=ContextCompactor(_FakeOpenAIClient([])),
@@ -96,7 +96,7 @@ class ContextManagerTests(unittest.TestCase):
             cost_baseline=0.0,
         )
 
-        outcome = management.run_pre_model_cycle(
+        outcome = orchestrator.run_pre_model_cycle(
             session_state=session_state,
             runtime_config=runtime_config,
             guard=guard,
@@ -132,7 +132,7 @@ class ContextManagerTests(unittest.TestCase):
         session_state.append_user('继续执行')
 
         compact_usage = TokenUsage(input_tokens=2, output_tokens=1)
-        management = ContextManager(
+        orchestrator = BudgetContextOrchestrator(
             budget_evaluator=ContextBudgetEvaluator(),
             context_snipper=ContextSnipper(),
             context_compactor=ContextCompactor(
@@ -152,7 +152,7 @@ class ContextManagerTests(unittest.TestCase):
             cost_baseline=0.0,
         )
 
-        outcome = management.run_pre_model_cycle(
+        outcome = orchestrator.run_pre_model_cycle(
             session_state=session_state,
             runtime_config=runtime_config,
             guard=guard,

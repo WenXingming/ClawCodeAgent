@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from interface.command_line_interface import CLI
 from openai_client.openai_client import OpenAIClient
-from orchestration.agent_runtime import LocalCodingAgent
+from orchestration.local_agent import LocalAgent
 from session.session_store import AgentSessionStore
 
 
@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     cli = CLI(
         openai_client_cls=OpenAIClient,
-        agent_cls=LocalCodingAgent,
+        agent_cls=LocalAgent,
         session_store_cls=AgentSessionStore,
     )
     return cli.main(argv)

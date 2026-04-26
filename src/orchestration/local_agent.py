@@ -1,4 +1,4 @@
-"""ISSUE-006 LocalCodingAgent 最小闭环实现。
+"""LocalAgent 最小闭环实现。
 
 本模块实现最小 run 主循环：
 1) 调模型。
@@ -22,7 +22,7 @@ from context.context_budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from interface.slash_commands_interface import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from context.context_compactor import ContextCompactor
-from context.context_management import ContextManager
+from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
@@ -40,7 +40,7 @@ from tools.agent_tools import AgentTool, ToolExecutionError, build_tool_context,
 
 
 @dataclass
-class LocalCodingAgent:
+class LocalAgent:
     """最小可用的本地编码代理。"""
 
     client: OpenAIClient  # 模型客户端。
@@ -50,7 +50,7 @@ class LocalCodingAgent:
     budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
-    context_manager: ContextManager = field(init=False)
+    budget_context_orchestrator: BudgetContextOrchestrator = field(init=False)
     search_runtime: SearchRuntime = field(init=False)
     mcp_runtime: MCPRuntime = field(init=False)
     plugin_runtime: PluginRuntime = field(init=False)
@@ -142,7 +142,7 @@ class LocalCodingAgent:
         self.tool_registry = self.hook_policy_runtime.filter_tool_registry(self.tool_registry)
         self.runtime_config = self.hook_policy_runtime.apply_runtime_config(self.runtime_config)
         self.context_compactor = ContextCompactor(self.client)
-        self.context_manager = ContextManager(
+        self.budget_context_orchestrator = BudgetContextOrchestrator(
             budget_evaluator=self.budget_evaluator,
             context_snipper=self.context_snipper,
             context_compactor=self.context_compactor,
@@ -732,7 +732,7 @@ class LocalCodingAgent:
             turns_this_run = turn_index
 
             openai_tools = self._build_openai_tools()
-            pre_model_outcome = self.context_manager.run_pre_model_cycle(
+            pre_model_outcome = self.budget_context_orchestrator.run_pre_model_cycle(
                 session_state=session_state,
                 runtime_config=self.runtime_config,
                 guard=guard,
@@ -957,7 +957,7 @@ class LocalCodingAgent:
         model_call_count: int,
     ) -> tuple[OneTurnResponse | None, TokenUsage, int, str | None]:
         """执行一次模型调用；必要时在 context-length 错误后进行 reactive compact 重试。"""
-        reactive_outcome = self.context_manager.complete_with_reactive_compact(
+        reactive_outcome = self.budget_context_orchestrator.complete_with_reactive_compact(
             client=self.client,
             session_state=session_state,
             runtime_config=self.runtime_config,

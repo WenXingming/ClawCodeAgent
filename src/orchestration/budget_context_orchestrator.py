@@ -50,8 +50,8 @@ class ReactiveCompactOutcome:
 
 
 @dataclass
-class ContextManager:
-    """组合 snipper 与 compactor，统一处理上下文治理编排。"""
+class BudgetContextOrchestrator:
+    """组合 snipper 与 compactor，统一处理上下文治理与预算编排。"""
 
     budget_evaluator: ContextBudgetEvaluator
     context_snipper: ContextSnipper

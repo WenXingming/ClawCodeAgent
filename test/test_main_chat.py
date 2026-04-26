@@ -1,4 +1,4 @@
-"""ISSUE-013 交互式 chat CLI 测试。"""
+﻿"""ISSUE-013 交互式 chat CLI 测试。"""
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ class MainChatEntryTests(unittest.TestCase):
     def test_agent_chat_runs_initial_prompt_then_exits(self) -> None:
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['第一轮', '/exit']),
         ):
             stdout = io.StringIO()
@@ -130,7 +130,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['继续', '/exit']),
         ):
             stdout = io.StringIO()
@@ -147,7 +147,7 @@ class MainChatEntryTests(unittest.TestCase):
     def test_agent_chat_quit_command_exits_without_agent_call(self) -> None:
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['/quit']),
         ):
             stdout = io.StringIO()
@@ -162,7 +162,7 @@ class MainChatEntryTests(unittest.TestCase):
     def test_agent_chat_handles_eof(self) -> None:
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=EOFError),
         ):
             stdout = io.StringIO()
@@ -205,7 +205,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['/clear', '继续处理', '/exit']),
         ):
             stdout = io.StringIO()
@@ -232,7 +232,7 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['第一轮', '第二轮', '/exit']),
         ):
             stdout = io.StringIO()
@@ -250,7 +250,7 @@ class MainChatEntryTests(unittest.TestCase):
         """agent 命令在 EOF 时应正常退出，返回码为 0。"""
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=EOFError),
         ):
             code = main(['agent'])
@@ -270,7 +270,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['第一轮续跑', '第二轮续跑', '/quit']),
         ):
             stdout = io.StringIO()
@@ -296,7 +296,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
-            patch('main.LocalCodingAgent', _ChatFakeAgent),
+            patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['', '   ', '有效输入', '/exit']),
         ):
             stdout = io.StringIO()

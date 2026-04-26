@@ -16,7 +16,8 @@ src/
 |  |- command_line_interface.py
 |  '- slash_commands_interface.py
 |- orchestration/
-|  '- agent_runtime.py
+|  |- budget_context_orchestrator.py
+|  '- local_agent.py
 |- planning/
 |  |- task_runtime.py
 |  |- plan_runtime.py
@@ -31,7 +32,6 @@ src/
 |- context/
 |  |- context_token_estimator.py
 |  |- context_budget_evaluator.py
-|  |- context_management.py
 |  |- context_snipper.py
 |  '- context_compactor.py
 |- session/
@@ -71,7 +71,8 @@ graph TB
 
     subgraph Orchestration[orchestration package / 主循环编排]
         direction TB
-        n_agent(["⚙️ orchestration/agent_runtime.py"])
+        n_agent(["⚙️ orchestration/local_agent.py"])
+        n_budget_context_orchestrator(["🧠 orchestration/budget_context_orchestrator.py"])
         style Orchestration fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -102,7 +103,6 @@ graph TB
         direction TB
         n_token_estimator(["🔢 context/context_token_estimator.py"])
         n_budget_evaluator(["📏 context/context_budget_evaluator.py"])
-        n_context_management(["🧠 context/context_management.py"])
         n_snip(["✂️ context/context_snipper.py"])
         n_compact(["🗜️ context/context_compactor.py"])
         style ContextPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
@@ -147,16 +147,12 @@ graph TB
     n_agent --> n_tools
     n_agent --> n_session_state
     n_agent --> n_session_store
-    n_agent --> n_budget_guard
-    n_agent --> n_budget_evaluator
-    n_agent --> n_context_management
-    n_agent --> n_snip
-    n_agent --> n_compact
+    n_agent --> n_budget_context_orchestrator
 
-    n_context_management --> n_budget_guard
-    n_context_management --> n_budget_evaluator
-    n_context_management --> n_snip
-    n_context_management --> n_compact
+    n_budget_context_orchestrator --> n_budget_guard
+    n_budget_context_orchestrator --> n_budget_evaluator
+    n_budget_context_orchestrator --> n_snip
+    n_budget_context_orchestrator --> n_compact
 
     n_slash --> n_session_state
     n_slash --> n_tools
@@ -196,6 +192,7 @@ graph TB
     style n_cli fill:#6610f2,color:#fff,stroke:#520dc2
     style n_slash fill:#8a5cf6,color:#fff,stroke:#6f42c1
     style n_agent fill:#007bff,color:#fff,stroke:#0056b3
+    style n_budget_context_orchestrator fill:#228be6,color:#fff,stroke:#1864ab
     style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
     style n_plugin fill:#0d6efd,color:#fff,stroke:#0a58ca
     style n_search fill:#f76707,color:#fff,stroke:#d9480f
@@ -206,7 +203,6 @@ graph TB
     style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34
     style n_budget_evaluator fill:#37b24d,color:#fff,stroke:#2b8a3e
     style n_token_estimator fill:#74b816,color:#fff,stroke:#5c940d
-    style n_context_management fill:#228be6,color:#fff,stroke:#1864ab
     style n_snip fill:#2f9e44,color:#fff,stroke:#1b5e20
     style n_compact fill:#1c7ed6,color:#fff,stroke:#1864ab
     style n_tools fill:#fd7e14,color:#fff,stroke:#d9480f
@@ -220,10 +216,11 @@ graph TB
 
 ## 当前边界
 
-- `orchestration/agent_runtime.py` 现在只保留主循环编排职责：模型调用、工具回填、预算闸门、会话保存，以及通过 `ContextManager` 调用上下文治理。
+- `orchestration/local_agent.py` (`LocalAgent`) 负责主循环编排职责：模型调用、工具回填、预算闸门、会话保存，通过 `BudgetContextOrchestrator` 调用上下文治理。
+- `orchestration/budget_context_orchestrator.py` (`BudgetContextOrchestrator`) 统一编排 pre-model 阶段的 snip/compact/预算预检及 reactive compact 重试。
 - `budget/` 负责 token 预算的对象模型和闸门逻辑：`TokenBudgetSnapshot`、统一估算器、预算投影器和运行时预算检查都集中在这里。
 - `budget/` 只保留 `BudgetGuard`：集中管理主循环的五维执行限制（turns / model_calls / token / cost / tool_calls），是 orchestration 层的运行时闸门。
-- `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextBudgetEvaluator`（含 `ContextBudgetSnapshot`）提供预算投影，`ContextManager` 编排 pre-model 与 reactive compact 重试，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
+- `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextBudgetEvaluator`（含 `ContextBudgetSnapshot`）提供预算投影，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
 - `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、MCP server 都从工作区 `.claw/` manifest 或环境变量发现并对外提供独立 API。
 - `interface/` 负责 CLI 和 slash 命令；`slash_commands_interface.py` 依赖预算投影和工具注册表，但不会触发模型调用。
@@ -255,7 +252,8 @@ test/
 - `test/extensions/` 对应 plugin/policy/search/mcp 测试，并承接相关 patch 目标。
 - `test/budget/` 对应预算快照、估算、评估与闸门测试。
 - `test/budget/` 现在只包含 `test_budget_guard.py`（五维闸门测试）。
-- `test/context/` 包含 `test_context_token_estimator.py`、`test_context_budget_evaluator.py`、`test_context_management.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
+- `test/context/` 包含 `test_context_token_estimator.py`、`test_context_budget_evaluator.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
+- `test/orchestration/` 包含 `test_budget_context_orchestrator.py` 与 `test_local_agent.py`。
 
 ## 推荐阅读顺序
 
@@ -263,4 +261,4 @@ test/
 2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧的外部交互面。
 3. 再看 `context/`（含 token 估算与预算投影）和 `budget/`（执行闸门），理解预算预检、上下文剪裁和摘要压缩的职责切分。
 4. 再看 `planning/` 与 `extensions/`，理解工作区本地状态和外部扩展能力各自如何发现、持久化和暴露 API。
-5. 最后看 `orchestration/agent_runtime.py`、`interface/command_line_interface.py` 和 `main.py`，理解这些能力如何被装配成完整入口。
+5. 最后看 `orchestration/local_agent.py`、`interface/command_line_interface.py` 和 `main.py`，理解这些能力如何被装配成完整入口。
