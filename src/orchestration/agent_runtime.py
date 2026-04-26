@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from budget.budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
-from control_plane.slash_commands import SlashCommandContext, SlashCommandResult, dispatch_slash_command
+from control_plane.slash_commands import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from context.context_compactor import CompactionResult, ContextCompactor
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
@@ -56,6 +56,7 @@ class LocalCodingAgent:
     mcp_runtime: MCPRuntime = field(init=False)
     plugin_runtime: PluginRuntime = field(init=False)
     hook_policy_runtime: HookPolicyRuntime = field(init=False)
+    slash_dispatcher: SlashCommandDispatcher = field(init=False)
 
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务（新会话）。
@@ -142,6 +143,7 @@ class LocalCodingAgent:
         self.tool_registry = self.hook_policy_runtime.filter_tool_registry(self.tool_registry)
         self.runtime_config = self.hook_policy_runtime.apply_runtime_config(self.runtime_config)
         self.context_compactor = ContextCompactor(self.client)
+        self.slash_dispatcher = SlashCommandDispatcher(self.budget_evaluator)
 
     def _register_workspace_runtime_tools(
         self,
@@ -551,7 +553,7 @@ class LocalCodingAgent:
         Returns:
             AgentRunResult | None: slash 本地处理有结果时返回 AgentRunResult，否则返回 None。
         """
-        slash_result = dispatch_slash_command(
+        slash_result = self.slash_dispatcher.dispatch_slash_command(
             SlashCommandContext(
                 session_state=session_state,
                 session_id=session_id,
