@@ -3,15 +3,15 @@
 本文件是最顶层的 Python 包入口，负责：
 - 组织所有控制面、运行时、客户端等组件的依赖注入
 - 通过@patch点可擦写关键依赖（OpenAIClient、LocalCodingAgent、AgentSessionStore）
-- 转发CLI命令到control_plane.cli的主逻辑
+- 转发CLI命令到control_plane.command_line_interface的主逻辑
 
-控制面实现已下沉到 control_plane.cli；
+控制面实现已下沉到 control_plane.command_line_interface；
 本文件仅保留顶层入口与可 patch 的依赖注入点。
 """
 
 from __future__ import annotations
 
-from control_plane.cli import main as _control_plane_main
+from control_plane.command_line_interface import main as _control_plane_main
 from openai_client.openai_client import OpenAIClient
 from orchestration.agent_runtime import LocalCodingAgent
 from session.session_store import AgentSessionStore

@@ -17,7 +17,7 @@ from session.session_snapshot import AgentSessionSnapshot
 
 
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
-    testcase.assertIn('TUDOU CLI', output)
+    testcase.assertIn('Tudou Code Agent - Empower Your Coding Journey with AI', output)
     testcase.assertIn('████████╗', output)
 
 
@@ -107,7 +107,7 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['第一轮', '.exit']),
+            patch('builtins.input', side_effect=['第一轮', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -131,7 +131,7 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['继续', '.exit']),
+            patch('builtins.input', side_effect=['继续', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -148,7 +148,7 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['.quit']),
+            patch('builtins.input', side_effect=['/quit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -206,7 +206,7 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['/clear', '继续处理', '.exit']),
+            patch('builtins.input', side_effect=['/clear', '继续处理', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -233,7 +233,7 @@ class MainChatEntryTests(unittest.TestCase):
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['第一轮', '第二轮', '.exit']),
+            patch('builtins.input', side_effect=['第一轮', '第二轮', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -271,7 +271,7 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['第一轮续跑', '第二轮续跑', '.quit']),
+            patch('builtins.input', side_effect=['第一轮续跑', '第二轮续跑', '/quit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -297,7 +297,7 @@ class MainChatEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
             patch('main.LocalCodingAgent', _ChatFakeAgent),
-            patch('builtins.input', side_effect=['', '   ', '有效输入', '.exit']),
+            patch('builtins.input', side_effect=['', '   ', '有效输入', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):

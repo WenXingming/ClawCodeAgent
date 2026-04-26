@@ -17,7 +17,7 @@ from session.session_snapshot import AgentSessionSnapshot
 
 
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
-    testcase.assertIn('TUDOU CLI', output)
+    testcase.assertIn('Tudou Code Agent - Empower Your Coding Journey with AI', output)
     testcase.assertIn('████████╗', output)
 
 
@@ -111,7 +111,7 @@ class MainEntryTests(unittest.TestCase):
                 clear=False,
             ),
             patch('main.LocalCodingAgent', _FakeAgent),
-            patch('builtins.input', side_effect=['你好', '.exit']),
+            patch('builtins.input', side_effect=['你好', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -144,7 +144,7 @@ class MainEntryTests(unittest.TestCase):
                 clear=False,
             ),
             patch('main.LocalCodingAgent', _FakeAgent),
-            patch('builtins.input', side_effect=['.exit']),
+            patch('builtins.input', side_effect=['/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -199,7 +199,7 @@ class MainEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
-            patch('builtins.input', side_effect=['续跑问题', '.exit']),
+            patch('builtins.input', side_effect=['续跑问题', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -231,7 +231,7 @@ class MainEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
-            patch('builtins.input', side_effect=['.exit']),
+            patch('builtins.input', side_effect=['/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -264,7 +264,7 @@ class MainEntryTests(unittest.TestCase):
         with (
             patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
             patch('main.LocalCodingAgent', _FakeAgent),
-            patch('builtins.input', side_effect=['请把春江花月夜全文写入文件', '.exit']),
+            patch('builtins.input', side_effect=['请把春江花月夜全文写入文件', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
@@ -304,7 +304,7 @@ class MainEntryTests(unittest.TestCase):
                 clear=False,
             ),
             patch('main.LocalCodingAgent', _FakeAgent),
-            patch('builtins.input', side_effect=['普通问题', '.exit']),
+            patch('builtins.input', side_effect=['普通问题', '/exit']),
         ):
             stdout = io.StringIO()
             with redirect_stdout(stdout):
