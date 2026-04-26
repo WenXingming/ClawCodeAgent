@@ -345,15 +345,24 @@ print(runtime.render_plan())
 - `SEARXNG_BASE_URL`
 - `CLAW_SEARCH_PROVIDER`（可选，用于指定默认 active provider）
 
+provider 可选鉴权：
+
+- `api_key_env`（可选，provider profile 指定后会从对应环境变量读取 API Key，并附带 `Authorization: Bearer` 与 `X-API-Key` 请求头）
+
 当前能力：
 
 - `list_providers` / `get_provider`：列出和读取已发现 provider profile。
 - `activate_provider`：切换 active provider，并把结果持久化到 `.claw/search_state.json`。
 - `search`：执行结构化检索，返回 provider、query、attempts 和结果列表。
 
+天气查询兜底：
+
+- 当 `duckduckgo` 查询结果为空且 query 命中天气关键词（`weather` / `天气` / `forecast` 等）时，runtime 会自动调用 `wttr.in` 返回一条天气概览结果，降低“connection issue”空返回概率。
+
 当前已接通后端：
 
 - `searxng`
+- `duckduckgo`
 
 示例：
 
@@ -365,6 +374,19 @@ print(runtime.render_plan())
   "base_url": "http://127.0.0.1:8080",
   "default_max_results": 5,
   "description": "Local SearxNG provider for workspace search."
+}
+```
+
+DuckDuckGo provider 示例（在公网 SearxNG 返回 403/429 时可作为降级）：
+
+```json
+{
+  "provider_id": "duckduckgo-web",
+  "provider": "duckduckgo",
+  "title": "DuckDuckGo Web Search",
+  "base_url": "https://api.duckduckgo.com",
+  "default_max_results": 5,
+  "description": "DuckDuckGo instant answer API based search provider."
 }
 ```
 

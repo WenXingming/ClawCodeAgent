@@ -87,7 +87,14 @@ _READ_ONLY_COMMANDS = frozenset(
 
 
 def split_command(command: str) -> list[str]:
-    """按 ; && || | 粗粒度拆分命令段，保留引号内内容。"""
+    """按 ; && || | 粗粒度拆分命令段，保留引号内内容。
+
+    Args:
+        command (str): 原始命令行字符串。
+
+    Returns:
+        list[str]: 拆分后的命令片段列表（已去除空白片段）。
+    """
     if not command:
         return []
 
@@ -153,7 +160,14 @@ def _contains_control_characters(command: str) -> bool:
 
 
 def _match_command_substitution(command: str) -> str | None:
-    """匹配命令替换模式。"""
+    """匹配命令替换模式。
+
+    Args:
+        command (str): 待检测命令。
+
+    Returns:
+        str | None: 命中的风险描述，未命中则返回 None。
+    """
     for pattern, description in _SUBSTITUTION_PATTERNS:
         if pattern.search(command):
             return description
@@ -161,7 +175,14 @@ def _match_command_substitution(command: str) -> str | None:
 
 
 def get_destructive_command_warning(command: str) -> str | None:
-    """匹配破坏性命令模式。"""
+    """匹配破坏性命令模式。
+
+    Args:
+        command (str): 待检测命令。
+
+    Returns:
+        str | None: 命中时返回告警文案，否则返回 None。
+    """
     lowered = command.lower()
     for pattern, warning in _DESTRUCTIVE_PATTERNS:
         if pattern.search(lowered):
@@ -170,7 +191,14 @@ def get_destructive_command_warning(command: str) -> str | None:
 
 
 def is_command_read_only(command: str) -> bool:
-    """判断命令是否整体可视为只读。"""
+    """判断命令是否整体可视为只读。
+
+    Args:
+        command (str): 待检测命令。
+
+    Returns:
+        bool: 是否可判定为只读命令集合。
+    """
     segments = split_command(command)
     if not segments:
         return True
@@ -192,7 +220,14 @@ def is_command_read_only(command: str) -> bool:
 
 
 def bash_command_is_safe(command: str) -> SecurityResult:
-    """判断 shell 命令是否安全。"""
+    """判断 shell 命令是否安全。
+
+    Args:
+        command (str): 待检测命令。
+
+    Returns:
+        SecurityResult: 安全判定结果与解释信息。
+    """
     stripped = command.strip()
     if not stripped:
         return SecurityResult(SecurityBehavior.ALLOW, 'Empty command is safe')
@@ -217,7 +252,16 @@ def check_shell_security(
     allow_shell: bool,
     allow_destructive: bool,
 ) -> tuple[bool, str]:
-    """综合权限与命令特征，返回是否允许执行。"""
+    """综合权限与命令特征，返回是否允许执行。
+
+    Args:
+        command (str): 待执行命令。
+        allow_shell (bool): 是否启用 shell 能力。
+        allow_destructive (bool): 是否允许破坏性命令。
+
+    Returns:
+        tuple[bool, str]: (是否允许, 拒绝原因)。
+    """
     if not allow_shell:
         return False, 'Shell commands are disabled: allow_shell_commands=false'
 

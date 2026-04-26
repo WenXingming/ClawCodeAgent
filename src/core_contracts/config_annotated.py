@@ -28,24 +28,25 @@ from .usage import ModelPricing
 class BudgetConfig:
     """运行期预算限制，用于保证安全和可预测性。
     
-    包含多个可选的预算限制维度，超过任一限制时主循环会中止执行。
+    定义Agent执行时的各维度资源限制，包括总token数、成本上限、调用次数等。
+    None表示该维度无限制。
     """
 
-    max_total_tokens: int | None = None  # 会话总token限制
-    max_input_tokens: int | None = None  # 单次输入token限制
-    max_output_tokens: int | None = None  # 单次输出token限制
-    max_reasoning_tokens: int | None = None  # 推理token总限制
-    max_total_cost_usd: float | None = None  # 会话成本上限（美元）
-    max_tool_calls: int | None = None  # 工具调用总数限制
-    max_delegated_tasks: int | None = None  # 委派任务数限制
-    max_model_calls: int | None = None  # 模型调用次数限制
-    max_session_turns: int | None = None  # 会话turn数限制
+    max_total_tokens: int | None = None  # 单次运行最多消耗的总token数（输入+输出）
+    max_input_tokens: int | None = None  # 单次运行最多消耗的输入token数
+    max_output_tokens: int | None = None  # 单次运行最多生成的输出token数
+    max_reasoning_tokens: int | None = None  # 单次运行最多消耗的推理token数
+    max_total_cost_usd: float | None = None  # 单次运行最多花费的USD金额
+    max_tool_calls: int | None = None  # 单次运行最多调用工具的次数
+    max_delegated_tasks: int | None = None  # 最多可委派的任务数
+    max_model_calls: int | None = None  # 单次运行最多调用模型的次数
+    max_session_turns: int | None = None  # 单次会话最多交互轮数
 
     def to_dict(self) -> JSONDict:
         """序列化为字典。
         
         Returns:
-            JSONDict: 包含所有预算限制配置的字典
+            JSONDict: 包含所有预算限制字段的字典
         """
         return {
             'max_total_tokens': self.max_total_tokens,
@@ -61,12 +62,10 @@ class BudgetConfig:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'BudgetConfig':
-        """反序列化为 BudgetConfig 对象。
-        
-        支持snake_case和camelCase两种字段命名。
+        """从字典反序列化。
         
         Args:
-            payload (JSONDict | None): 待反序列化的配置字典
+            payload (JSONDict | None): 待反序列化的字典，支持snake_case与camelCase字段名
             
         Returns:
             BudgetConfig: 反序列化后的预算配置对象
@@ -107,18 +106,18 @@ class BudgetConfig:
 class OutputSchemaConfig:
     """可选的结构化输出 schema 配置。
     
-    若模型支持结构化输出模式，此配置指定期望的JSON schema和是否严格验证。
+    当需要模型返回结构化JSON时使用，包含schema定义与验证强度设置。
     """
 
-    name: str # schema 名称，用于区分不同的输出格式规范
-    schema: JSONDict # JSON Schema 定义，描述预期的输出结构和类型
-    strict: bool = False # 是否严格验证输出，默认为 False，允许额外字段存在
+    name: str  # schema 名称，用于区分不同的输出格式规范
+    schema: JSONDict  # JSON Schema 定义，描述预期的输出结构和类型
+    strict: bool = False  # 是否严格验证输出，默认为 False，允许额外字段存在
 
     def to_dict(self) -> JSONDict:
         """序列化为字典。
         
         Returns:
-            JSONDict: 包含name/schema/strict的字典
+            JSONDict: 包含schema配置的字典
         """
         return {
             'name': self.name,
@@ -128,15 +127,13 @@ class OutputSchemaConfig:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'OutputSchemaConfig | None':
-        """反序列化为 OutputSchemaConfig 对象。
-        
-        若输入不包含必要字段则返回None。
+        """从字典反序列化。
         
         Args:
-            payload (JSONDict | None): 待反序列化的配置字典
+            payload (JSONDict | None): 待反序列化的字典
             
         Returns:
-            OutputSchemaConfig | None: 反序列化后的输出schema配置，或None（若输入无效）
+            OutputSchemaConfig | None: 反序列化后的schema配置，或None（若输入无效）
         """
         data = _as_dict(payload)
         name = _as_str(data.get('name'), '').strip()
@@ -154,21 +151,21 @@ class OutputSchemaConfig:
 class ModelConfig:
     """OpenAI-compatible 客户端使用的模型后端配置。
     
-    指定模型名称、API端点、认证信息、运行参数、以及计费配置。
+    定义与大语言模型服务的连接参数与推理参数。
     """
 
-    model: str  # 模型标识符，如 'gpt-4', 'claude-3-sonnet' 等
-    base_url: str = 'http://127.0.0.1:8000/v1'  # API端点基础URL，默认本地dev服务器
-    api_key: str = 'local-token'  # API认证密钥，默认本地token
-    temperature: float = 0.0  # 生成温度参数（0.0=确定性，1.0=最大随机性）
-    timeout_seconds: float = 120.0  # API请求超时时间（秒）
-    pricing: ModelPricing = field(default_factory=ModelPricing)  # 模型计费配置
+    model: str  # 模型标识符（如 'gpt-4', 'qwen-max'）
+    base_url: str = 'http://127.0.0.1:8000/v1'  # OpenAI-compatible API 的基础URL
+    api_key: str = 'local-token'  # API密钥（本地模型可使用占位符）
+    temperature: float = 0.0  # 采样温度，控制输出多样性（0=确定性，1=随机）
+    timeout_seconds: float = 120.0  # 模型调用超时时间（秒）
+    pricing: ModelPricing = field(default_factory=ModelPricing)  # 计费配置用于成本估算
 
     def to_dict(self) -> JSONDict:
         """序列化为字典。
         
         Returns:
-            JSONDict: 包含所有模型配置的字典
+            JSONDict: 包含模型配置的字典
         """
         return {
             'model': self.model,
@@ -181,12 +178,10 @@ class ModelConfig:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'ModelConfig':
-        """反序列化为 ModelConfig 对象。
-        
-        支持snake_case和camelCase两种字段命名。
+        """从字典反序列化。
         
         Args:
-            payload (JSONDict | None): 待反序列化的配置字典
+            payload (JSONDict | None): 待反序列化的字典，支持snake_case与camelCase字段名
             
         Returns:
             ModelConfig: 反序列化后的模型配置对象
@@ -213,18 +208,18 @@ class ModelConfig:
 class AgentPermissions:
     """运行时和工具执行使用的权限开关。
     
-    控制Agent是否允许执行特定类别的操作（文件写入、shell命令、销毁性操作等）。
+    细粒度控制Agent在执行过程中对文件系统与shell命令的权限。
     """
 
-    allow_file_write: bool = False  # 是否允许Agent写文件
-    allow_shell_commands: bool = False  # 是否允许执行shell命令
-    allow_destructive_shell_commands: bool = False  # 是否允许执行销毁性shell操作
+    allow_file_write: bool = False  # 是否允许Agent创建/修改/删除文件
+    allow_shell_commands: bool = False  # 是否允许Agent执行shell命令
+    allow_destructive_shell_commands: bool = False  # 是否允许执行破坏性命令（rm/dd等）
 
     def to_dict(self) -> JSONDict:
         """序列化为字典。
         
         Returns:
-            JSONDict: 包含所有权限开关的字典
+            JSONDict: 包含权限开关的字典
         """
         return {
             'allow_file_write': self.allow_file_write,
@@ -234,15 +229,13 @@ class AgentPermissions:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'AgentPermissions':
-        """反序列化为 AgentPermissions 对象。
-        
-        支持snake_case和camelCase两种字段命名。
+        """从字典反序列化。
         
         Args:
-            payload (JSONDict | None): 待反序列化的权限配置字典
+            payload (JSONDict | None): 待反序列化的字典，支持snake_case与camelCase字段名
             
         Returns:
-            AgentPermissions: 反序列化后的权限对象
+            AgentPermissions: 反序列化后的权限配置对象
         """
         data = _as_dict(payload)
         return cls(
@@ -269,32 +262,30 @@ class AgentPermissions:
 class AgentRuntimeConfig:
     """运行配置：执行选项与工作目录路径。
     
-    综合配置类，包含运行行为参数、权限控制、预算限制、会话存储路径等。
+    定义Agent运行的完整环境、预算、权限与输出配置。
     """
 
-    cwd: Path  # 工作目录绝对路径
-    max_turns: int = 12  # 单个会话的最大turn数
+    cwd: Path  # 运行工作目录
+    max_turns: int = 12  # 单次会话最多允许的交互轮数
     command_timeout_seconds: float = 30.0  # shell命令执行超时时间（秒）
-    max_output_chars: int = 12000  # 单次命令输出的最大字符数
-    stream_model_responses: bool = False  # 是否流式输出模型响应
-    auto_snip_threshold_tokens: int | None = None  # 自动snip的token阈值；None表示禁用
-    auto_compact_threshold_tokens: int | None = None  # 自动compact的token阈值；None表示禁用
-    compact_preserve_messages: int = 4  # compact时保留的最近消息数
+    max_output_chars: int = 12000  # 单次工具执行输出的最大字符数（超出会截断）
+    stream_model_responses: bool = False  # 是否以流式方式处理模型响应
+    auto_snip_threshold_tokens: int | None = None  # token数超过此阈值时自动执行context snipping
+    auto_compact_threshold_tokens: int | None = None  # token数超过此阈值时自动执行context compacting
+    compact_preserve_messages: int = 4  # 执行compacting时保留的最近消息数
     permissions: AgentPermissions = field(default_factory=AgentPermissions)  # 权限配置
-    additional_working_directories: tuple[Path, ...] = ()  # 额外的工作目录（用于文件访问限制）
-    disable_claude_md_discovery: bool = False  # 是否禁用claude.md自动发现
+    additional_working_directories: tuple[Path, ...] = ()  # 除cwd外的其他可访问目录
+    disable_claude_md_discovery: bool = False  # 是否禁用.claw/claude.md内存文件发现
     budget_config: BudgetConfig = field(default_factory=BudgetConfig)  # 预算限制配置
-    output_schema: OutputSchemaConfig | None = None  # 结构化输出schema配置
+    output_schema: OutputSchemaConfig | None = None  # 可选的结构化输出schema配置
     session_directory: Path = field(default_factory=lambda: (Path('.port_sessions') / 'agent').resolve())  # 会话存储目录
-    scratchpad_root: Path = field(default_factory=lambda: (Path('.port_sessions') / 'scratchpad').resolve())  # 临时工作目录
+    scratchpad_root: Path = field(default_factory=lambda: (Path('.port_sessions') / 'scratchpad').resolve())  # 临时工作目录根目录
 
     def to_dict(self) -> JSONDict:
         """序列化为字典。
         
-        所有Path对象转换为字符串；嵌套配置对象调用其to_dict()方法。
-        
         Returns:
-            JSONDict: 包含所有运行配置的字典
+            JSONDict: 包含完整运行配置的字典
         """
         return {
             'cwd': str(self.cwd),
@@ -316,15 +307,13 @@ class AgentRuntimeConfig:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'AgentRuntimeConfig':
-        """反序列化为 AgentRuntimeConfig 对象。
-        
-        支持snake_case和camelCase两种字段命名；将字符串路径转换为Path对象。
+        """从字典反序列化。
         
         Args:
-            payload (JSONDict | None): 待反序列化的运行配置字典
+            payload (JSONDict | None): 待反序列化的字典，支持snake_case与camelCase字段名
             
         Returns:
-            AgentRuntimeConfig: 反序列化后的运行时配置对象
+            AgentRuntimeConfig: 反序列化后的运行配置对象
         """
         data = _as_dict(payload)
         default_session_dir = (Path('.port_sessions') / 'agent').resolve()

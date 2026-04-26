@@ -64,7 +64,14 @@ class SlashCommandSpec:
 
 
 def parse_slash_command(input_text: str) -> ParsedSlashCommand | None:
-    """从原始输入解析 slash 命令。"""
+    """从原始输入解析 slash 命令。
+
+    Args:
+        input_text (str): 用户原始输入。
+
+    Returns:
+        ParsedSlashCommand | None: 解析成功返回命令对象，非 slash 输入返回 None。
+    """
     stripped = input_text.strip()
     if not stripped.startswith('/'):
         return None
@@ -82,7 +89,15 @@ def dispatch_slash_command(
     context: SlashCommandContext,
     input_text: str,
 ) -> SlashCommandResult:
-    """分发单条输入；非 slash 输入透传给常规 query 路径。"""
+    """分发单条输入；非 slash 输入透传给常规 query 路径。
+
+    Args:
+        context (SlashCommandContext): 命令执行上下文。
+        input_text (str): 用户输入文本。
+
+    Returns:
+        SlashCommandResult: 分流结果（是否处理、是否继续常规查询等）。
+    """
     parsed = parse_slash_command(input_text)
     if parsed is None:
         return SlashCommandResult(
@@ -130,6 +145,15 @@ def find_slash_command(command_name: str) -> SlashCommandSpec | None:
 
 
 def _handle_help(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
+    """内部方法：执行 `_handle_help` 相关逻辑。
+    Args:
+        context (SlashCommandContext): 参数 `context`。
+        parsed (ParsedSlashCommand): 参数 `parsed`。
+    Returns:
+        SlashCommandResult: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     lines = ['Slash Commands', '==============', '']
     for spec in get_slash_command_specs():
         lines.append(f'/{spec.names[0]} - {spec.description}')
@@ -142,6 +166,15 @@ def _handle_help(context: SlashCommandContext, parsed: ParsedSlashCommand) -> Sl
 
 
 def _handle_context(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
+    """内部方法：执行 `_handle_context` 相关逻辑。
+    Args:
+        context (SlashCommandContext): 参数 `context`。
+        parsed (ParsedSlashCommand): 参数 `parsed`。
+    Returns:
+        SlashCommandResult: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     openai_tools = _build_openai_tools(context.tool_registry)
     snapshot = _BUDGET_EVALUATOR.evaluate(
         messages=context.session_state.to_messages(),
@@ -170,6 +203,15 @@ def _handle_context(context: SlashCommandContext, parsed: ParsedSlashCommand) ->
 
 
 def _handle_status(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
+    """内部方法：执行 `_handle_status` 相关逻辑。
+    Args:
+        context (SlashCommandContext): 参数 `context`。
+        parsed (ParsedSlashCommand): 参数 `parsed`。
+    Returns:
+        SlashCommandResult: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     lines = [
         'Session Status',
         '==============',
@@ -188,6 +230,15 @@ def _handle_status(context: SlashCommandContext, parsed: ParsedSlashCommand) -> 
 
 
 def _handle_permissions(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
+    """内部方法：执行 `_handle_permissions` 相关逻辑。
+    Args:
+        context (SlashCommandContext): 参数 `context`。
+        parsed (ParsedSlashCommand): 参数 `parsed`。
+    Returns:
+        SlashCommandResult: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     permissions = context.runtime_config.permissions
     lines = [
         'Permissions',
@@ -205,6 +256,15 @@ def _handle_permissions(context: SlashCommandContext, parsed: ParsedSlashCommand
 
 
 def _handle_tools(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
+    """内部方法：执行 `_handle_tools` 相关逻辑。
+    Args:
+        context (SlashCommandContext): 参数 `context`。
+        parsed (ParsedSlashCommand): 参数 `parsed`。
+    Returns:
+        SlashCommandResult: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     permissions = context.runtime_config.permissions
     lines = [
         'Registered Tools',
@@ -226,6 +286,15 @@ def _handle_tools(context: SlashCommandContext, parsed: ParsedSlashCommand) -> S
 
 
 def _handle_clear(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
+    """内部方法：执行 `_handle_clear` 相关逻辑。
+    Args:
+        context (SlashCommandContext): 参数 `context`。
+        parsed (ParsedSlashCommand): 参数 `parsed`。
+    Returns:
+        SlashCommandResult: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     had_history = bool(
         context.session_state.messages
         or context.session_state.transcript_entries
@@ -244,14 +313,38 @@ def _handle_clear(context: SlashCommandContext, parsed: ParsedSlashCommand) -> S
 
 
 def _build_openai_tools(tool_registry: Mapping[str, AgentTool]) -> list[JSONDict]:
+    """内部方法：执行 `_build_openai_tools` 相关逻辑。
+    Args:
+        tool_registry (Mapping[str, AgentTool]): 参数 `tool_registry`。
+    Returns:
+        list[JSONDict]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     return [tool.to_openai_tool() for tool in tool_registry.values()]
 
 
 def _render_bool(value: bool) -> str:
+    """内部方法：执行 `_render_bool` 相关逻辑。
+    Args:
+        value (bool): 参数 `value`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     return 'yes' if value else 'no'
 
 
 def _render_optional_int(value: int | None) -> str:
+    """内部方法：执行 `_render_optional_int` 相关逻辑。
+    Args:
+        value (int | None): 参数 `value`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if value is None:
         return 'unlimited'
     return str(value)

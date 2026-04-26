@@ -49,6 +49,14 @@ class WorkflowStepSpec:
     reason: str | None = None
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload: JSONDict = {
             'action': self.action.value,
             'task_id': self.task_id,
@@ -65,6 +73,14 @@ class WorkflowStepSpec:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'WorkflowStepSpec':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+        Returns:
+            'WorkflowStepSpec': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         action = WorkflowAction(str(data.get('action', '')).strip())
         task_id = _normalize_identifier(data.get('task_id', data.get('taskId', '')), label='task_id')
@@ -99,6 +115,14 @@ class WorkflowManifest:
     source_path: Path | None = None
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return {
             'workflow_id': self.workflow_id,
             'title': self.title,
@@ -108,6 +132,15 @@ class WorkflowManifest:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None, *, source_path: Path | None = None) -> 'WorkflowManifest':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+            source_path (Path | None): 参数 `source_path`。
+        Returns:
+            'WorkflowManifest': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         workflow_id = _normalize_identifier(
             data.get('workflow_id', data.get('workflowId', '')),
@@ -139,6 +172,14 @@ class WorkflowManifest:
 
     @classmethod
     def from_path(cls, manifest_path: Path) -> 'WorkflowManifest':
+        """执行 `from_path` 逻辑。
+        Args:
+            manifest_path (Path): 参数 `manifest_path`。
+        Returns:
+            'WorkflowManifest': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload = json.loads(manifest_path.read_text(encoding='utf-8'))
         if not isinstance(payload, dict):
             raise ValueError(f'Workflow manifest {manifest_path} must contain a JSON object')
@@ -168,6 +209,14 @@ class WorkflowStepResult:
     error: str | None = None
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload: JSONDict = {
             'step_index': self.step_index,
             'action': self.action.value,
@@ -185,6 +234,14 @@ class WorkflowStepResult:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'WorkflowStepResult':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+        Returns:
+            'WorkflowStepResult': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         return cls(
             step_index=_as_int(data.get('step_index', data.get('stepIndex')), 0),
@@ -210,6 +267,14 @@ class WorkflowRunRecord:
     step_results: tuple[WorkflowStepResult, ...] = ()
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload: JSONDict = {
             'run_id': self.run_id,
             'workflow_id': self.workflow_id,
@@ -223,6 +288,14 @@ class WorkflowRunRecord:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'WorkflowRunRecord':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+        Returns:
+            'WorkflowRunRecord': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         results_raw = data.get('step_results', data.get('stepResults', []))
         if not isinstance(results_raw, list):
@@ -255,6 +328,14 @@ class WorkflowRuntime:
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'WorkflowRuntime':
+        """从工作区加载工作流清单与运行历史。
+
+        Args:
+            workspace (Path): 工作区根目录。
+
+        Returns:
+            WorkflowRuntime: 初始化后的工作流运行时对象。
+        """
         resolved_workspace = workspace.resolve()
         manifests: list[WorkflowManifest] = []
         load_errors: list[WorkflowLoadError] = []
@@ -293,9 +374,25 @@ class WorkflowRuntime:
         )
 
     def list_workflows(self) -> tuple[WorkflowManifest, ...]:
+        """执行 `list_workflows` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            tuple[WorkflowManifest, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return self.manifests
 
     def get_workflow(self, workflow_id: str) -> WorkflowManifest:
+        """执行 `get_workflow` 逻辑。
+        Args:
+            workflow_id (str): 参数 `workflow_id`。
+        Returns:
+            WorkflowManifest: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_id = _normalize_identifier(workflow_id, label='workflow_id')
         for manifest in self.manifests:
             if manifest.workflow_id == normalized_id:
@@ -303,12 +400,28 @@ class WorkflowRuntime:
         raise ValueError(f'Unknown workflow: {normalized_id!r}')
 
     def history(self, workflow_id: str | None = None) -> tuple[WorkflowRunRecord, ...]:
+        """执行 `history` 逻辑。
+        Args:
+            workflow_id (str | None): 参数 `workflow_id`。
+        Returns:
+            tuple[WorkflowRunRecord, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if workflow_id is None:
             return self.run_history
         normalized_id = _normalize_identifier(workflow_id, label='workflow_id')
         return tuple(item for item in self.run_history if item.workflow_id == normalized_id)
 
     def run_workflow(self, workflow_id: str) -> WorkflowRunRecord:
+        """执行 `run_workflow` 逻辑。
+        Args:
+            workflow_id (str): 参数 `workflow_id`。
+        Returns:
+            WorkflowRunRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         manifest = self.get_workflow(workflow_id)
         task_runtime = TaskRuntime.from_workspace(self.workspace)
         step_results: list[WorkflowStepResult] = []
@@ -360,11 +473,27 @@ class WorkflowRuntime:
         return run_record
 
     def _append_run_history(self, run_record: WorkflowRunRecord) -> None:
+        """内部方法：执行 `_append_run_history` 相关逻辑。
+        Args:
+            run_record (WorkflowRunRecord): 参数 `run_record`。
+        Returns:
+            None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         self.run_history = self.run_history + (run_record,)
         _save_run_history(self.workspace, self.run_history)
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
+    """内部方法：执行 `_discover_manifest_paths` 相关逻辑。
+    Args:
+        workspace (Path): 参数 `workspace`。
+    Returns:
+        tuple[Path, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     candidates: list[Path] = []
     single_manifest = workspace / _WORKFLOW_MANIFEST_FILE
     if single_manifest.is_file():
@@ -381,6 +510,14 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
 
 
 def _load_run_history(workspace: Path) -> tuple[WorkflowRunRecord, ...]:
+    """内部方法：执行 `_load_run_history` 相关逻辑。
+    Args:
+        workspace (Path): 参数 `workspace`。
+    Returns:
+        tuple[WorkflowRunRecord, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     path = workspace / _WORKFLOW_RUN_HISTORY_FILE
     if not path.is_file():
         return ()
@@ -401,6 +538,15 @@ def _load_run_history(workspace: Path) -> tuple[WorkflowRunRecord, ...]:
 
 
 def _save_run_history(workspace: Path, run_history: tuple[WorkflowRunRecord, ...]) -> Path:
+    """内部方法：执行 `_save_run_history` 相关逻辑。
+    Args:
+        workspace (Path): 参数 `workspace`。
+        run_history (tuple[WorkflowRunRecord, ...]): 参数 `run_history`。
+    Returns:
+        Path: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     path = workspace / _WORKFLOW_RUN_HISTORY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -418,6 +564,15 @@ def _save_run_history(workspace: Path, run_history: tuple[WorkflowRunRecord, ...
 
 
 def _execute_workflow_step(task_runtime: TaskRuntime, step: WorkflowStepSpec) -> TaskRecord:
+    """内部方法：执行 `_execute_workflow_step` 相关逻辑。
+    Args:
+        task_runtime (TaskRuntime): 参数 `task_runtime`。
+        step (WorkflowStepSpec): 参数 `step`。
+    Returns:
+        TaskRecord: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if step.action is WorkflowAction.CREATE:
         return task_runtime.create_task(
             step.task_id,
@@ -444,6 +599,15 @@ def _execute_workflow_step(task_runtime: TaskRuntime, step: WorkflowStepSpec) ->
 
 
 def _get_task_status(task_runtime: TaskRuntime, task_id: str) -> str | None:
+    """内部方法：执行 `_get_task_status` 相关逻辑。
+    Args:
+        task_runtime (TaskRuntime): 参数 `task_runtime`。
+        task_id (str): 参数 `task_id`。
+    Returns:
+        str | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     try:
         return task_runtime.get_task(task_id).status.value
     except ValueError:
@@ -451,6 +615,15 @@ def _get_task_status(task_runtime: TaskRuntime, task_id: str) -> str | None:
 
 
 def _normalize_identifier(value: object, *, label: str) -> str:
+    """内部方法：执行 `_normalize_identifier` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+        label (str): 参数 `label`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, str):
         raise ValueError(f'{label} must be a string')
     normalized = value.strip()
@@ -462,6 +635,14 @@ def _normalize_identifier(value: object, *, label: str) -> str:
 
 
 def _normalize_optional_text(value: object) -> str | None:
+    """内部方法：执行 `_normalize_optional_text` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        str | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if value is None:
         return None
     normalized = str(value).strip()
@@ -469,6 +650,14 @@ def _normalize_optional_text(value: object) -> str | None:
 
 
 def _normalize_optional_dependencies(value: object) -> tuple[str, ...] | None:
+    """内部方法：执行 `_normalize_optional_dependencies` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        tuple[str, ...] | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if value is None:
         return None
     if not isinstance(value, (list, tuple)):
@@ -482,6 +671,15 @@ def _normalize_optional_dependencies(value: object) -> tuple[str, ...] | None:
 
 
 def _as_int(value: object, default: int) -> int:
+    """内部方法：执行 `_as_int` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+        default (int): 参数 `default`。
+    Returns:
+        int: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if isinstance(value, bool) or value is None:
         return default
     if isinstance(value, int):

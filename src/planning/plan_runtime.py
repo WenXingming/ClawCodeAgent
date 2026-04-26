@@ -36,6 +36,14 @@ class PlanStep:
     status: PlanStepStatus = PlanStepStatus.PENDING
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return {
             'step_id': self.step_id,
             'title': self.title,
@@ -46,6 +54,14 @@ class PlanStep:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'PlanStep':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+        Returns:
+            'PlanStep': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         step_id = _normalize_step_id(data.get('step_id', data.get('stepId', '')))
         title = str(data.get('title', '')).strip()
@@ -71,6 +87,14 @@ class PlanRuntime:
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'PlanRuntime':
+        """从工作区加载计划运行时状态。
+
+        Args:
+            workspace (Path): 工作区根目录。
+
+        Returns:
+            PlanRuntime: 解析并校验后的计划运行时对象。
+        """
         resolved_workspace = workspace.resolve()
         path = resolved_workspace / _PLAN_STATE_FILE
         if not path.is_file():
@@ -105,6 +129,14 @@ class PlanRuntime:
         return runtime
 
     def save(self) -> Path:
+        """执行 `save` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            Path: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         path = self.workspace / _PLAN_STATE_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -121,6 +153,14 @@ class PlanRuntime:
         return path
 
     def list_steps(self) -> tuple[PlanStep, ...]:
+        """执行 `list_steps` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            tuple[PlanStep, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return tuple(
             self.steps_by_id[step_id]
             for step_id in self.step_order
@@ -128,6 +168,14 @@ class PlanRuntime:
         )
 
     def get_step(self, step_id: str) -> PlanStep:
+        """执行 `get_step` 逻辑。
+        Args:
+            step_id (str): 参数 `step_id`。
+        Returns:
+            PlanStep: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_id = _normalize_step_id(step_id)
         step = self.steps_by_id.get(normalized_id)
         if step is None:
@@ -140,6 +188,15 @@ class PlanRuntime:
         *,
         sync_tasks: bool = False,
     ) -> tuple[PlanStep, ...]:
+        """执行 `update_plan` 逻辑。
+        Args:
+            steps (tuple[PlanStep, ...] | list[PlanStep]): 参数 `steps`。
+            sync_tasks (bool): 参数 `sync_tasks`。
+        Returns:
+            tuple[PlanStep, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_steps = self._normalize_steps(steps)
         self.steps_by_id = {item.step_id: item for item in normalized_steps}
         self.step_order = tuple(item.step_id for item in normalized_steps)
@@ -149,6 +206,14 @@ class PlanRuntime:
         return self.list_steps()
 
     def clear_plan(self, *, sync_tasks: bool = False) -> None:
+        """执行 `clear_plan` 逻辑。
+        Args:
+            sync_tasks (bool): 参数 `sync_tasks`。
+        Returns:
+            None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         self.steps_by_id = {}
         self.step_order = ()
         self.save()
@@ -156,6 +221,14 @@ class PlanRuntime:
             TaskRuntime.from_workspace(self.workspace).replace_tasks(())
 
     def sync_tasks(self) -> tuple[PlanStep, ...]:
+        """执行 `sync_tasks` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            tuple[PlanStep, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         task_runtime = TaskRuntime.from_workspace(self.workspace)
         existing_tasks = {item.task_id: item for item in task_runtime.list_tasks()}
         synced_tasks = task_runtime.replace_tasks(
@@ -179,6 +252,14 @@ class PlanRuntime:
         return self.list_steps()
 
     def render_plan(self) -> str:
+        """执行 `render_plan` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         steps = self.list_steps()
         if not steps:
             return 'Plan Steps\n==========\n(none)'
@@ -189,6 +270,14 @@ class PlanRuntime:
         return '\n'.join(lines)
 
     def _normalize_steps(self, steps: tuple[PlanStep, ...] | list[PlanStep]) -> tuple[PlanStep, ...]:
+        """内部方法：执行 `_normalize_steps` 相关逻辑。
+        Args:
+            steps (tuple[PlanStep, ...] | list[PlanStep]): 参数 `steps`。
+        Returns:
+            tuple[PlanStep, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_steps: list[PlanStep] = []
         seen_ids: set[str] = set()
         for step in steps:
@@ -207,6 +296,14 @@ class PlanRuntime:
 
     @staticmethod
     def _validate_dependencies(steps: tuple[PlanStep, ...]) -> None:
+        """内部方法：执行 `_validate_dependencies` 相关逻辑。
+        Args:
+            steps (tuple[PlanStep, ...]): 参数 `steps`。
+        Returns:
+            None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         known_step_ids = {item.step_id for item in steps}
         for step in steps:
             missing_dependencies = [item for item in step.dependencies if item not in known_step_ids]
@@ -217,6 +314,15 @@ class PlanRuntime:
 
     @staticmethod
     def _step_to_task_record(step: PlanStep, existing_task: TaskRecord | None) -> TaskRecord:
+        """内部方法：执行 `_step_to_task_record` 相关逻辑。
+        Args:
+            step (PlanStep): 参数 `step`。
+            existing_task (TaskRecord | None): 参数 `existing_task`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         status = existing_task.status if existing_task is not None else TaskStatus.PENDING
         manual_block_reason = existing_task.manual_block_reason if existing_task is not None else None
         return TaskRecord(
@@ -230,6 +336,14 @@ class PlanRuntime:
 
 
 def _normalize_step_id(value: object) -> str:
+    """内部方法：执行 `_normalize_step_id` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, str):
         raise ValueError('step_id must be a string')
     normalized = value.strip()
@@ -241,6 +355,15 @@ def _normalize_step_id(value: object) -> str:
 
 
 def _normalize_dependencies(value: object, *, step_id: str) -> tuple[str, ...]:
+    """内部方法：执行 `_normalize_dependencies` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+        step_id (str): 参数 `step_id`。
+    Returns:
+        tuple[str, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if value is None:
         return ()
     if not isinstance(value, (list, tuple)):
@@ -257,6 +380,15 @@ def _normalize_dependencies(value: object, *, step_id: str) -> tuple[str, ...]:
 
 
 def _as_int(value: object, default: int) -> int:
+    """内部方法：执行 `_as_int` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+        default (int): 参数 `default`。
+    Returns:
+        int: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if isinstance(value, bool) or value is None:
         return default
     if isinstance(value, int):

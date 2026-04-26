@@ -37,6 +37,14 @@ class TaskRecord:
     manual_block_reason: str | None = None
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload: JSONDict = {
             'task_id': self.task_id,
             'title': self.title,
@@ -51,6 +59,14 @@ class TaskRecord:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'TaskRecord':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+        Returns:
+            'TaskRecord': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         task_id = _normalize_task_id(data.get('task_id', data.get('taskId', '')))
         title = str(data.get('title', '')).strip()
@@ -85,6 +101,14 @@ class TaskRuntime:
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'TaskRuntime':
+        """从工作区加载任务运行时状态。
+
+        Args:
+            workspace (Path): 工作区根目录。
+
+        Returns:
+            TaskRuntime: 解析并校验后的任务运行时对象。
+        """
         resolved_workspace = workspace.resolve()
         path = resolved_workspace / _TASKS_STATE_FILE
         if not path.is_file():
@@ -119,6 +143,14 @@ class TaskRuntime:
         return runtime
 
     def save(self) -> Path:
+        """执行 `save` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            Path: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         path = self.workspace / _TASKS_STATE_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -142,6 +174,17 @@ class TaskRuntime:
         description: str = '',
         dependencies: tuple[str, ...] | list[str] = (),
     ) -> TaskRecord:
+        """执行 `create_task` 逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+            title (str): 参数 `title`。
+            description (str): 参数 `description`。
+            dependencies (tuple[str, ...] | list[str]): 参数 `dependencies`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_id = _normalize_task_id(task_id)
         if normalized_id in self.tasks_by_id:
             raise ValueError(f'Task already exists: {normalized_id!r}')
@@ -162,6 +205,14 @@ class TaskRuntime:
         return self.tasks_by_id[normalized_id]
 
     def replace_tasks(self, tasks: tuple[TaskRecord, ...] | list[TaskRecord]) -> tuple[TaskRecord, ...]:
+        """执行 `replace_tasks` 逻辑。
+        Args:
+            tasks (tuple[TaskRecord, ...] | list[TaskRecord]): 参数 `tasks`。
+        Returns:
+            tuple[TaskRecord, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_tasks: list[TaskRecord] = []
         seen_ids: set[str] = set()
         for task in tasks:
@@ -186,6 +237,17 @@ class TaskRuntime:
         description: str | None = None,
         dependencies: tuple[str, ...] | list[str] | None = None,
     ) -> TaskRecord:
+        """执行 `update_task` 逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+            title (str | None): 参数 `title`。
+            description (str | None): 参数 `description`。
+            dependencies (tuple[str, ...] | list[str] | None): 参数 `dependencies`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         current = self.get_task(task_id)
         updated = replace(
             current,
@@ -206,6 +268,14 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def start_task(self, task_id: str) -> TaskRecord:
+        """执行 `start_task` 逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         current = self._refreshed_task(task_id)
         if current.status is not TaskStatus.PENDING:
             raise ValueError(f'Task {current.task_id!r} cannot start from status {current.status.value!r}')
@@ -220,6 +290,14 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def complete_task(self, task_id: str) -> TaskRecord:
+        """执行 `complete_task` 逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         current = self.get_task(task_id)
         if current.status is not TaskStatus.IN_PROGRESS:
             raise ValueError(f'Task {current.task_id!r} cannot complete from status {current.status.value!r}')
@@ -235,6 +313,15 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def block_task(self, task_id: str, *, reason: str) -> TaskRecord:
+        """执行 `block_task` 逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+            reason (str): 参数 `reason`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         current = self.get_task(task_id)
         if current.status in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}:
             raise ValueError(f'Task {current.task_id!r} cannot be blocked from status {current.status.value!r}')
@@ -253,6 +340,14 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def cancel_task(self, task_id: str) -> TaskRecord:
+        """执行 `cancel_task` 逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         current = self.get_task(task_id)
         if current.status in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}:
             raise ValueError(f'Task {current.task_id!r} cannot cancel from status {current.status.value!r}')
@@ -268,6 +363,14 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def list_tasks(self) -> tuple[TaskRecord, ...]:
+        """执行 `list_tasks` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            tuple[TaskRecord, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return tuple(
             self.tasks_by_id[task_id]
             for task_id in self.task_order
@@ -275,6 +378,14 @@ class TaskRuntime:
         )
 
     def next_tasks(self) -> tuple[TaskRecord, ...]:
+        """执行 `next_tasks` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            tuple[TaskRecord, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return tuple(
             task
             for task in self.list_tasks()
@@ -282,6 +393,14 @@ class TaskRuntime:
         )
 
     def get_task(self, task_id: str) -> TaskRecord:
+        """执行 `get_task` 逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_id = _normalize_task_id(task_id)
         task = self.tasks_by_id.get(normalized_id)
         if task is None:
@@ -289,6 +408,14 @@ class TaskRuntime:
         return task
 
     def _refreshed_task(self, task_id: str) -> TaskRecord:
+        """内部方法：执行 `_refreshed_task` 相关逻辑。
+        Args:
+            task_id (str): 参数 `task_id`。
+        Returns:
+            TaskRecord: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         refreshed = self._reconcile_dependency_states(self.tasks_by_id)
         self.tasks_by_id = refreshed
         return self.get_task(task_id)
@@ -299,6 +426,15 @@ class TaskRuntime:
         *,
         task_order: tuple[str, ...] | None = None,
     ) -> None:
+        """内部方法：执行 `_commit` 相关逻辑。
+        Args:
+            tasks_by_id (dict[str, TaskRecord]): 参数 `tasks_by_id`。
+            task_order (tuple[str, ...] | None): 参数 `task_order`。
+        Returns:
+            None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if task_order is not None:
             self.task_order = task_order
         self.tasks_by_id = self._reconcile_dependency_states(tasks_by_id)
@@ -308,6 +444,14 @@ class TaskRuntime:
         self,
         tasks_by_id: dict[str, TaskRecord],
     ) -> dict[str, TaskRecord]:
+        """内部方法：执行 `_reconcile_dependency_states` 相关逻辑。
+        Args:
+            tasks_by_id (dict[str, TaskRecord]): 参数 `tasks_by_id`。
+        Returns:
+            dict[str, TaskRecord]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         completed_tasks = {
             task_id
             for task_id, task in tasks_by_id.items()
@@ -361,6 +505,14 @@ class TaskRuntime:
 
 
 def _normalize_task_id(value: object) -> str:
+    """内部方法：执行 `_normalize_task_id` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, str):
         raise ValueError('task_id must be a string')
 
@@ -373,6 +525,15 @@ def _normalize_task_id(value: object) -> str:
 
 
 def _normalize_dependencies(value: object, *, task_id: str) -> tuple[str, ...]:
+    """内部方法：执行 `_normalize_dependencies` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+        task_id (str): 参数 `task_id`。
+    Returns:
+        tuple[str, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if value is None:
         return ()
     if not isinstance(value, (list, tuple)):
@@ -389,6 +550,14 @@ def _normalize_dependencies(value: object, *, task_id: str) -> tuple[str, ...]:
 
 
 def _normalize_optional_text(value: object) -> str | None:
+    """内部方法：执行 `_normalize_optional_text` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        str | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if value is None:
         return None
     normalized = str(value).strip()
@@ -396,6 +565,15 @@ def _normalize_optional_text(value: object) -> str | None:
 
 
 def _as_int(value: object, default: int) -> int:
+    """内部方法：执行 `_as_int` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+        default (int): 参数 `default`。
+    Returns:
+        int: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if isinstance(value, bool) or value is None:
         return default
     if isinstance(value, int):

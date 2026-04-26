@@ -36,6 +36,15 @@ class HookPolicyManifest:
         *,
         source_path: Path | None = None,
     ) -> 'HookPolicyManifest':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+            source_path (Path | None): 参数 `source_path`。
+        Returns:
+            'HookPolicyManifest': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         name = str(data.get('name', '')).strip()
         if not name:
@@ -63,6 +72,14 @@ class HookPolicyManifest:
 
     @classmethod
     def from_path(cls, manifest_path: Path) -> 'HookPolicyManifest':
+        """执行 `from_path` 逻辑。
+        Args:
+            manifest_path (Path): 参数 `manifest_path`。
+        Returns:
+            'HookPolicyManifest': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload = json.loads(manifest_path.read_text(encoding='utf-8'))
         if not isinstance(payload, dict):
             raise ValueError(f'Hook policy manifest {manifest_path} must contain a JSON object')
@@ -94,6 +111,14 @@ class HookPolicyRuntime:
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'HookPolicyRuntime':
+        """从工作区发现并加载 hook policy 清单。
+
+        Args:
+            workspace (Path): 工作区根目录。
+
+        Returns:
+            HookPolicyRuntime: 合并策略与加载错误后的运行时快照。
+        """
         manifests: list[HookPolicyManifest] = []
         skipped_manifests: list[HookPolicyManifest] = []
         load_errors: list[HookPolicyLoadError] = []
@@ -144,6 +169,14 @@ class HookPolicyRuntime:
         )
 
     def is_tool_denied(self, tool_name: str) -> bool:
+        """执行 `is_tool_denied` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            bool: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if tool_name in self.deny_tools:
             return True
         return any(tool_name.startswith(prefix) for prefix in self.deny_prefixes)
@@ -152,6 +185,14 @@ class HookPolicyRuntime:
         self,
         tool_registry: dict[str, AgentTool],
     ) -> dict[str, AgentTool]:
+        """执行 `filter_tool_registry` 逻辑。
+        Args:
+            tool_registry (dict[str, AgentTool]): 参数 `tool_registry`。
+        Returns:
+            dict[str, AgentTool]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return {
             name: tool
             for name, tool in tool_registry.items()
@@ -159,12 +200,28 @@ class HookPolicyRuntime:
         }
 
     def apply_runtime_config(self, runtime_config: AgentRuntimeConfig) -> AgentRuntimeConfig:
+        """执行 `apply_runtime_config` 逻辑。
+        Args:
+            runtime_config (AgentRuntimeConfig): 参数 `runtime_config`。
+        Returns:
+            AgentRuntimeConfig: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         merged_budget = _merge_budget_configs(runtime_config.budget_config, self.budget_overrides)
         if merged_budget == runtime_config.budget_config:
             return runtime_config
         return replace(runtime_config, budget_config=merged_budget)
 
     def resolve_block(self, tool_name: str) -> JSONDict | None:
+        """执行 `resolve_block` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            JSONDict | None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if not self.manifests:
             if tool_name in self.deny_tools:
                 return {
@@ -201,12 +258,36 @@ class HookPolicyRuntime:
         return None
 
     def get_before_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        """执行 `get_before_hooks` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            tuple[JSONDict, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return self._collect_hooks('before', tool_name)
 
     def get_after_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        """执行 `get_after_hooks` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            tuple[JSONDict, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return self._collect_hooks('after', tool_name)
 
     def render_summary(self) -> str:
+        """执行 `render_summary` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if not self.manifests and not self.skipped_manifests and not self.load_errors:
             return ''
 
@@ -225,6 +306,15 @@ class HookPolicyRuntime:
         return '\n'.join(lines)
 
     def _collect_hooks(self, phase: str, tool_name: str) -> tuple[JSONDict, ...]:
+        """内部方法：执行 `_collect_hooks` 相关逻辑。
+        Args:
+            phase (str): 参数 `phase`。
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            tuple[JSONDict, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if not self.manifests:
             raw_hooks = self.before_hooks if phase == 'before' else self.after_hooks
             hooks: list[JSONDict] = []
@@ -266,6 +356,14 @@ class HookPolicyRuntime:
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
+    """内部方法：执行 `_discover_manifest_paths` 相关逻辑。
+    Args:
+        workspace (Path): 参数 `workspace`。
+    Returns:
+        tuple[Path, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     candidates: list[Path] = []
     single_manifest = workspace / _POLICY_MANIFEST_FILE
     if single_manifest.is_file():
@@ -282,6 +380,14 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
 
 
 def _normalize_string_list(value: object) -> tuple[str, ...]:
+    """内部方法：执行 `_normalize_string_list` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        tuple[str, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, list):
         return ()
     result: list[str] = []
@@ -295,6 +401,14 @@ def _normalize_string_list(value: object) -> tuple[str, ...]:
 
 
 def _normalize_string_mapping(value: object) -> dict[str, str]:
+    """内部方法：执行 `_normalize_string_mapping` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        dict[str, str]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, dict):
         return {}
     result: dict[str, str] = {}
@@ -309,6 +423,14 @@ def _normalize_string_mapping(value: object) -> dict[str, str]:
 
 
 def _normalize_hook_list(value: object) -> tuple[JSONDict, ...]:
+    """内部方法：执行 `_normalize_hook_list` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        tuple[JSONDict, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, list):
         return ()
     hooks: list[JSONDict] = []
@@ -319,12 +441,30 @@ def _normalize_hook_list(value: object) -> tuple[JSONDict, ...]:
 
 
 def _extend_unique(target: list[str], values: tuple[str, ...]) -> None:
+    """内部方法：执行 `_extend_unique` 相关逻辑。
+    Args:
+        target (list[str]): 参数 `target`。
+        values (tuple[str, ...]): 参数 `values`。
+    Returns:
+        None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     for item in values:
         if item not in target:
             target.append(item)
 
 
 def _merge_budget_configs(base: BudgetConfig, override: BudgetConfig) -> BudgetConfig:
+    """内部方法：执行 `_merge_budget_configs` 相关逻辑。
+    Args:
+        base (BudgetConfig): 参数 `base`。
+        override (BudgetConfig): 参数 `override`。
+    Returns:
+        BudgetConfig: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     payload = base.to_dict()
     for key, value in override.to_dict().items():
         if value is not None:

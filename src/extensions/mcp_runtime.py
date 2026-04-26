@@ -34,6 +34,14 @@ class MCPResource:
     metadata: JSONDict = field(default_factory=dict)
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload: JSONDict = {
             'uri': self.uri,
             'server_name': self.server_name,
@@ -67,6 +75,14 @@ class MCPTool:
     metadata: JSONDict = field(default_factory=dict)
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload: JSONDict = {
             'name': self.name,
             'server_name': self.server_name,
@@ -96,6 +112,14 @@ class MCPServerProfile:
     metadata: JSONDict = field(default_factory=dict)
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload: JSONDict = {
             'name': self.name,
             'transport': self.transport,
@@ -125,6 +149,14 @@ class MCPToolCallResult:
     raw_result: JSONDict = field(default_factory=dict)
 
     def to_dict(self) -> JSONDict:
+        """执行 `to_dict` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return {
             'server_name': self.server_name,
             'tool_name': self.tool_name,
@@ -154,6 +186,18 @@ class MCPTransportError(RuntimeError):
         stderr: str = '',
         exit_code: int | None = None,
     ) -> None:
+        """初始化对象状态。
+        Args:
+            server_name (str): 参数 `server_name`。
+            method (str): 参数 `method`。
+            detail (str): 参数 `detail`。
+            stderr (str): 参数 `stderr`。
+            exit_code (int | None): 参数 `exit_code`。
+        Returns:
+            None: 无返回值。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         self.server_name = server_name
         self.method = method
         self.detail = detail
@@ -180,6 +224,14 @@ class MCPRuntime:
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'MCPRuntime':
+        """从工作区发现 MCP 资源与服务配置。
+
+        Args:
+            workspace (Path): 工作区根目录。
+
+        Returns:
+            MCPRuntime: 包含资源、服务与加载错误的运行时对象。
+        """
         resolved_workspace = workspace.resolve()
         resources: list[MCPResource] = []
         servers: list[MCPServerProfile] = []
@@ -205,6 +257,16 @@ class MCPRuntime:
         server_name: str | None = None,
         limit: int | None = None,
     ) -> tuple[MCPResource, ...]:
+        """执行 `list_resources` 逻辑。
+        Args:
+            query (str | None): 参数 `query`。
+            server_name (str | None): 参数 `server_name`。
+            limit (int | None): 参数 `limit`。
+        Returns:
+            tuple[MCPResource, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         local_resources = tuple(
             item for item in self.resources if server_name is None or item.server_name == server_name
         )
@@ -215,6 +277,14 @@ class MCPRuntime:
         return combined
 
     def get_resource(self, uri: str) -> MCPResource:
+        """执行 `get_resource` 逻辑。
+        Args:
+            uri (str): 参数 `uri`。
+        Returns:
+            MCPResource: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_uri = _normalize_uri(uri)
         for resource in self.resources:
             if resource.uri == normalized_uri:
@@ -225,6 +295,15 @@ class MCPRuntime:
         raise ValueError(f'Unknown MCP resource: {normalized_uri!r}')
 
     def read_resource(self, uri: str, *, max_chars: int = 12000) -> str:
+        """执行 `read_resource` 逻辑。
+        Args:
+            uri (str): 参数 `uri`。
+            max_chars (int): 参数 `max_chars`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_uri = _normalize_uri(uri)
         for resource in self.resources:
             if resource.uri != normalized_uri:
@@ -274,6 +353,16 @@ class MCPRuntime:
         server_name: str | None = None,
         limit: int | None = None,
     ) -> tuple[MCPTool, ...]:
+        """执行 `list_tools` 逻辑。
+        Args:
+            query (str | None): 参数 `query`。
+            server_name (str | None): 参数 `server_name`。
+            limit (int | None): 参数 `limit`。
+        Returns:
+            tuple[MCPTool, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         tools = self._list_remote_tools(server_name=server_name)
         if query:
             needle = query.lower()
@@ -296,6 +385,17 @@ class MCPRuntime:
         server_name: str | None = None,
         max_chars: int = 12000,
     ) -> MCPToolCallResult:
+        """执行 `call_tool` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+            arguments (dict[str, Any] | None): 参数 `arguments`。
+            server_name (str | None): 参数 `server_name`。
+            max_chars (int): 参数 `max_chars`。
+        Returns:
+            MCPToolCallResult: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         tool = self._resolve_tool(tool_name, server_name=server_name)
         server = self.get_server(tool.server_name)
         if server is None:
@@ -318,6 +418,14 @@ class MCPRuntime:
         )
 
     def get_server(self, server_name: str) -> MCPServerProfile | None:
+        """执行 `get_server` 逻辑。
+        Args:
+            server_name (str): 参数 `server_name`。
+        Returns:
+            MCPServerProfile | None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_name = _normalize_name(server_name, label='server_name')
         for server in self.servers:
             if server.name == normalized_name:
@@ -325,6 +433,14 @@ class MCPRuntime:
         return None
 
     def render_summary(self) -> str:
+        """执行 `render_summary` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if not self.resources and not self.servers:
             return 'No local MCP manifests, servers, or resources discovered.'
         lines = [
@@ -336,6 +452,15 @@ class MCPRuntime:
         return '\n'.join(lines)
 
     def render_resource_index(self, *, query: str | None = None, limit: int = 20) -> str:
+        """执行 `render_resource_index` 逻辑。
+        Args:
+            query (str | None): 参数 `query`。
+            limit (int): 参数 `limit`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         resources = self.list_resources(query=query, limit=limit)
         if not resources:
             return '# MCP Resources\n\nNo matching MCP resources discovered.'
@@ -357,6 +482,15 @@ class MCPRuntime:
         return '\n'.join(lines)
 
     def render_resource(self, uri: str, *, max_chars: int = 12000) -> str:
+        """执行 `render_resource` 逻辑。
+        Args:
+            uri (str): 参数 `uri`。
+            max_chars (int): 参数 `max_chars`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         resource = self.get_resource(uri)
         lines = [
             '# MCP Resource',
@@ -378,6 +512,16 @@ class MCPRuntime:
         server_name: str | None = None,
         limit: int = 50,
     ) -> str:
+        """执行 `render_tool_index` 逻辑。
+        Args:
+            query (str | None): 参数 `query`。
+            server_name (str | None): 参数 `server_name`。
+            limit (int): 参数 `limit`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         tools = self.list_tools(query=query, server_name=server_name, limit=limit)
         if not tools:
             return '# MCP Tools\n\nNo matching MCP tools discovered.'
@@ -398,6 +542,17 @@ class MCPRuntime:
         server_name: str | None = None,
         max_chars: int = 12000,
     ) -> str:
+        """执行 `render_tool_call` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+            arguments (dict[str, Any] | None): 参数 `arguments`。
+            server_name (str | None): 参数 `server_name`。
+            max_chars (int): 参数 `max_chars`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         result = self.call_tool(tool_name, arguments=arguments, server_name=server_name, max_chars=max_chars)
         return '\n'.join(
             [
@@ -412,6 +567,14 @@ class MCPRuntime:
         )
 
     def _list_remote_resources(self, *, server_name: str | None = None) -> tuple[MCPResource, ...]:
+        """内部方法：执行 `_list_remote_resources` 相关逻辑。
+        Args:
+            server_name (str | None): 参数 `server_name`。
+        Returns:
+            tuple[MCPResource, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         discovered: list[MCPResource] = []
         candidate_servers = _resolve_candidate_servers(self.servers, server_name)
         for server in candidate_servers:
@@ -427,6 +590,14 @@ class MCPRuntime:
         return tuple(discovered)
 
     def _list_remote_tools(self, *, server_name: str | None = None) -> tuple[MCPTool, ...]:
+        """内部方法：执行 `_list_remote_tools` 相关逻辑。
+        Args:
+            server_name (str | None): 参数 `server_name`。
+        Returns:
+            tuple[MCPTool, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         discovered: list[MCPTool] = []
         candidate_servers = _resolve_candidate_servers(self.servers, server_name)
         for server in candidate_servers:
@@ -442,6 +613,15 @@ class MCPRuntime:
         return tuple(discovered)
 
     def _resolve_tool(self, tool_name: str, *, server_name: str | None = None) -> MCPTool:
+        """内部方法：执行 `_resolve_tool` 相关逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+            server_name (str | None): 参数 `server_name`。
+        Returns:
+            MCPTool: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         normalized_name = _normalize_name(tool_name, label='tool_name')
         matches = [tool for tool in self.list_tools(server_name=server_name) if tool.name == normalized_name]
         if not matches:
@@ -456,6 +636,14 @@ class MCPRuntime:
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
+    """内部方法：执行 `_discover_manifest_paths` 相关逻辑。
+    Args:
+        workspace (Path): 参数 `workspace`。
+    Returns:
+        tuple[Path, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     discovered: list[Path] = []
     single_manifest = workspace / _MCP_MANIFEST_FILE
     if single_manifest.is_file():
@@ -472,6 +660,14 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
 
 
 def _load_manifest(path: Path) -> tuple[tuple[MCPResource, ...], tuple[MCPServerProfile, ...], tuple[MCPLoadError, ...]]:
+    """内部方法：执行 `_load_manifest` 相关逻辑。
+    Args:
+        path (Path): 参数 `path`。
+    Returns:
+        tuple[tuple[MCPResource, ...], tuple[MCPServerProfile, ...], tuple[MCPLoadError, ...]]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     try:
         payload = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as exc:
@@ -530,6 +726,16 @@ def _extract_server_profile(
     *,
     manifest_path: Path,
 ) -> MCPServerProfile | None:
+    """内部方法：执行 `_extract_server_profile` 相关逻辑。
+    Args:
+        server_name (str): 参数 `server_name`。
+        payload (dict[str, Any]): 参数 `payload`。
+        manifest_path (Path): 参数 `manifest_path`。
+    Returns:
+        MCPServerProfile | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     transport = _normalize_optional_text(payload.get('transport')) or 'stdio'
     transport = transport.lower()
     if transport != 'stdio':
@@ -570,6 +776,16 @@ def _extract_server_profile(
 
 
 def _extract_resources(server_name: str, raw_resources: list[Any], *, manifest_path: Path) -> tuple[MCPResource, ...]:
+    """内部方法：执行 `_extract_resources` 相关逻辑。
+    Args:
+        server_name (str): 参数 `server_name`。
+        raw_resources (list[Any]): 参数 `raw_resources`。
+        manifest_path (Path): 参数 `manifest_path`。
+    Returns:
+        tuple[MCPResource, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     resources: list[MCPResource] = []
     seen_uris: set[str] = set()
     normalized_server_name = _normalize_name(server_name, label='server_name')
@@ -606,6 +822,15 @@ def _extract_resources(server_name: str, raw_resources: list[Any], *, manifest_p
 
 
 def _extract_remote_resources(server: MCPServerProfile, payload: dict[str, Any]) -> tuple[MCPResource, ...]:
+    """内部方法：执行 `_extract_remote_resources` 相关逻辑。
+    Args:
+        server (MCPServerProfile): 参数 `server`。
+        payload (dict[str, Any]): 参数 `payload`。
+    Returns:
+        tuple[MCPResource, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     raw_resources = payload.get('resources')
     if not isinstance(raw_resources, list):
         return ()
@@ -635,6 +860,15 @@ def _extract_remote_resources(server: MCPServerProfile, payload: dict[str, Any])
 
 
 def _extract_remote_tools(server: MCPServerProfile, payload: dict[str, Any]) -> tuple[MCPTool, ...]:
+    """内部方法：执行 `_extract_remote_tools` 相关逻辑。
+    Args:
+        server (MCPServerProfile): 参数 `server`。
+        payload (dict[str, Any]): 参数 `payload`。
+    Returns:
+        tuple[MCPTool, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     raw_tools = payload.get('tools')
     if not isinstance(raw_tools, list):
         return ()
@@ -664,6 +898,14 @@ def _extract_remote_tools(server: MCPServerProfile, payload: dict[str, Any]) -> 
 
 
 def _dedupe_servers(servers: list[MCPServerProfile] | tuple[MCPServerProfile, ...]) -> tuple[MCPServerProfile, ...]:
+    """内部方法：执行 `_dedupe_servers` 相关逻辑。
+    Args:
+        servers (list[MCPServerProfile] | tuple[MCPServerProfile, ...]): 参数 `servers`。
+    Returns:
+        tuple[MCPServerProfile, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     deduped: list[MCPServerProfile] = []
     seen: set[tuple[str, str, str, tuple[str, ...]]] = set()
     for server in servers:
@@ -679,6 +921,15 @@ def _resolve_candidate_servers(
     servers: tuple[MCPServerProfile, ...],
     server_name: str | None,
 ) -> tuple[MCPServerProfile, ...]:
+    """内部方法：执行 `_resolve_candidate_servers` 相关逻辑。
+    Args:
+        servers (tuple[MCPServerProfile, ...]): 参数 `servers`。
+        server_name (str | None): 参数 `server_name`。
+    Returns:
+        tuple[MCPServerProfile, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if server_name is None:
         return servers
     normalized_name = _normalize_name(server_name, label='server_name')
@@ -695,6 +946,17 @@ def _request_stdio(
     *,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
+    """内部方法：执行 `_request_stdio` 相关逻辑。
+    Args:
+        server (MCPServerProfile): 参数 `server`。
+        method (str): 参数 `method`。
+        params (dict[str, Any]): 参数 `params`。
+        timeout_seconds (float): 参数 `timeout_seconds`。
+    Returns:
+        dict[str, Any]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     command = [server.command, *server.args]
     env = os.environ.copy()
     env.update(server.env)
@@ -811,12 +1073,28 @@ def _request_stdio(
 
 
 def _encode_mcp_message(payload: dict[str, Any]) -> bytes:
+    """内部方法：执行 `_encode_mcp_message` 相关逻辑。
+    Args:
+        payload (dict[str, Any]): 参数 `payload`。
+    Returns:
+        bytes: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     body = json.dumps(payload, ensure_ascii=True).encode('utf-8')
     header = f'Content-Length: {len(body)}\r\n\r\n'.encode('ascii')
     return header + body
 
 
 def _decode_mcp_messages(raw: bytes | None) -> tuple[dict[str, Any], ...]:
+    """内部方法：执行 `_decode_mcp_messages` 相关逻辑。
+    Args:
+        raw (bytes | None): 参数 `raw`。
+    Returns:
+        tuple[dict[str, Any], ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not raw:
         return ()
 
@@ -845,6 +1123,14 @@ def _decode_mcp_messages(raw: bytes | None) -> tuple[dict[str, Any], ...]:
 
 
 def _parse_content_length(header_blob: str) -> int:
+    """内部方法：执行 `_parse_content_length` 相关逻辑。
+    Args:
+        header_blob (str): 参数 `header_blob`。
+    Returns:
+        int: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     for raw_line in header_blob.split('\r\n'):
         name, _, value = raw_line.partition(':')
         if name.lower() != 'content-length':
@@ -857,6 +1143,15 @@ def _parse_content_length(header_blob: str) -> int:
 
 
 def _find_response(messages: tuple[dict[str, Any], ...], request_id: int) -> dict[str, Any] | None:
+    """内部方法：执行 `_find_response` 相关逻辑。
+    Args:
+        messages (tuple[dict[str, Any], ...]): 参数 `messages`。
+        request_id (int): 参数 `request_id`。
+    Returns:
+        dict[str, Any] | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     for message in messages:
         if message.get('id') == request_id:
             return message
@@ -864,6 +1159,14 @@ def _find_response(messages: tuple[dict[str, Any], ...], request_id: int) -> dic
 
 
 def _render_resource_contents(contents: Any) -> str:
+    """内部方法：执行 `_render_resource_contents` 相关逻辑。
+    Args:
+        contents (Any): 参数 `contents`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(contents, list):
         return ''
 
@@ -885,6 +1188,14 @@ def _render_resource_contents(contents: Any) -> str:
 
 
 def _render_tool_call_result(result: dict[str, Any]) -> str:
+    """内部方法：执行 `_render_tool_call_result` 相关逻辑。
+    Args:
+        result (dict[str, Any]): 参数 `result`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     content = result.get('content')
     if not isinstance(content, list):
         return json.dumps(result, ensure_ascii=True, indent=2)
@@ -902,6 +1213,15 @@ def _render_tool_call_result(result: dict[str, Any]) -> str:
 
 
 def _filter_resources(resources: tuple[MCPResource, ...], *, query: str | None = None) -> tuple[MCPResource, ...]:
+    """内部方法：执行 `_filter_resources` 相关逻辑。
+    Args:
+        resources (tuple[MCPResource, ...]): 参数 `resources`。
+        query (str | None): 参数 `query`。
+    Returns:
+        tuple[MCPResource, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not query:
         return resources
     needle = query.lower()
@@ -916,6 +1236,15 @@ def _filter_resources(resources: tuple[MCPResource, ...], *, query: str | None =
 
 
 def _normalize_name(value: object, *, label: str) -> str:
+    """内部方法：执行 `_normalize_name` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+        label (str): 参数 `label`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, str):
         raise ValueError(f'{label} must be a string')
     normalized = value.strip()
@@ -927,6 +1256,14 @@ def _normalize_name(value: object, *, label: str) -> str:
 
 
 def _normalize_uri(value: object) -> str:
+    """内部方法：执行 `_normalize_uri` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, str):
         raise ValueError('uri must be a string')
     normalized = value.strip()
@@ -936,6 +1273,14 @@ def _normalize_uri(value: object) -> str:
 
 
 def _normalize_optional_text(value: object) -> str | None:
+    """内部方法：执行 `_normalize_optional_text` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        str | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if value is None:
         return None
     normalized = str(value).strip()
@@ -943,12 +1288,29 @@ def _normalize_optional_text(value: object) -> str | None:
 
 
 def _decode_stderr(raw: bytes | None) -> str:
+    """内部方法：执行 `_decode_stderr` 相关逻辑。
+    Args:
+        raw (bytes | None): 参数 `raw`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not raw:
         return ''
     return raw.decode('utf-8', errors='replace').strip()
 
 
 def _resolve_manifest_path(manifest_path: Path, raw_path: str) -> Path:
+    """内部方法：执行 `_resolve_manifest_path` 相关逻辑。
+    Args:
+        manifest_path (Path): 参数 `manifest_path`。
+        raw_path (str): 参数 `raw_path`。
+    Returns:
+        Path: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     candidate = Path(raw_path).expanduser()
     if candidate.is_absolute():
         return candidate.resolve()
@@ -960,6 +1322,14 @@ def _resolve_manifest_path(manifest_path: Path, raw_path: str) -> Path:
 
 
 def _infer_workspace_root(manifest_path: Path) -> Path | None:
+    """内部方法：执行 `_infer_workspace_root` 相关逻辑。
+    Args:
+        manifest_path (Path): 参数 `manifest_path`。
+    Returns:
+        Path | None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     parent = manifest_path.parent.resolve()
     if parent.name == '.claw':
         return parent.parent.resolve()
@@ -969,6 +1339,15 @@ def _infer_workspace_root(manifest_path: Path) -> Path | None:
 
 
 def _truncate(value: str, max_chars: int) -> str:
+    """内部方法：执行 `_truncate` 相关逻辑。
+    Args:
+        value (str): 参数 `value`。
+        max_chars (int): 参数 `max_chars`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if max_chars <= 0 or len(value) <= max_chars:
         return value
     return value[:max_chars] + '...'

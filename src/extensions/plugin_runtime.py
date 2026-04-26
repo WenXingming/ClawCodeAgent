@@ -28,6 +28,14 @@ class AliasToolSpec:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'AliasToolSpec':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+        Returns:
+            'AliasToolSpec': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         name = str(data.get('name', '')).strip()
         target = str(data.get('target', '')).strip()
@@ -64,6 +72,14 @@ class VirtualToolSpec:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'VirtualToolSpec':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+        Returns:
+            'VirtualToolSpec': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         name = str(data.get('name', '')).strip()
         description = str(data.get('description', '')).strip()
@@ -107,6 +123,15 @@ class PluginManifest:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None, *, source_path: Path | None = None) -> 'PluginManifest':
+        """执行 `from_dict` 逻辑。
+        Args:
+            payload (JSONDict | None): 参数 `payload`。
+            source_path (Path | None): 参数 `source_path`。
+        Returns:
+            'PluginManifest': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         data = dict(payload or {})
         name = str(data.get('name', '')).strip()
         if not name:
@@ -149,6 +174,14 @@ class PluginManifest:
 
     @classmethod
     def from_path(cls, manifest_path: Path) -> 'PluginManifest':
+        """执行 `from_path` 逻辑。
+        Args:
+            manifest_path (Path): 参数 `manifest_path`。
+        Returns:
+            'PluginManifest': 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         payload = json.loads(manifest_path.read_text(encoding='utf-8'))
         if not isinstance(payload, dict):
             raise ValueError(f'Plugin manifest {manifest_path} must contain a JSON object')
@@ -199,6 +232,15 @@ class PluginRuntime:
         workspace: Path,
         base_tool_registry: Mapping[str, AgentTool],
     ) -> 'PluginRuntime':
+        """从工作区加载插件清单并构建插件运行时。
+
+        Args:
+            workspace (Path): 工作区根目录。
+            base_tool_registry (Mapping[str, AgentTool]): 基础工具注册表。
+
+        Returns:
+            PluginRuntime: 含注册结果、冲突与错误信息的运行时对象。
+        """
         manifests: list[PluginManifest] = []
         load_errors: list[PluginLoadError] = []
         for manifest_path in _discover_manifest_paths(workspace.resolve()):
@@ -286,11 +328,27 @@ class PluginRuntime:
         )
 
     def merge_tool_registry(self, base_tool_registry: Mapping[str, AgentTool]) -> dict[str, AgentTool]:
+        """执行 `merge_tool_registry` 逻辑。
+        Args:
+            base_tool_registry (Mapping[str, AgentTool]): 参数 `base_tool_registry`。
+        Returns:
+            dict[str, AgentTool]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         merged = dict(base_tool_registry)
         merged.update(self.plugin_registry)
         return merged
 
     def resolve_block(self, tool_name: str) -> JSONDict | None:
+        """执行 `resolve_block` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            JSONDict | None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if not self.manifests:
             return None
         for manifest in self.manifests:
@@ -312,12 +370,36 @@ class PluginRuntime:
         return None
 
     def get_before_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        """执行 `get_before_hooks` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            tuple[JSONDict, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return self._collect_hooks('before', tool_name)
 
     def get_after_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
+        """执行 `get_after_hooks` 逻辑。
+        Args:
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            tuple[JSONDict, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         return self._collect_hooks('after', tool_name)
 
     def render_summary(self) -> str:
+        """执行 `render_summary` 逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if not self.manifests and not self.load_errors:
             return ''
 
@@ -356,6 +438,15 @@ class PluginRuntime:
         return '\n'.join(lines)
 
     def _collect_hooks(self, phase: str, tool_name: str) -> tuple[JSONDict, ...]:
+        """内部方法：执行 `_collect_hooks` 相关逻辑。
+        Args:
+            phase (str): 参数 `phase`。
+            tool_name (str): 参数 `tool_name`。
+        Returns:
+            tuple[JSONDict, ...]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if not self.manifests:
             return ()
         hooks: list[JSONDict] = []
@@ -380,6 +471,14 @@ class PluginRuntime:
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
+    """内部方法：执行 `_discover_manifest_paths` 相关逻辑。
+    Args:
+        workspace (Path): 参数 `workspace`。
+    Returns:
+        tuple[Path, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     candidates: list[Path] = []
     single_manifest = workspace / _PLUGIN_MANIFEST_FILE
     if single_manifest.is_file():
@@ -396,6 +495,14 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
 
 
 def _normalize_string_list(value: object) -> tuple[str, ...]:
+    """内部方法：执行 `_normalize_string_list` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        tuple[str, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, list):
         return ()
     result: list[str] = []
@@ -409,6 +516,14 @@ def _normalize_string_list(value: object) -> tuple[str, ...]:
 
 
 def _normalize_hook_list(value: object) -> tuple[JSONDict, ...]:
+    """内部方法：执行 `_normalize_hook_list` 相关逻辑。
+    Args:
+        value (object): 参数 `value`。
+    Returns:
+        tuple[JSONDict, ...]: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if not isinstance(value, list):
         return ()
     hooks: list[JSONDict] = []
@@ -424,6 +539,16 @@ def _validate_declared_tool_names(
     aliases: tuple[AliasToolSpec, ...],
     virtual_tools: tuple[VirtualToolSpec, ...],
 ) -> None:
+    """内部方法：执行 `_validate_declared_tool_names` 相关逻辑。
+    Args:
+        plugin_name (str): 参数 `plugin_name`。
+        aliases (tuple[AliasToolSpec, ...]): 参数 `aliases`。
+        virtual_tools (tuple[VirtualToolSpec, ...]): 参数 `virtual_tools`。
+    Returns:
+        None: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     seen: set[str] = set()
     for tool_name in [item.name for item in virtual_tools] + [item.name for item in aliases]:
         if tool_name in seen:
@@ -432,7 +557,26 @@ def _validate_declared_tool_names(
 
 
 def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_tool: AgentTool) -> AgentTool:
+    """内部方法：执行 `_build_alias_tool` 相关逻辑。
+    Args:
+        manifest (PluginManifest): 参数 `manifest`。
+        alias (AliasToolSpec): 参数 `alias`。
+        target_tool (AgentTool): 参数 `target_tool`。
+    Returns:
+        AgentTool: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     def _handler(arguments: JSONDict, context: ToolExecutionContext):
+        """内部方法：执行 `_handler` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (ToolExecutionContext): 参数 `context`。
+        Returns:
+            Any: 返回值。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         resolved_arguments = dict(arguments)
         resolved_arguments.update(alias.arguments)
         result = target_tool.handler(resolved_arguments, context)
@@ -460,7 +604,25 @@ def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_too
 
 
 def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec) -> AgentTool:
+    """内部方法：执行 `_build_virtual_tool` 相关逻辑。
+    Args:
+        manifest (PluginManifest): 参数 `manifest`。
+        virtual_tool (VirtualToolSpec): 参数 `virtual_tool`。
+    Returns:
+        AgentTool: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     def _handler(arguments: JSONDict, context: ToolExecutionContext):
+        """内部方法：执行 `_handler` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (ToolExecutionContext): 参数 `context`。
+        Returns:
+            Any: 返回值。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         metadata = dict(virtual_tool.metadata)
         metadata.update(
             {
@@ -479,6 +641,15 @@ def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec)
 
 
 def _derive_alias_parameters(target_parameters: JSONDict, forced_arguments: JSONDict) -> JSONDict:
+    """内部方法：执行 `_derive_alias_parameters` 相关逻辑。
+    Args:
+        target_parameters (JSONDict): 参数 `target_parameters`。
+        forced_arguments (JSONDict): 参数 `forced_arguments`。
+    Returns:
+        JSONDict: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if target_parameters.get('type') != 'object':
         return dict(_EMPTY_OBJECT_SCHEMA)
 
@@ -507,6 +678,16 @@ def _describe_tool_source(
     base_tool_registry: Mapping[str, AgentTool],
     plugin_registry: Mapping[str, AgentTool],
 ) -> str:
+    """内部方法：执行 `_describe_tool_source` 相关逻辑。
+    Args:
+        tool_name (str): 参数 `tool_name`。
+        base_tool_registry (Mapping[str, AgentTool]): 参数 `base_tool_registry`。
+        plugin_registry (Mapping[str, AgentTool]): 参数 `plugin_registry`。
+    Returns:
+        str: 函数返回结果。
+    Raises:
+        Exception: 按调用链透传的异常。
+    """
     if tool_name in base_tool_registry:
         return f'core tool {tool_name}'
     if tool_name in plugin_registry:

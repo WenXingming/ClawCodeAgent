@@ -131,7 +131,16 @@ def build_tool_context(
     tool_registry: dict[str, AgentTool] | None = None,
     safe_env: dict[str, str] | None = None,
 ) -> ToolExecutionContext:
-    """根据运行配置构建工具执行上下文。"""
+    """根据运行配置构建工具执行上下文。
+
+    Args:
+        config (AgentRuntimeConfig): 运行时配置。
+        tool_registry (dict[str, AgentTool] | None): 工具注册表。
+        safe_env (dict[str, str] | None): 允许注入的安全环境变量。
+
+    Returns:
+        ToolExecutionContext: 标准化后的工具执行上下文对象。
+    """
     return ToolExecutionContext(
         root=config.cwd.resolve(),
         command_timeout_seconds=config.command_timeout_seconds,
@@ -148,7 +157,17 @@ def execute_tool(
     arguments: JSONDict,
     context: ToolExecutionContext,
 ) -> ToolExecutionResult:
-    """按工具名执行一次工具调用。"""
+    """按工具名执行一次工具调用。
+
+    Args:
+        tool_registry (dict[str, AgentTool]): 工具注册表。
+        name (str): 目标工具名。
+        arguments (JSONDict): 工具参数。
+        context (ToolExecutionContext): 执行上下文。
+
+    Returns:
+        ToolExecutionResult: 统一封装的执行结果。
+    """
     tool = tool_registry.get(name)
     if tool is None:
         return ToolExecutionResult(
@@ -166,7 +185,17 @@ def execute_tool_streaming(
     arguments: JSONDict,
     context: ToolExecutionContext,
 ) -> Iterator[ToolStreamUpdate]:
-    """按工具名执行一次工具调用，并输出流式更新。"""
+    """按工具名执行一次工具调用，并输出流式更新。
+
+    Args:
+        tool_registry (dict[str, AgentTool]): 工具注册表。
+        name (str): 目标工具名。
+        arguments (JSONDict): 工具参数。
+        context (ToolExecutionContext): 执行上下文。
+
+    Returns:
+        Iterator[ToolStreamUpdate]: 增量输出及最终结果事件流。
+    """
     tool = tool_registry.get(name)
     if tool is None:
         yield ToolStreamUpdate(
@@ -209,7 +238,11 @@ def execute_tool_streaming(
 
 
 def default_tool_registry() -> dict[str, AgentTool]:
-    """返回 ISSUE-004 的最小工具注册表。"""
+    """返回 ISSUE-004 的最小工具注册表。
+
+    Returns:
+        dict[str, AgentTool]: 默认启用的基础工具映射。
+    """
     tools = [
         AgentTool(
             name='list_dir',

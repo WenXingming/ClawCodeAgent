@@ -57,7 +57,82 @@ class LocalCodingAgent:
     plugin_runtime: PluginRuntime = field(init=False)
     hook_policy_runtime: HookPolicyRuntime = field(init=False)
 
+    def run(self, prompt: str) -> AgentRunResult:
+        """执行一轮端到端任务（新会话）。
+
+        Args:
+            prompt (str): 用户输入的本轮任务提示词。
+
+        Returns:
+            AgentRunResult: 本轮运行结果（含输出、事件、用量与会话信息）。
+        """
+        session_state = AgentSessionState()
+        session_id = uuid4().hex
+        local_result = self._prepare_prompt(
+            prompt=prompt,
+            session_state=session_state,
+            session_id=session_id,
+            turns_offset=0,
+            usage_baseline=TokenUsage(),
+            cost_baseline=0.0,
+        )
+        if local_result is not None:
+            return local_result
+        return self._execute_loop(
+            session_state=session_state,
+            session_id=session_id,
+            turns_offset=0,
+            usage_baseline=TokenUsage(),
+            cost_baseline=0.0,
+        )
+
+    def resume(self, prompt: str, session_snapshot: AgentSessionSnapshot) -> AgentRunResult:
+        """从已保存的会话恢复并继续执行新 prompt。
+
+        严格继承 session_snapshot 的 model/runtime 配置；
+        usage、turns、tool_calls 从历史基线累计；
+        cost = 历史成本 + 本次 delta 成本；
+        session_id 保持不变。
+
+        Args:
+            prompt (str): 本次续跑输入。
+            session_snapshot (AgentSessionSnapshot): 已持久化的会话快照。
+
+        Returns:
+            AgentRunResult: 续跑后的完整运行结果。
+        """
+        session_state = AgentSessionState.from_persisted(
+            messages=list(session_snapshot.messages),
+            transcript=list(session_snapshot.transcript),
+            tool_call_count=session_snapshot.tool_calls,
+        )
+        local_result = self._prepare_prompt(
+            prompt=prompt,
+            session_state=session_state,
+            session_id=session_snapshot.session_id,
+            turns_offset=session_snapshot.turns,
+            usage_baseline=session_snapshot.usage,
+            cost_baseline=session_snapshot.total_cost_usd,
+        )
+        if local_result is not None:
+            return local_result
+        return self._execute_loop(
+            session_state=session_state,
+            session_id=session_snapshot.session_id,
+            turns_offset=session_snapshot.turns,
+            usage_baseline=session_snapshot.usage,
+            cost_baseline=session_snapshot.total_cost_usd,
+        )
+
     def __post_init__(self) -> None:
+        """内部方法：执行 `__post_init__` 相关逻辑。
+        Args:
+            None: 无参数。
+        Returns:
+            None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         self.search_runtime = SearchRuntime.from_workspace(self.runtime_config.cwd)
         self.mcp_runtime = MCPRuntime.from_workspace(self.runtime_config.cwd)
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
@@ -72,6 +147,14 @@ class LocalCodingAgent:
         self,
         tool_registry: dict[str, AgentTool],
     ) -> dict[str, AgentTool]:
+        """内部方法：执行 `_register_workspace_runtime_tools` 相关逻辑。
+        Args:
+            tool_registry (dict[str, AgentTool]): 参数 `tool_registry`。
+        Returns:
+            dict[str, AgentTool]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         merged_registry = dict(tool_registry)
 
         if self.search_runtime.providers:
@@ -161,6 +244,15 @@ class LocalCodingAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
+        """内部方法：执行 `_run_workspace_search` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (Any): 参数 `context`。
+        Returns:
+            str | tuple[str, JSONDict]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         query = self._require_tool_string(arguments, 'query')
         provider_id = self._optional_tool_string(arguments, 'provider_id')
         max_results = self._optional_tool_int(arguments, 'max_results', min_value=1, max_value=20)
@@ -212,6 +304,15 @@ class LocalCodingAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
+        """内部方法：执行 `_run_mcp_list_resources` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (Any): 参数 `context`。
+        Returns:
+            str | tuple[str, JSONDict]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         query = self._optional_tool_string(arguments, 'query')
         server_name = self._optional_tool_string(arguments, 'server_name')
         limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 20
@@ -232,6 +333,15 @@ class LocalCodingAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
+        """内部方法：执行 `_run_mcp_read_resource` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (Any): 参数 `context`。
+        Returns:
+            str | tuple[str, JSONDict]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         uri = self._require_tool_string(arguments, 'uri')
         max_chars = self._resolve_tool_output_limit(arguments, context, key='max_chars')
 
@@ -246,6 +356,15 @@ class LocalCodingAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
+        """内部方法：执行 `_run_mcp_list_tools` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (Any): 参数 `context`。
+        Returns:
+            str | tuple[str, JSONDict]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         query = self._optional_tool_string(arguments, 'query')
         server_name = self._optional_tool_string(arguments, 'server_name')
         limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 50
@@ -266,6 +385,15 @@ class LocalCodingAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
+        """内部方法：执行 `_run_mcp_call_tool` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (Any): 参数 `context`。
+        Returns:
+            str | tuple[str, JSONDict]: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         tool_name = self._require_tool_string(arguments, 'tool_name')
         server_name = self._optional_tool_string(arguments, 'server_name')
         raw_tool_arguments = arguments.get('arguments', {})
@@ -299,6 +427,15 @@ class LocalCodingAgent:
 
     @staticmethod
     def _truncate_tool_output(content: str, max_chars: int) -> str:
+        """内部方法：执行 `_truncate_tool_output` 相关逻辑。
+        Args:
+            content (str): 参数 `content`。
+            max_chars (int): 参数 `max_chars`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if len(content) <= max_chars:
             return content
         omitted = len(content) - max_chars
@@ -308,6 +445,15 @@ class LocalCodingAgent:
 
     @staticmethod
     def _require_tool_string(arguments: JSONDict, key: str) -> str:
+        """内部方法：执行 `_require_tool_string` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            key (str): 参数 `key`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         value = arguments.get(key)
         if not isinstance(value, str) or not value.strip():
             raise ToolExecutionError(f'{key} must be a non-empty string')
@@ -315,6 +461,15 @@ class LocalCodingAgent:
 
     @staticmethod
     def _optional_tool_string(arguments: JSONDict, key: str) -> str | None:
+        """内部方法：执行 `_optional_tool_string` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            key (str): 参数 `key`。
+        Returns:
+            str | None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         value = arguments.get(key)
         if value is None:
             return None
@@ -331,6 +486,17 @@ class LocalCodingAgent:
         min_value: int,
         max_value: int,
     ) -> int | None:
+        """内部方法：执行 `_optional_tool_int` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            key (str): 参数 `key`。
+            min_value (int): 参数 `min_value`。
+            max_value (int): 参数 `max_value`。
+        Returns:
+            int | None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         value = arguments.get(key)
         if value is None:
             return None
@@ -347,63 +513,20 @@ class LocalCodingAgent:
         *,
         key: str,
     ) -> int:
+        """内部方法：执行 `_resolve_tool_output_limit` 相关逻辑。
+        Args:
+            arguments (JSONDict): 参数 `arguments`。
+            context (Any): 参数 `context`。
+            key (str): 参数 `key`。
+        Returns:
+            int: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         requested = self._optional_tool_int(arguments, key, min_value=1, max_value=20000)
         if requested is None:
             return context.max_output_chars
         return min(requested, context.max_output_chars)
-
-    def run(self, prompt: str) -> AgentRunResult:
-        """执行一轮端到端任务（新会话）。"""
-        session_state = AgentSessionState()
-        session_id = uuid4().hex
-        local_result = self._prepare_prompt(
-            prompt=prompt,
-            session_state=session_state,
-            session_id=session_id,
-            turns_offset=0,
-            usage_baseline=TokenUsage(),
-            cost_baseline=0.0,
-        )
-        if local_result is not None:
-            return local_result
-        return self._execute_loop(
-            session_state=session_state,
-            session_id=session_id,
-            turns_offset=0,
-            usage_baseline=TokenUsage(),
-            cost_baseline=0.0,
-        )
-
-    def resume(self, prompt: str, session_snapshot: AgentSessionSnapshot) -> AgentRunResult:
-        """从已保存的会话恢复并继续执行新 prompt。
-
-        严格继承 session_snapshot 的 model/runtime 配置；
-        usage、turns、tool_calls 从历史基线累计；
-        cost = 历史成本 + 本次 delta 成本；
-        session_id 保持不变。
-        """
-        session_state = AgentSessionState.from_persisted(
-            messages=list(session_snapshot.messages),
-            transcript=list(session_snapshot.transcript),
-            tool_call_count=session_snapshot.tool_calls,
-        )
-        local_result = self._prepare_prompt(
-            prompt=prompt,
-            session_state=session_state,
-            session_id=session_snapshot.session_id,
-            turns_offset=session_snapshot.turns,
-            usage_baseline=session_snapshot.usage,
-            cost_baseline=session_snapshot.total_cost_usd,
-        )
-        if local_result is not None:
-            return local_result
-        return self._execute_loop(
-            session_state=session_state,
-            session_id=session_snapshot.session_id,
-            turns_offset=session_snapshot.turns,
-            usage_baseline=session_snapshot.usage,
-            cost_baseline=session_snapshot.total_cost_usd,
-        )
 
     def _prepare_prompt(
         self,
@@ -415,7 +538,19 @@ class LocalCodingAgent:
         usage_baseline: TokenUsage,
         cost_baseline: float,
     ) -> AgentRunResult | None:
-        """在 prompt 写入 session_state 前执行 slash 分流。"""
+        """在 prompt 写入 session_state 前执行 slash 分流。
+
+        Args:
+            prompt (str): 用户输入。
+            session_state (AgentSessionState): 当前会话状态。
+            session_id (str): 当前会话 ID。
+            turns_offset (int): 历史已完成轮次。
+            usage_baseline (TokenUsage): 历史 token 基线。
+            cost_baseline (float): 历史成本基线。
+
+        Returns:
+            AgentRunResult | None: slash 本地处理有结果时返回 AgentRunResult，否则返回 None。
+        """
         slash_result = dispatch_slash_command(
             SlashCommandContext(
                 session_state=session_state,
@@ -456,7 +591,11 @@ class LocalCodingAgent:
         usage_baseline: TokenUsage,
         cost_baseline: float,
     ) -> AgentRunResult:
-        """构造本地 slash 命令结果并落盘。"""
+        """构造本地 slash 命令结果并落盘。
+
+        Returns:
+            AgentRunResult: slash 命令对应的标准运行结果对象。
+        """
         effective_session_state = slash_result.replacement_session_state or session_state
         effective_session_id = uuid4().hex if slash_result.fork_session else session_id
 
@@ -499,6 +638,16 @@ class LocalCodingAgent:
         session_id_before: str,
         session_id_after: str,
     ) -> JSONDict:
+        """内部方法：执行 `_make_slash_event` 相关逻辑。
+        Args:
+            slash_result (SlashCommandResult): 参数 `slash_result`。
+            session_id_before (str): 参数 `session_id_before`。
+            session_id_after (str): 参数 `session_id_after`。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         event: JSONDict = {
             'type': 'slash_command',
             'command': slash_result.command_name,
@@ -518,6 +667,16 @@ class LocalCodingAgent:
         session_id_before: str,
         session_id_after: str,
     ) -> str:
+        """内部方法：执行 `_format_slash_output` 相关逻辑。
+        Args:
+            slash_result (SlashCommandResult): 参数 `slash_result`。
+            session_id_before (str): 参数 `session_id_before`。
+            session_id_after (str): 参数 `session_id_after`。
+        Returns:
+            str: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         if slash_result.command_name != 'clear':
             return slash_result.output
 
@@ -541,6 +700,9 @@ class LocalCodingAgent:
         usage_delta  只统计本次执行的增量。
         usage_total  = usage_baseline + usage_delta。
         cost         = cost_baseline + estimate_cost_usd(usage_delta)。
+
+        Returns:
+            AgentRunResult: 达到停止条件后的最终运行结果。
         """
         events: list[JSONDict] = []
         usage_delta = TokenUsage()
@@ -932,6 +1094,17 @@ class LocalCodingAgent:
         *,
         attempt: int | None = None,
     ) -> JSONDict:
+        """内部方法：执行 `_make_compact_event` 相关逻辑。
+        Args:
+            turn_index (int): 参数 `turn_index`。
+            trigger (str): 参数 `trigger`。
+            result (CompactionResult): 参数 `result`。
+            attempt (int | None): 参数 `attempt`。
+        Returns:
+            JSONDict: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         event: JSONDict = {
             'type': 'compact_boundary',
             'turn': turn_index,
@@ -955,6 +1128,15 @@ class LocalCodingAgent:
         result: ToolExecutionResult,
         metadata_updates: JSONDict,
     ) -> ToolExecutionResult:
+        """内部方法：执行 `_merge_tool_result_metadata` 相关逻辑。
+        Args:
+            result (ToolExecutionResult): 参数 `result`。
+            metadata_updates (JSONDict): 参数 `metadata_updates`。
+        Returns:
+            ToolExecutionResult: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         merged_metadata = dict(result.metadata)
         for key, value in metadata_updates.items():
             if value:
@@ -972,6 +1154,16 @@ class LocalCodingAgent:
         block_decision: JSONDict,
         metadata_updates: JSONDict,
     ) -> ToolExecutionResult:
+        """内部方法：执行 `_make_blocked_tool_result` 相关逻辑。
+        Args:
+            tool_call (ToolCall): 参数 `tool_call`。
+            block_decision (JSONDict): 参数 `block_decision`。
+            metadata_updates (JSONDict): 参数 `metadata_updates`。
+        Returns:
+            ToolExecutionResult: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         merged_metadata = dict(metadata_updates)
         merged_metadata.update(
             {
@@ -997,6 +1189,18 @@ class LocalCodingAgent:
         turn_index: int,
         events: list[JSONDict],
     ) -> None:
+        """内部方法：执行 `_append_tool_hook_message` 相关逻辑。
+        Args:
+            session_state (AgentSessionState): 参数 `session_state`。
+            hook (JSONDict): 参数 `hook`。
+            tool_call (ToolCall): 参数 `tool_call`。
+            turn_index (int): 参数 `turn_index`。
+            events (list[JSONDict]): 参数 `events`。
+        Returns:
+            None: 函数返回结果。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         phase = str(hook.get('phase', 'before'))
         event_type = 'tool_preflight' if phase == 'before' else 'tool_after_hook'
         metadata = {

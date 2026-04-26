@@ -135,6 +135,147 @@ class SearchRuntimeTests(unittest.TestCase):
         self.assertEqual(response.results[1].rank, 2)
 
     @patch('extensions.search_runtime.request.urlopen')
+    def test_search_duckduckgo_returns_structured_results(self, mocked_urlopen) -> None:
+        mocked_urlopen.return_value = _FakeHTTPResponse(
+            {
+                'Heading': 'ClawCodeAgent',
+                'AbstractURL': 'https://example.com/overview',
+                'AbstractText': 'overview snippet',
+                'RelatedTopics': [
+                    {
+                        'FirstURL': 'https://example.com/topic-1',
+                        'Text': 'Topic 1 - detail',
+                    },
+                    {
+                        'Topics': [
+                            {
+                                'FirstURL': 'https://example.com/topic-2',
+                                'Text': 'Topic 2 - detail',
+                            }
+                        ]
+                    },
+                ],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            self._write_manifest(
+                workspace,
+                'search.json',
+                {
+                    'provider_id': 'web-search',
+                    'provider': 'duckduckgo',
+                    'title': 'DuckDuckGo Search',
+                },
+            )
+
+            runtime = SearchRuntime.from_workspace(workspace)
+            response = runtime.search('claw code agent', max_results=2)
+
+        self.assertEqual(response.provider.provider_id, 'web-search')
+        self.assertEqual(response.results[0].title, 'ClawCodeAgent')
+        self.assertEqual(response.results[0].snippet, 'overview snippet')
+        self.assertEqual(response.results[1].title, 'Topic 1')
+        self.assertEqual(response.results[1].url, 'https://example.com/topic-1')
+
+    @patch('extensions.search_runtime.request.urlopen')
+    def test_search_searxng_includes_api_key_headers_when_configured(self, mocked_urlopen) -> None:
+        mocked_urlopen.return_value = _FakeHTTPResponse({'results': []})
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            self._write_manifest(
+                workspace,
+                'search.json',
+                {
+                    'provider_id': 'workspace-search',
+                    'provider': 'searxng',
+                    'title': 'Workspace Search',
+                    'base_url': 'http://127.0.0.1:8080',
+                    'api_key_env': 'SEARXNG_API_KEY',
+                },
+            )
+
+            with patch.dict('os.environ', {'SEARXNG_API_KEY': 'secret-key'}, clear=False):
+                runtime = SearchRuntime.from_workspace(workspace)
+                runtime.search('claw code agent')
+
+        sent_request = mocked_urlopen.call_args[0][0]
+        self.assertEqual(sent_request.headers.get('Authorization'), 'Bearer secret-key')
+        self.assertEqual(sent_request.headers.get('X-api-key'), 'secret-key')
+
+    @patch('extensions.search_runtime.request.urlopen')
+    def test_search_duckduckgo_falls_back_to_http_when_https_fails(self, mocked_urlopen) -> None:
+        def _side_effect(http_request, timeout=10):
+            if str(http_request.full_url).startswith('https://'):
+                raise error.URLError('ssl handshake failure')
+            return _FakeHTTPResponse({'results': []})
+
+        mocked_urlopen.side_effect = _side_effect
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            self._write_manifest(
+                workspace,
+                'search.json',
+                {
+                    'provider_id': 'web-search',
+                    'provider': 'duckduckgo',
+                    'title': 'DuckDuckGo Search',
+                    'base_url': 'https://api.duckduckgo.com',
+                },
+            )
+            runtime = SearchRuntime.from_workspace(workspace)
+            response = runtime.search('ClawCodeAgent')
+
+        self.assertEqual(response.attempts, 1)
+        self.assertEqual(len(response.results), 0)
+        self.assertGreaterEqual(mocked_urlopen.call_count, 2)
+
+    @patch('extensions.search_runtime.request.urlopen')
+    def test_search_duckduckgo_weather_fallback_returns_weather_result(self, mocked_urlopen) -> None:
+        def _side_effect(http_request, timeout=10):
+            url = str(http_request.full_url)
+            if 'duckduckgo.com' in url:
+                return _FakeHTTPResponse({'Abstract': '', 'RelatedTopics': []})
+            if 'wttr.in' in url:
+                return _FakeHTTPResponse(
+                    {
+                        'current_condition': [
+                            {
+                                'temp_C': '26',
+                                'FeelsLikeC': '28',
+                                'humidity': '71',
+                                'weatherDesc': [{'value': 'Partly cloudy'}],
+                            }
+                        ]
+                    }
+                )
+            raise AssertionError(f'unexpected url: {url}')
+
+        mocked_urlopen.side_effect = _side_effect
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            self._write_manifest(
+                workspace,
+                'search.json',
+                {
+                    'provider_id': 'web-search',
+                    'provider': 'duckduckgo',
+                    'title': 'DuckDuckGo Search',
+                    'base_url': 'https://api.duckduckgo.com',
+                },
+            )
+            runtime = SearchRuntime.from_workspace(workspace)
+            response = runtime.search('北京天气怎么样')
+
+        self.assertEqual(len(response.results), 1)
+        self.assertEqual(response.results[0].title, 'Weather in 北京')
+        self.assertIn('Partly cloudy', response.results[0].snippet)
+
+    @patch('extensions.search_runtime.request.urlopen')
     def test_search_retries_failed_query_and_raises_controlled_error(self, mocked_urlopen) -> None:
         mocked_urlopen.side_effect = [
             error.URLError('temporary outage'),

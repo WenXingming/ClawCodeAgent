@@ -51,6 +51,16 @@ class OpenAIResponseError(OpenAIClientError):
         status_code: int | None = None,
         detail: str | None = None,
     ) -> None:
+        """初始化对象状态。
+        Args:
+            message (str): 参数 `message`。
+            status_code (int | None): 参数 `status_code`。
+            detail (str | None): 参数 `detail`。
+        Returns:
+            None: 无返回值。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         super().__init__(message)
         self.status_code = status_code
         self.detail = detail if detail is not None else message
@@ -78,16 +88,26 @@ class _ToolCallBuildState:
     arguments_parts: list[str] = field(default_factory=list)  # 参数 JSON 分片列表。
 
     def merge_delta(self, *, tool_name: str | None, arguments_delta: str) -> None:
-        """合并一次 tool_call 增量。"""
-        """接收到 SSE 事件流中的增量数据时，更新当前收集器的状态。"""
+        """合并一次工具调用增量。
+
+        Args:
+            tool_name (str | None): 本次增量携带的工具名，可能为空。
+            arguments_delta (str): 本次增量携带的参数字符串片段。
+
+        Returns:
+            None: 原地更新内部聚合状态。
+        """
         if self.name == 'unknown_tool' and tool_name:
             self.name = tool_name
         if arguments_delta:
             self.arguments_parts.append(arguments_delta)
 
     def build_arguments(self) -> JSONDict:
-        """把参数分片拼接并解析为 dict。"""
-        """流结束后，将收集到的字符串碎片合并，并解析为最终的字典。"""
+        """把参数分片拼接并解析为字典。
+
+        Returns:
+            JSONDict: 解析后的工具参数对象；若参数为空则返回空字典。
+        """
         arguments_text = ''.join(self.arguments_parts).strip()
         if not arguments_text:
             return {}
@@ -105,6 +125,14 @@ class OpenAIClient:
     model_config: ModelConfig  # 客户端固定模型配置。
 
     def __init__(self, model_config: ModelConfig) -> None:
+        """初始化对象状态。
+        Args:
+            model_config (ModelConfig): 参数 `model_config`。
+        Returns:
+            None: 无返回值。
+        Raises:
+            Exception: 按调用链透传的异常。
+        """
         self.model_config = model_config
 
     def complete(
@@ -115,9 +143,14 @@ class OpenAIClient:
         output_schema: OutputSchemaConfig | None = None,
     ) -> OneTurnResponse:
         """执行一次非流式模型调用并返回标准化结果。
-            messages: 模型对话消息列表，每条消息是一个 dict，至少包含 'role' 和 'content' 字段。
-            tools: 可选的工具定义列表，每个工具是一个 dict，至少包含 'name' 和 'description' 字段。
-            output_schema: 可选的输出格式定义，指定模型响应应该符合的 JSON Schema。
+
+        Args:
+            messages (list[JSONDict]): 模型对话消息列表。
+            tools (list[JSONDict] | None): 可选工具定义列表。
+            output_schema (OutputSchemaConfig | None): 可选结构化输出约束。
+
+        Returns:
+            OneTurnResponse: 标准化后的单轮响应结果。
         """
         payload = self._build_payload(
             messages=messages,
@@ -136,7 +169,14 @@ class OpenAIClient:
         output_schema: OutputSchemaConfig | None = None,  # 输出模式配置，可选
     ) -> Iterator[StreamEvent]:
         """执行一次流式模型调用并持续输出标准化事件。
-            流式调用会返回一系列事件，每个事件表示模型生成的部分内容、工具调用增量或使用情况。
+
+        Args:
+            messages (list[JSONDict]): 模型对话消息列表。
+            tools (list[JSONDict] | None): 可选工具定义列表。
+            output_schema (OutputSchemaConfig | None): 可选结构化输出约束。
+
+        Returns:
+            Iterator[StreamEvent]: 逐条产出的流式事件序列。
         """
         payload = self._build_payload(
             messages=messages,

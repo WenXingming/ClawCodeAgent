@@ -15,3 +15,6 @@ test/.tmp/
 
 # Session cache
 .port_sessions/
+
+# Provider
+.claw/
