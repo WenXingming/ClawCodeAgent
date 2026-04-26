@@ -49,6 +49,7 @@ graph TB
         n_plan_runtime(["🗺️ runtime/plan_runtime.py"])
         n_workflow_runtime(["🧭 runtime/workflow_runtime.py"])
         n_search_runtime(["🔎 runtime/search_runtime.py"])
+        n_mcp_runtime(["🛰️ runtime/mcp_runtime.py"])
         n_runtime(["⚙️ runtime/agent_runtime.py"])
         style Runtime fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
@@ -143,6 +144,7 @@ graph TB
     n_plan_runtime -.-> n_core_contracts
     n_workflow_runtime -.-> n_core_contracts
     n_search_runtime -.-> n_core_contracts
+    n_mcp_runtime -.-> n_core_contracts
     n_slash -.-> n_core_contracts
     n_tools -.-> n_core_contracts
     n_openai_client -.-> n_core_contracts
@@ -161,6 +163,7 @@ graph TB
     style n_plan_runtime fill:#ff922b,color:#fff,stroke:#d97706
     style n_workflow_runtime fill:#e8590c,color:#fff,stroke:#c2410c
     style n_search_runtime fill:#f76707,color:#fff,stroke:#d9480f
+    style n_mcp_runtime fill:#1098ad,color:#fff,stroke:#0c8599
     style n_slash fill:#8a5cf6,color:#fff,stroke:#6f42c1
     style n_core_contracts fill:#6c757d,color:#fff,stroke:#495057
     style n_openai_client fill:#17a2b8,color:#fff,stroke:#117a8b
@@ -187,6 +190,7 @@ graph TB
 - `runtime/plan_runtime.py` 负责 `.claw/plan.json` 的持久化、计划渲染，以及把 `PlanStep` 列表同步到 `TaskRuntime`；它不直接接入 agent 主循环，后续主要由 plan/workflow/control-plane issue 消费。
 - `runtime/workflow_runtime.py` 负责发现 `.claw/workflows*.json` manifest，顺序执行一组 Task Runtime 操作，并把运行历史写入 `.claw/workflow_runs.json`；它当前聚焦本地顺序执行和可诊断历史记录，不做分布式调度。
 - `runtime/search_runtime.py` 负责发现 `.claw/search*.json` provider manifest 和环境变量 provider，维护 `.claw/search_state.json` 里的 active provider，并执行至少一种真实 HTTP 搜索后端；它当前聚焦单 provider 查询与失败重试，不做多源融合排序。
+- `runtime/mcp_runtime.py` 负责发现 `.claw/mcp*.json` manifest、本地 manifest 资源与 stdio MCP server profile，并通过一次性 stdio child-process 请求完成 `initialize`、`resources/list/read`、`tools/list/call`；它当前聚焦本地资源链路和可追踪 transport 错误，不做远端 MCP 网关。
 - `control_plane/slash_commands.py` 作为本地控制面，挂在 `runtime/agent_runtime.py` 前面做 prompt 预分流；它读取 session、tool registry 与 token 预算投影，但不会触发模型调用。
 
 ## 推荐阅读顺序
@@ -194,6 +198,6 @@ graph TB
 1. 先看 `core_contracts/`，建立共享契约层与配置/协议对象的边界感。
 2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧两个外部交互面。
 3. 再看 `session/` 与 `context/`，理解状态恢复、预算治理、snip、compact 的局部职责。
-4. 再看 `runtime/task_runtime.py`、`runtime/plan_runtime.py`、`runtime/workflow_runtime.py`、`runtime/search_runtime.py`、`runtime/hook_policy_runtime.py`、`runtime/plugin_runtime.py` 与 `runtime/agent_runtime.py`，理解工作区 task/plan/workflow/search/policy/plugin 如何各自管理状态、同步关系、运行历史、provider 状态、预算、工具注册和 tool loop 行为。
+4. 再看 `runtime/task_runtime.py`、`runtime/plan_runtime.py`、`runtime/workflow_runtime.py`、`runtime/search_runtime.py`、`runtime/mcp_runtime.py`、`runtime/hook_policy_runtime.py`、`runtime/plugin_runtime.py` 与 `runtime/agent_runtime.py`，理解工作区 task/plan/workflow/search/MCP/policy/plugin 如何各自管理状态、同步关系、运行历史、provider 状态、transport 错误、预算、工具注册和 tool loop 行为。
 5. 再看 `control_plane/slash_commands.py` 与 `control_plane/cli.py`，理解 CLI 子命令、chat loop 和本地控制面如何装配到 runtime 上。
 6. 最后看 `main.py`，确认顶层进程入口只是一个薄包装层。

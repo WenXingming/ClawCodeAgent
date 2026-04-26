@@ -386,7 +386,68 @@ print(response.results[0].title)
 
 说明：当前版本不做多 provider 融合排序；查询失败时会按 `max_retries` 重试，重试耗尽后抛出带 `provider_id`、`attempts` 和错误文本的 `SearchQueryError`，便于上层做可控处理。
 
-## 14. 预算控制（BudgetConfig）
+## 14. 工作区 MCP Runtime（ISSUE-021）
+
+当前版本支持从工作区发现 MCP manifest，读取本地 manifest 资源，并通过 stdio transport 调用 MCP server 的 `resources/list/read` 与 `tools/list/call`。
+
+发现路径：
+
+- `.claw/mcp.json`
+- `.claw/mcp/*.json`
+
+当前能力：
+
+- `list_resources` / `read_resource`：列出和读取 manifest 资源，或通过 stdio server 读取远端 MCP 资源。
+- `list_tools` / `call_tool`：列出和调用 stdio MCP server 暴露的工具。
+- `render_summary` / `render_resource_index` / `render_tool_index`：输出可读的 MCP 资源和工具概览。
+
+当前已接通 transport：
+
+- `stdio`
+
+示例：
+
+```json
+{
+  "servers": [
+    {
+      "name": "workspace",
+      "resources": [
+        {
+          "uri": "mcp://workspace/notes",
+          "name": "Notes",
+          "path": "notes.txt"
+        }
+      ]
+    }
+  ],
+  "mcpServers": {
+    "remote": {
+      "command": "python",
+      "args": ["-u", "fake_mcp_server.py"]
+    }
+  }
+}
+```
+
+代码示例：
+
+```python
+from pathlib import Path
+
+from runtime.mcp_runtime import MCPRuntime
+
+runtime = MCPRuntime.from_workspace(Path('.'))
+print(runtime.list_resources())
+print(runtime.read_resource('mcp://workspace/notes'))
+
+tool_result = runtime.call_tool('echo', arguments={'text': 'hello'}, server_name='remote')
+print(tool_result.content)
+```
+
+说明：当前版本不做远端 MCP 网关和长连接复用；每次 transport 请求都会拉起一次 stdio child process，完成 `initialize` 和目标方法调用。失败会抛出带 `server_name`、`method`、`stderr` 和 `exit_code` 的 `MCPTransportError`，便于上层追踪。
+
+## 15. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -421,13 +482,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 15. CLI 迁移说明
+## 16. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 16. 说明
+## 17. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：
