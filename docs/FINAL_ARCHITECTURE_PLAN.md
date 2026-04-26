@@ -52,7 +52,7 @@
 2. 核心编排层：`src/orchestration/agent_runtime.py` 的 `LocalCodingAgent`
 3. 扩展能力层：`src/extensions/`（plugin / hook_policy / search / mcp）
 4. 计划状态机层：`src/planning/`（task / plan / workflow）
-5. 预算与上下文层：`src/budget/` + `src/context/`
+5. 预算与上下文层：`src/budget/` + `src/context/`（`ContextManager` 统一编排 pre-model 与 reactive compact 上下文治理）
 6. 状态与持久化层：`src/session/session_state.py` + `src/session/session_snapshot.py` + `src/session/session_store.py`
 7. 模型接入与共享契约层：`src/openai_client/openai_client.py` + `src/core_contracts/`
 
@@ -61,7 +61,7 @@
 1. 解析 CLI 参数并构造 `ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`。
 2. 构建 `OpenAIClient` 与 `LocalCodingAgent`，并注入运行配置与工具注册表。
 3. 依据是否提供 `--session-id`，选择新会话 run 或 resume 路径。
-4. 进入 turn loop：prompt preflight -> snip/compact -> model call。
+4. 进入 turn loop：`ContextManager` 处理 pre-model preflight/snip/compact 与 reactive compact 重试 -> model call。
 5. 解析 tool calls，执行工具并写回 transcript。
 6. 多处预算检查与 stop_reason 约束。
 7. 结束后持久化 session，并支持后续 resume。

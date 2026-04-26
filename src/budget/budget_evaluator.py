@@ -17,8 +17,7 @@ SOFT_BUFFER_TOKENS: int = 13_000
 class ContextBudgetEvaluator:
     """基于 token 估算结果生成预算快照。
     
-    在模型调用前进行预检，估算输入token数并与预算限制比对，
-    生成是否超预算的决策结果快照。
+    在模型调用前进行预检，估算输入token数并与预算限制比对，生成是否超预算的决策结果快照。
     """
 
     token_estimator: ContextTokenEstimator = field(default_factory=ContextTokenEstimator)  # Token估算器实例
