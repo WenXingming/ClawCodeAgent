@@ -16,6 +16,11 @@ from main import main
 from session.session_snapshot import AgentSessionSnapshot
 
 
+def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
+    testcase.assertIn('TUDOU CLI', output)
+    testcase.assertIn('████████╗', output)
+
+
 class _FakeAgent:
     """拦截 main 中的 agent 调用，避免真实网络请求。"""
 
@@ -113,6 +118,7 @@ class MainEntryTests(unittest.TestCase):
                 code = main(['agent'])
 
         self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('echo:你好', stdout.getvalue())
         self.assertEqual(_FakeAgent.last_client.model_config.model, 'demo-model')
         self.assertEqual(_FakeAgent.last_client.model_config.api_key, 'demo-key')
@@ -145,6 +151,7 @@ class MainEntryTests(unittest.TestCase):
                 code = main(['agent', '--allow-file-write', '--allow-shell', '--allow-destructive-shell'])
 
         self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_file_write)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_shell_commands)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_destructive_shell_commands)
@@ -199,6 +206,7 @@ class MainEntryTests(unittest.TestCase):
                 code = main(['agent-resume', 'resume-test-001'])
 
         self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('resumed:续跑问题', stdout.getvalue())
         self.assertEqual(_FakeAgent.resume_calls, [('续跑问题', 'resume-test-001')])
 
@@ -239,6 +247,7 @@ class MainEntryTests(unittest.TestCase):
                 ])
 
         self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertEqual(_FakeAgent.last_client.model_config.model, 'override-model')
         self.assertEqual(_FakeAgent.last_client.model_config.api_key, 'override-key')
         self.assertEqual(_FakeAgent.last_client.model_config.temperature, 0.7)
@@ -266,6 +275,7 @@ class MainEntryTests(unittest.TestCase):
                 ])
 
         self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertEqual(
             _FakeAgent.resume_calls,
             [('请把春江花月夜全文写入文件', 'resume-test-001')],
@@ -301,6 +311,7 @@ class MainEntryTests(unittest.TestCase):
                 code = main(['agent'])
 
         self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('echo:普通问题', stdout.getvalue())
         self.assertEqual(_FakeAgent.run_prompts, ['普通问题'])
         self.assertEqual(_FakeAgent.resume_calls, [])

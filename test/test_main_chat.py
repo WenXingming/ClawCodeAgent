@@ -16,6 +16,11 @@ from main import main
 from session.session_snapshot import AgentSessionSnapshot
 
 
+def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
+    testcase.assertIn('TUDOU CLI', output)
+    testcase.assertIn('████████╗', output)
+
+
 class _ChatFakeAgent:
     last_client = None
     last_runtime = None
@@ -111,6 +116,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(_ChatFakeAgent.run_prompts, ['第一轮'])
         self.assertEqual(_ChatFakeAgent.resume_calls, [])
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('run:第一轮', stdout.getvalue())
         self.assertIn('[session] chat-session-001', stdout.getvalue())
 
@@ -135,6 +141,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(load_calls, ['resume-test-001'])
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
         self.assertEqual(_ChatFakeAgent.resume_calls, [('继续', 'resume-test-001')])
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('resumed:继续', stdout.getvalue())
 
     def test_agent_chat_quit_command_exits_without_agent_call(self) -> None:
@@ -150,6 +157,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
         self.assertEqual(_ChatFakeAgent.resume_calls, [])
+        _assert_banner_rendered(self, stdout.getvalue())
 
     def test_agent_chat_handles_eof(self) -> None:
         with (
@@ -164,6 +172,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
         self.assertEqual(_ChatFakeAgent.resume_calls, [])
+        _assert_banner_rendered(self, stdout.getvalue())
 
     def test_agent_chat_clear_updates_current_session_id(self) -> None:
         load_calls: list[str] = []
@@ -206,6 +215,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(load_calls, ['old-session', 'cleared-002'])
         self.assertEqual(_ChatFakeAgent.resume_calls, [('/clear', 'old-session'), ('继续处理', 'cleared-002')])
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('Cleared session id: cleared-002', stdout.getvalue())
 
     # ------------------------------------------------------------------
@@ -232,6 +242,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(_ChatFakeAgent.run_prompts, ['第一轮'])
         self.assertEqual(_ChatFakeAgent.resume_calls, [('第二轮', 'chat-session-001')])
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('run:第一轮', stdout.getvalue())
         self.assertIn('resumed:第二轮', stdout.getvalue())
 
@@ -246,6 +257,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
+        
 
     def test_agent_resume_enters_interactive_loop(self) -> None:
         """agent-resume 命令应加载存档会话并进入多轮交互循环。"""
@@ -271,6 +283,7 @@ class MainChatEntryTests(unittest.TestCase):
             _ChatFakeAgent.resume_calls,
             [('第一轮续跑', 'resume-loop-001'), ('第二轮续跑', 'resume-loop-001')],
         )
+        _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('resumed:第一轮续跑', stdout.getvalue())
         self.assertIn('resumed:第二轮续跑', stdout.getvalue())
 
@@ -293,6 +306,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(_ChatFakeAgent.resume_calls), 1)
         self.assertEqual(_ChatFakeAgent.resume_calls[0][0], '有效输入')
+        _assert_banner_rendered(self, stdout.getvalue())
 
 
 if __name__ == '__main__':

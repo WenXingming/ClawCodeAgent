@@ -8,6 +8,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from control_plane.startup_banner import StartupBannerRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import ModelPricing
@@ -18,6 +19,7 @@ from session.session_store import AgentSessionStore
 
 
 _CHAT_EXIT_COMMANDS = {'.exit', '.quit'}
+_STARTUP_BANNER = StartupBannerRenderer()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -329,6 +331,7 @@ def _run_interactive_loop(
     session_store_cls: type[AgentSessionStore],
 ) -> int:
     """通用多轮交互循环，供 agent / agent-resume / agent-chat 共用。"""
+    _STARTUP_BANNER.render()
     while True:
         try:
             prompt = input('agent> ')
