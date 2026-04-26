@@ -8,6 +8,7 @@ from pathlib import Path
 
 from control_plane.slash_commands import (
     SlashCommandContext,
+    SlashCommandDispatcher,
     dispatch_slash_command,
     parse_slash_command,
 )
@@ -18,6 +19,10 @@ from tools.agent_tools import default_tool_registry
 
 class SlashCommandModuleTests(unittest.TestCase):
     """验证 slash 解析与本地命令分发。"""
+
+    def setUp(self) -> None:
+        """为每个测试用例创建独立的 slash 分发器实例。"""
+        self.dispatcher = SlashCommandDispatcher()
 
     def _make_context(self) -> SlashCommandContext:
         session_state = AgentSessionState()
@@ -47,6 +52,17 @@ class SlashCommandModuleTests(unittest.TestCase):
 
     def test_parse_slash_command_returns_none_for_regular_prompt(self) -> None:
         self.assertIsNone(parse_slash_command('hello world'))
+
+    def test_dispatcher_public_api_supports_parse_and_lookup(self) -> None:
+        parsed = self.dispatcher.parse('/tools verbose')
+        spec = self.dispatcher.find('TOOLS')
+
+        self.assertIsNotNone(parsed)
+        self.assertIsNotNone(spec)
+        assert parsed is not None
+        assert spec is not None
+        self.assertEqual(parsed.command_name, 'tools')
+        self.assertEqual(spec.names[0], 'tools')
 
     def test_dispatch_unknown_command_returns_local_error(self) -> None:
         result = dispatch_slash_command(self._make_context(), '/unknown')

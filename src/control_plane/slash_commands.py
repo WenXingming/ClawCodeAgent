@@ -1,4 +1,10 @@
-"""ISSUE-012 Slash 命令框架与高频命令。"""
+"""Slash 命令控制面模块。
+
+本模块负责三件事：
+1. 解析用户输入中的本地 slash 命令。
+2. 根据会话与运行时上下文分发到具体命令处理器。
+3. 以兼容包装函数的形式对外暴露稳定入口，供 runtime 与测试复用。
+"""
 
 from __future__ import annotations
 
@@ -14,101 +20,405 @@ from tools.agent_tools import AgentTool
 
 @dataclass(frozen=True)
 class ParsedSlashCommand:
-    """解析后的 slash 命令。"""
+    """表示一次成功解析的 slash 输入。
 
-    command_name: str
-    arguments: str
-    raw_input: str
+    外部通常先通过 SlashCommandDispatcher.parse() 获取该对象，
+    然后再交给分发器或具体处理器执行。
+    """
+
+    command_name: str  # str: 规范化后的命令名，不包含前导斜杠。
+    arguments: str  # str: 命令后的原始参数文本，保留空格折叠后的用户输入。
+    raw_input: str  # str: 用户提交的原始输入，供日志与回显复用。
 
 
 @dataclass(frozen=True)
 class SlashCommandContext:
-    """Slash 命令执行所需的只读上下文。"""
+    """封装 slash 命令执行期间所需的只读上下文。
 
-    session_state: AgentSessionState
-    session_id: str
-    turns_offset: int
-    runtime_config: AgentRuntimeConfig
-    model_config: ModelConfig
-    tool_registry: Mapping[str, AgentTool]
-    plugin_summary: str = ''
+    该对象把 session、模型配置、运行时配置与工具注册表解耦后传入控制面，
+    使 slash 模块不需要直接依赖 LocalCodingAgent。
+    """
+
+    session_state: AgentSessionState  # AgentSessionState: 当前会话内存状态，供命令读取消息与转录历史。
+    session_id: str  # str: 当前会话标识，用于状态展示与结果关联。
+    turns_offset: int  # int: 历史已完成轮次，供 /status 与 /clear 判断是否已有历史。
+    runtime_config: AgentRuntimeConfig  # AgentRuntimeConfig: 当前工作目录、权限与预算等运行配置。
+    model_config: ModelConfig  # ModelConfig: 当前模型元数据，供 /status 展示模型名。
+    tool_registry: Mapping[str, AgentTool]  # Mapping[str, AgentTool]: 当前已注册工具集合。
+    plugin_summary: str = ''  # str: 插件运行时生成的摘要文本，供 /tools 追加展示。
 
 
 @dataclass(frozen=True)
 class SlashCommandResult:
-    """Slash 命令分流结果。"""
+    """描述一次 slash 分流后的处理结果。"""
 
-    handled: bool
-    continue_query: bool
-    command_name: str = ''
-    output: str = ''
-    prompt: str | None = None
-    replacement_session_state: AgentSessionState | None = None
-    fork_session: bool = False
-    metadata: JSONDict = field(default_factory=dict)
+    handled: bool  # bool: 是否已被 slash 控制面识别并处理。
+    continue_query: bool  # bool: 处理后是否还需要继续进入常规模型 query 路径。
+    command_name: str = ''  # str: 已识别的命令名；非 slash 或透传时可为空。
+    output: str = ''  # str: 本地命令输出文本，由调用方决定如何展示。
+    prompt: str | None = None  # str | None: 需要继续写入会话的 prompt，通常为原始用户输入。
+    replacement_session_state: AgentSessionState | None = None  # AgentSessionState | None: /clear 等命令返回的新会话状态。
+    fork_session: bool = False  # bool: 是否要求上层以 fork 语义生成一个新会话。
+    metadata: JSONDict = field(default_factory=dict)  # JSONDict: 额外元数据，用于标注错误码或分支上下文。
 
 
 SlashHandler = Callable[[SlashCommandContext, ParsedSlashCommand], SlashCommandResult]
 
 
-_BUDGET_EVALUATOR = ContextBudgetEvaluator()
-
-
 @dataclass(frozen=True)
 class SlashCommandSpec:
-    """单个 slash 命令的规格。"""
+    """定义单个 slash 命令的名称、描述与处理器。"""
 
-    names: tuple[str, ...]
-    description: str
-    handler: SlashHandler
+    names: tuple[str, ...]  # tuple[str, ...]: 当前命令支持的全部名称与别名。
+    description: str  # str: 面向 /help 输出的人类可读描述。
+    handler: SlashHandler  # SlashHandler: 真正执行业务逻辑的命令处理函数。
 
 
-def parse_slash_command(input_text: str) -> ParsedSlashCommand | None:
-    """从原始输入解析 slash 命令。
+class SlashCommandDispatcher:
+    """本地 slash 命令的面向对象分发器。
 
-    Args:
-        input_text (str): 用户原始输入。
+    工作流分为三步：
+    1. parse() 把原始输入转换为 ParsedSlashCommand。
+    2. dispatch() 按命令名查找 SlashCommandSpec 并执行处理器。
+    3. 处理器从 SlashCommandContext 读取会话、预算、权限与工具信息，返回 SlashCommandResult。
 
-    Returns:
-        ParsedSlashCommand | None: 解析成功返回命令对象，非 slash 输入返回 None。
+    外部推荐直接复用默认分发器暴露的兼容函数；如果需要注入自定义预算评估器，
+    也可以显式实例化本类并调用其公有方法。
     """
-    stripped = input_text.strip()
-    if not stripped.startswith('/'):
-        return None
 
-    body = stripped[1:]
-    command_name, _, arguments = body.partition(' ')
-    return ParsedSlashCommand(
-        command_name=command_name.strip().lower(),
-        arguments=arguments.strip(),
-        raw_input=input_text,
-    )
+    def __init__(self, budget_evaluator: ContextBudgetEvaluator | None = None) -> None:
+        """初始化 slash 命令分发器。
 
+        Args:
+            budget_evaluator (ContextBudgetEvaluator | None): 可选的预算评估器；未提供时创建默认实例。
 
-def dispatch_slash_command(
-    context: SlashCommandContext,
-    input_text: str,
-) -> SlashCommandResult:
-    """分发单条输入；非 slash 输入透传给常规 query 路径。
+        Returns:
+            None: 该构造函数只负责建立分发器内部状态。
+        """
+        self._budget_evaluator = budget_evaluator or ContextBudgetEvaluator()  # ContextBudgetEvaluator: /context 使用的 token 预算投影器。
+        self._specs = self._build_specs()  # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，按帮助输出顺序保存。
+        self._spec_index = self._build_spec_index(self._specs)  # dict[str, SlashCommandSpec]: 命令名到规格的查找索引。
 
-    Args:
-        context (SlashCommandContext): 命令执行上下文。
-        input_text (str): 用户输入文本。
+    def parse(self, input_text: str) -> ParsedSlashCommand | None:
+        """从原始输入中提取 slash 命令。
 
-    Returns:
-        SlashCommandResult: 分流结果（是否处理、是否继续常规查询等）。
-    """
-    parsed = parse_slash_command(input_text)
-    if parsed is None:
-        return SlashCommandResult(
-            handled=False,
-            continue_query=True,
-            prompt=input_text,
+        Args:
+            input_text (str): 用户提交的原始输入文本。
+
+        Returns:
+            ParsedSlashCommand | None: 成功时返回解析结果；普通 prompt 返回 None。
+        """
+        stripped = input_text.strip()
+        if not stripped.startswith('/'):
+            return None
+
+        body = stripped[1:]
+        command_name, _, arguments = body.partition(' ')
+        return ParsedSlashCommand(
+            command_name=command_name.strip().lower(),
+            arguments=arguments.strip(),
+            raw_input=input_text,
         )
 
-    spec = find_slash_command(parsed.command_name)
-    if spec is None:
-        command_label = parsed.command_name or '(empty)'
+    def dispatch(
+        self,
+        context: SlashCommandContext,
+        input_text: str,
+    ) -> SlashCommandResult:
+        """分发单条输入；非 slash 输入透传给常规 query 路径。
+
+        Args:
+            context (SlashCommandContext): 命令执行所需的只读上下文。
+            input_text (str): 用户输入文本。
+
+        Returns:
+            SlashCommandResult: 分流结果，描述是否已处理以及后续是否继续 query。
+        """
+        parsed = self.parse(input_text)
+        if parsed is None:
+            return SlashCommandResult(
+                handled=False,
+                continue_query=True,
+                prompt=input_text,
+            )
+
+        spec = self.find(parsed.command_name)
+        if spec is None:
+            return self._build_unknown_command_result(parsed.command_name)
+
+        return spec.handler(context, parsed)
+
+    def get_specs(self) -> tuple[SlashCommandSpec, ...]:
+        """返回当前分发器支持的 slash 命令规格列表。
+
+        Returns:
+            tuple[SlashCommandSpec, ...]: 按帮助展示顺序排列的命令规格。
+        """
+        return self._specs
+
+    def find(self, command_name: str) -> SlashCommandSpec | None:
+        """按名称查找 slash 命令规格。
+
+        Args:
+            command_name (str): 待查找的命令名，可包含大小写与首尾空白。
+
+        Returns:
+            SlashCommandSpec | None: 找到时返回规格对象，否则返回 None。
+        """
+        return self._spec_index.get(command_name.strip().lower())
+
+    def _build_specs(self) -> tuple[SlashCommandSpec, ...]:
+        """构建当前分发器支持的全部命令规格。
+
+        Returns:
+            tuple[SlashCommandSpec, ...]: 命令规格元组。
+        """
+        return (
+            SlashCommandSpec(names=('help',), description='Show supported local slash commands.', handler=self._handle_help),
+            SlashCommandSpec(names=('context',), description='Show local context status.', handler=self._handle_context),
+            SlashCommandSpec(names=('status',), description='Show current session status.', handler=self._handle_status),
+            SlashCommandSpec(names=('permissions',), description='Show current tool permissions.', handler=self._handle_permissions),
+            SlashCommandSpec(names=('tools',), description='List registered local tools.', handler=self._handle_tools),
+            SlashCommandSpec(names=('clear',), description='Fork a new cleared session snapshot.', handler=self._handle_clear),
+        )
+
+    def _handle_help(
+        self,
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        """渲染当前支持的本地 slash 命令清单。
+
+        Args:
+            context (SlashCommandContext): 命令执行上下文；当前命令不读取其中内容。
+            parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
+
+        Returns:
+            SlashCommandResult: 包含帮助文本的本地处理结果。
+        """
+        del context, parsed
+        lines = ['Slash Commands', '==============', '']
+        for spec in self.get_specs():
+            lines.append(f'/{spec.names[0]} - {spec.description}')
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name='help',
+            output='\n'.join(lines),
+        )
+
+    def _handle_context(
+        self,
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        """渲染当前会话的上下文预算状态。
+
+        Args:
+            context (SlashCommandContext): 命令执行上下文，提供消息、预算与工具注册信息。
+            parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
+
+        Returns:
+            SlashCommandResult: 包含上下文预算快照的本地处理结果。
+        """
+        del parsed
+        openai_tools = self._build_openai_tools(context.tool_registry)
+        snapshot = self._budget_evaluator.evaluate(
+            messages=context.session_state.to_messages(),
+            tools=openai_tools,
+            max_input_tokens=context.runtime_config.budget_config.max_input_tokens,
+        )
+        lines = [
+            'Context Status',
+            '==============',
+            f'Messages: {len(context.session_state.messages)}',
+            f'Transcript entries: {len(context.session_state.transcript_entries)}',
+            f'Tool calls: {context.session_state.tool_call_count}',
+            f'Projected input tokens: {snapshot.projected_input_tokens}',
+            f'Hard input limit: {self._render_optional_int(snapshot.hard_input_limit)}',
+            f'Soft input limit: {self._render_optional_int(snapshot.soft_input_limit)}',
+            f'Is soft over: {self._render_bool(snapshot.is_soft_over)}',
+            f'Is hard over: {self._render_bool(snapshot.is_hard_over)}',
+            f'Compact preserve messages: {context.runtime_config.compact_preserve_messages}',
+        ]
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name='context',
+            output='\n'.join(lines),
+        )
+
+    def _build_openai_tools(self, tool_registry: Mapping[str, AgentTool]) -> list[JSONDict]:
+        """把本地工具注册表投影为 OpenAI 工具 schema 列表。
+
+        Args:
+            tool_registry (Mapping[str, AgentTool]): 当前会话可见的本地工具注册表。
+
+        Returns:
+            list[JSONDict]: 供预算评估器计算 token 占用的工具 schema 列表。
+        """
+        return [tool.to_openai_tool() for tool in tool_registry.values()]
+
+    def _render_optional_int(self, value: int | None) -> str:
+        """把可选整数格式化为展示文本。
+
+        Args:
+            value (int | None): 需要展示的整数值；None 表示无限制。
+
+        Returns:
+            str: None 返回 unlimited，其余情况返回十进制字符串。
+        """
+        if value is None:
+            return 'unlimited'
+        return str(value)
+
+    def _render_bool(self, value: bool) -> str:
+        """把布尔值格式化为 yes 或 no。
+
+        Args:
+            value (bool): 待格式化的布尔值。
+
+        Returns:
+            str: True 返回 yes，False 返回 no。
+        """
+        return 'yes' if value else 'no'
+
+    def _handle_status(
+        self,
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        """渲染当前会话的基础状态摘要。
+
+        Args:
+            context (SlashCommandContext): 命令执行上下文，提供会话 ID、模型与工作目录信息。
+            parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
+
+        Returns:
+            SlashCommandResult: 包含会话状态信息的本地处理结果。
+        """
+        del parsed
+        lines = [
+            'Session Status',
+            '==============',
+            f'Session id: {context.session_id}',
+            f'Model: {context.model_config.model}',
+            f'Working directory: {context.runtime_config.cwd}',
+            f'Completed turns: {context.turns_offset}',
+            f'Tool calls: {context.session_state.tool_call_count}',
+        ]
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name='status',
+            output='\n'.join(lines),
+        )
+
+    def _handle_permissions(
+        self,
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        """渲染当前运行时的权限配置。
+
+        Args:
+            context (SlashCommandContext): 命令执行上下文，提供权限配置。
+            parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
+
+        Returns:
+            SlashCommandResult: 包含权限摘要的本地处理结果。
+        """
+        del parsed
+        permissions = context.runtime_config.permissions
+        lines = [
+            'Permissions',
+            '===========',
+            f'File write: {self._render_bool(permissions.allow_file_write)}',
+            f'Shell commands: {self._render_bool(permissions.allow_shell_commands)}',
+            f'Destructive shell: {self._render_bool(permissions.allow_destructive_shell_commands)}',
+        ]
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name='permissions',
+            output='\n'.join(lines),
+        )
+
+    def _handle_tools(
+        self,
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        """渲染当前注册工具与插件摘要。
+
+        Args:
+            context (SlashCommandContext): 命令执行上下文，提供工具注册表、权限与插件摘要。
+            parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
+
+        Returns:
+            SlashCommandResult: 包含工具列表与插件摘要的本地处理结果。
+        """
+        del parsed
+        permissions = context.runtime_config.permissions
+        lines = [
+            'Registered Tools',
+            '================',
+            f'File write enabled: {self._render_bool(permissions.allow_file_write)}',
+            f'Shell enabled: {self._render_bool(permissions.allow_shell_commands)}',
+            '',
+        ]
+        for tool in context.tool_registry.values():
+            lines.append(f'{tool.name} - {tool.description}')
+        if context.plugin_summary.strip():
+            lines.extend(['', context.plugin_summary.strip()])
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name='tools',
+            output='\n'.join(lines),
+        )
+
+    def _handle_clear(
+        self,
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        """请求上层以 fork 语义切换到一个全新的空会话。
+
+        Args:
+            context (SlashCommandContext): 命令执行上下文，提供当前会话历史以判断 had_history。
+            parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
+
+        Returns:
+            SlashCommandResult: 包含清空提示与新会话状态的本地处理结果。
+        """
+        del parsed
+        had_history = bool(
+            context.session_state.messages
+            or context.session_state.transcript_entries
+            or context.session_state.tool_call_count
+            or context.turns_offset
+        )
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name='clear',
+            output='Cleared in-memory session context.',
+            replacement_session_state=AgentSessionState(),
+            fork_session=True,
+            metadata={'had_history': had_history},
+        )
+
+    def _build_unknown_command_result(self, command_name: str) -> SlashCommandResult:
+        """为未知 slash 命令构造统一错误结果。
+
+        Args:
+            command_name (str): 用户输入的命令名，可能为空字符串。
+
+        Returns:
+            SlashCommandResult: 包含 unknown_command 错误码的本地处理结果。
+        """
+        command_label = command_name or '(empty)'
         return SlashCommandResult(
             handled=True,
             continue_query=False,
@@ -120,231 +430,72 @@ def dispatch_slash_command(
             metadata={'error': 'unknown_command'},
         )
 
-    return spec.handler(context, parsed)
+    def _build_spec_index(
+        self,
+        specs: tuple[SlashCommandSpec, ...],
+    ) -> dict[str, SlashCommandSpec]:
+        """根据命令规格构建名称索引。
+
+        Args:
+            specs (tuple[SlashCommandSpec, ...]): 按展示顺序排列的命令规格列表。
+
+        Returns:
+            dict[str, SlashCommandSpec]: 命令名到规格对象的映射表。
+        """
+        index: dict[str, SlashCommandSpec] = {}
+        for spec in specs:
+            for name in spec.names:
+                index[name] = spec
+        return index
+
+
+_DEFAULT_DISPATCHER = SlashCommandDispatcher()
+
+
+def parse_slash_command(input_text: str) -> ParsedSlashCommand | None:
+    """通过默认分发器解析 slash 命令。
+
+    Args:
+        input_text (str): 用户提交的原始输入文本。
+
+    Returns:
+        ParsedSlashCommand | None: 成功时返回解析结果；普通 prompt 返回 None。
+    """
+    return _DEFAULT_DISPATCHER.parse(input_text)
+
+
+def dispatch_slash_command(
+    context: SlashCommandContext,
+    input_text: str,
+) -> SlashCommandResult:
+    """通过默认分发器执行 slash 分流。
+
+    Args:
+        context (SlashCommandContext): 命令执行上下文。
+        input_text (str): 用户输入文本。
+
+    Returns:
+        SlashCommandResult: 分流结果（是否处理、是否继续常规查询等）。
+    """
+    return _DEFAULT_DISPATCHER.dispatch(context, input_text)
 
 
 def get_slash_command_specs() -> tuple[SlashCommandSpec, ...]:
-    """返回当前支持的 slash 命令列表。"""
-    return (
-        SlashCommandSpec(names=('help',), description='Show supported local slash commands.', handler=_handle_help),
-        SlashCommandSpec(names=('context',), description='Show local context status.', handler=_handle_context),
-        SlashCommandSpec(names=('status',), description='Show current session status.', handler=_handle_status),
-        SlashCommandSpec(names=('permissions',), description='Show current tool permissions.', handler=_handle_permissions),
-        SlashCommandSpec(names=('tools',), description='List registered local tools.', handler=_handle_tools),
-        SlashCommandSpec(names=('clear',), description='Fork a new cleared session snapshot.', handler=_handle_clear),
-    )
+    """通过默认分发器返回当前支持的 slash 命令列表。
+
+    Returns:
+        tuple[SlashCommandSpec, ...]: 按帮助输出顺序排列的命令规格。
+    """
+    return _DEFAULT_DISPATCHER.get_specs()
 
 
 def find_slash_command(command_name: str) -> SlashCommandSpec | None:
-    """按名称查找 slash 命令。"""
-    normalized = command_name.strip().lower()
-    for spec in get_slash_command_specs():
-        if normalized in spec.names:
-            return spec
-    return None
+    """通过默认分发器按名称查找 slash 命令。
 
-
-def _handle_help(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
-    """内部方法：执行 `_handle_help` 相关逻辑。
     Args:
-        context (SlashCommandContext): 参数 `context`。
-        parsed (ParsedSlashCommand): 参数 `parsed`。
+        command_name (str): 待查找的命令名。
+
     Returns:
-        SlashCommandResult: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        SlashCommandSpec | None: 找到时返回规格对象，否则返回 None。
     """
-    lines = ['Slash Commands', '==============', '']
-    for spec in get_slash_command_specs():
-        lines.append(f'/{spec.names[0]} - {spec.description}')
-    return SlashCommandResult(
-        handled=True,
-        continue_query=False,
-        command_name='help',
-        output='\n'.join(lines),
-    )
-
-
-def _handle_context(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
-    """内部方法：执行 `_handle_context` 相关逻辑。
-    Args:
-        context (SlashCommandContext): 参数 `context`。
-        parsed (ParsedSlashCommand): 参数 `parsed`。
-    Returns:
-        SlashCommandResult: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    openai_tools = _build_openai_tools(context.tool_registry)
-    snapshot = _BUDGET_EVALUATOR.evaluate(
-        messages=context.session_state.to_messages(),
-        tools=openai_tools,
-        max_input_tokens=context.runtime_config.budget_config.max_input_tokens,
-    )
-    lines = [
-        'Context Status',
-        '==============',
-        f'Messages: {len(context.session_state.messages)}',
-        f'Transcript entries: {len(context.session_state.transcript_entries)}',
-        f'Tool calls: {context.session_state.tool_call_count}',
-        f'Projected input tokens: {snapshot.projected_input_tokens}',
-        f'Hard input limit: {_render_optional_int(snapshot.hard_input_limit)}',
-        f'Soft input limit: {_render_optional_int(snapshot.soft_input_limit)}',
-        f'Is soft over: {_render_bool(snapshot.is_soft_over)}',
-        f'Is hard over: {_render_bool(snapshot.is_hard_over)}',
-        f'Compact preserve messages: {context.runtime_config.compact_preserve_messages}',
-    ]
-    return SlashCommandResult(
-        handled=True,
-        continue_query=False,
-        command_name='context',
-        output='\n'.join(lines),
-    )
-
-
-def _handle_status(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
-    """内部方法：执行 `_handle_status` 相关逻辑。
-    Args:
-        context (SlashCommandContext): 参数 `context`。
-        parsed (ParsedSlashCommand): 参数 `parsed`。
-    Returns:
-        SlashCommandResult: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    lines = [
-        'Session Status',
-        '==============',
-        f'Session id: {context.session_id}',
-        f'Model: {context.model_config.model}',
-        f'Working directory: {context.runtime_config.cwd}',
-        f'Completed turns: {context.turns_offset}',
-        f'Tool calls: {context.session_state.tool_call_count}',
-    ]
-    return SlashCommandResult(
-        handled=True,
-        continue_query=False,
-        command_name='status',
-        output='\n'.join(lines),
-    )
-
-
-def _handle_permissions(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
-    """内部方法：执行 `_handle_permissions` 相关逻辑。
-    Args:
-        context (SlashCommandContext): 参数 `context`。
-        parsed (ParsedSlashCommand): 参数 `parsed`。
-    Returns:
-        SlashCommandResult: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    permissions = context.runtime_config.permissions
-    lines = [
-        'Permissions',
-        '===========',
-        f'File write: {_render_bool(permissions.allow_file_write)}',
-        f'Shell commands: {_render_bool(permissions.allow_shell_commands)}',
-        f'Destructive shell: {_render_bool(permissions.allow_destructive_shell_commands)}',
-    ]
-    return SlashCommandResult(
-        handled=True,
-        continue_query=False,
-        command_name='permissions',
-        output='\n'.join(lines),
-    )
-
-
-def _handle_tools(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
-    """内部方法：执行 `_handle_tools` 相关逻辑。
-    Args:
-        context (SlashCommandContext): 参数 `context`。
-        parsed (ParsedSlashCommand): 参数 `parsed`。
-    Returns:
-        SlashCommandResult: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    permissions = context.runtime_config.permissions
-    lines = [
-        'Registered Tools',
-        '================',
-        f'File write enabled: {_render_bool(permissions.allow_file_write)}',
-        f'Shell enabled: {_render_bool(permissions.allow_shell_commands)}',
-        '',
-    ]
-    for tool in context.tool_registry.values():
-        lines.append(f'{tool.name} - {tool.description}')
-    if context.plugin_summary.strip():
-        lines.extend(['', context.plugin_summary.strip()])
-    return SlashCommandResult(
-        handled=True,
-        continue_query=False,
-        command_name='tools',
-        output='\n'.join(lines),
-    )
-
-
-def _handle_clear(context: SlashCommandContext, parsed: ParsedSlashCommand) -> SlashCommandResult:
-    """内部方法：执行 `_handle_clear` 相关逻辑。
-    Args:
-        context (SlashCommandContext): 参数 `context`。
-        parsed (ParsedSlashCommand): 参数 `parsed`。
-    Returns:
-        SlashCommandResult: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    had_history = bool(
-        context.session_state.messages
-        or context.session_state.transcript_entries
-        or context.session_state.tool_call_count
-        or context.turns_offset
-    )
-    return SlashCommandResult(
-        handled=True,
-        continue_query=False,
-        command_name='clear',
-        output='Cleared in-memory session context.',
-        replacement_session_state=AgentSessionState(),
-        fork_session=True,
-        metadata={'had_history': had_history},
-    )
-
-
-def _build_openai_tools(tool_registry: Mapping[str, AgentTool]) -> list[JSONDict]:
-    """内部方法：执行 `_build_openai_tools` 相关逻辑。
-    Args:
-        tool_registry (Mapping[str, AgentTool]): 参数 `tool_registry`。
-    Returns:
-        list[JSONDict]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    return [tool.to_openai_tool() for tool in tool_registry.values()]
-
-
-def _render_bool(value: bool) -> str:
-    """内部方法：执行 `_render_bool` 相关逻辑。
-    Args:
-        value (bool): 参数 `value`。
-    Returns:
-        str: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    return 'yes' if value else 'no'
-
-
-def _render_optional_int(value: int | None) -> str:
-    """内部方法：执行 `_render_optional_int` 相关逻辑。
-    Args:
-        value (int | None): 参数 `value`。
-    Returns:
-        str: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
-    """
-    if value is None:
-        return 'unlimited'
-    return str(value)
+    return _DEFAULT_DISPATCHER.find(command_name)
