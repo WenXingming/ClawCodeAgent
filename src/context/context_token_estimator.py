@@ -1,4 +1,4 @@
-"""ISSUE-009 Token 估算器。"""
+"""ISSUE-009 Token 估算器（归属 context 模块）。"""
 
 from __future__ import annotations
 

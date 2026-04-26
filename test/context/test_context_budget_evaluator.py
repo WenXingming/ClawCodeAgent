@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import unittest
 
-from budget.budget_evaluator import (
+from context.context_budget_evaluator import (
     ContextBudgetEvaluator,
     OUTPUT_RESERVE_TOKENS,
     SOFT_BUFFER_TOKENS,
 )
-from budget.budget_snapshot import TokenBudgetSnapshot
-from budget.token_estimator import ContextTokenEstimator
+from context.context_budget_evaluator import ContextBudgetSnapshot
+from context.context_token_estimator import ContextTokenEstimator
 
 
 ESTIMATOR = ContextTokenEstimator()
@@ -89,7 +89,7 @@ class CheckTokenBudgetTests(unittest.TestCase):
         self.assertGreaterEqual(snapshot.soft_input_limit, 0)
 
     def test_defaults_exposed_from_module(self) -> None:
-        snapshot = TokenBudgetSnapshot(
+        snapshot = ContextBudgetSnapshot(
             projected_input_tokens=1,
             output_reserve_tokens=OUTPUT_RESERVE_TOKENS,
             hard_input_limit=10,

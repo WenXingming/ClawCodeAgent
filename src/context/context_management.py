@@ -5,9 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from budget.budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
-from budget.budget_snapshot import TokenBudgetSnapshot
+from context.context_budget_evaluator import ContextBudgetEvaluator, ContextBudgetSnapshot
 from context.context_compactor import CompactionResult, ContextCompactor
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
@@ -32,7 +31,7 @@ class _SessionStateLike(Protocol):
 class PreModelContextOutcome:
     """描述一次 pre-model 上下文治理后的状态。"""
 
-    snapshot: TokenBudgetSnapshot
+    snapshot: ContextBudgetSnapshot
     usage_delta: TokenUsage
     model_call_count: int
     pre_model_stop: str | None

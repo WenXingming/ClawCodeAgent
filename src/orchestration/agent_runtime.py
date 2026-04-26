@@ -18,7 +18,7 @@ from typing import Any
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from budget.budget_evaluator import ContextBudgetEvaluator
+from context.context_budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from interface.slash_commands_interface import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from context.context_compactor import ContextCompactor

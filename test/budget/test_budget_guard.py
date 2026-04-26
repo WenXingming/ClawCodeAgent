@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from budget.budget_guard import BudgetGuard
-from budget.budget_snapshot import TokenBudgetSnapshot
+from context.context_budget_evaluator import ContextBudgetSnapshot
 from core_contracts.config import BudgetConfig
 from core_contracts.usage import ModelPricing, TokenUsage
 
@@ -18,8 +18,8 @@ def _guard(budget: BudgetConfig, *, cost_baseline: float = 0.0) -> BudgetGuard:
     )
 
 
-def _snapshot(*, is_hard_over: bool = False, is_soft_over: bool = False) -> TokenBudgetSnapshot:
-    return TokenBudgetSnapshot(
+def _snapshot(*, is_hard_over: bool = False, is_soft_over: bool = False) -> ContextBudgetSnapshot:
+    return ContextBudgetSnapshot(
         projected_input_tokens=100,
         output_reserve_tokens=4096,
         hard_input_limit=None,

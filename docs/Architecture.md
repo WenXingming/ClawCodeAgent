@@ -27,11 +27,10 @@ src/
 |  |- search_runtime.py
 |  '- mcp_runtime.py
 |- budget/
-|  |- budget_snapshot.py
-|  |- token_estimator.py
-|  |- budget_evaluator.py
 |  '- budget_guard.py
 |- context/
+|  |- context_token_estimator.py
+|  |- context_budget_evaluator.py
 |  |- context_management.py
 |  |- context_snipper.py
 |  '- context_compactor.py
@@ -93,17 +92,16 @@ graph TB
         style Planning fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    subgraph BudgetPkg[budget package / token 预算与闸门]
+    subgraph BudgetPkg[budget package / 执行预算闸门]
         direction TB
         n_budget_guard(["🛡️ budget/budget_guard.py"])
-        n_budget_evaluator(["📏 budget/budget_evaluator.py"])
-        n_budget_snapshot(["📸 budget/budget_snapshot.py"])
-        n_token_estimator(["🔢 budget/token_estimator.py"])
         style BudgetPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    subgraph ContextPkg[context package / 上下文收缩]
+    subgraph ContextPkg[context package / 上下文治理与预算]
         direction TB
+        n_token_estimator(["🔢 context/context_token_estimator.py"])
+        n_budget_evaluator(["📏 context/context_budget_evaluator.py"])
         n_context_management(["🧠 context/context_management.py"])
         n_snip(["✂️ context/context_snipper.py"])
         n_compact(["🗜️ context/context_compactor.py"])
@@ -172,8 +170,6 @@ graph TB
 
     n_session_store --> n_session_snapshot
 
-    n_budget_guard --> n_budget_snapshot
-    n_budget_evaluator --> n_budget_snapshot
     n_budget_evaluator --> n_token_estimator
     n_snip --> n_token_estimator
     n_compact --> n_token_estimator
@@ -191,7 +187,6 @@ graph TB
     n_plan -.-> n_core_contracts
     n_workflow -.-> n_core_contracts
     n_budget_guard -.-> n_core_contracts
-    n_budget_evaluator -.-> n_core_contracts
     n_session_state -.-> n_core_contracts
     n_session_snapshot -.-> n_core_contracts
     n_tools -.-> n_core_contracts
@@ -210,7 +205,6 @@ graph TB
     style n_workflow fill:#e8590c,color:#fff,stroke:#c2410c
     style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34
     style n_budget_evaluator fill:#37b24d,color:#fff,stroke:#2b8a3e
-    style n_budget_snapshot fill:#5c940d,color:#fff,stroke:#4c6ef5
     style n_token_estimator fill:#74b816,color:#fff,stroke:#5c940d
     style n_context_management fill:#228be6,color:#fff,stroke:#1864ab
     style n_snip fill:#2f9e44,color:#fff,stroke:#1b5e20
@@ -228,13 +222,14 @@ graph TB
 
 - `orchestration/agent_runtime.py` 现在只保留主循环编排职责：模型调用、工具回填、预算闸门、会话保存，以及通过 `ContextManager` 调用上下文治理。
 - `budget/` 负责 token 预算的对象模型和闸门逻辑：`TokenBudgetSnapshot`、统一估算器、预算投影器和运行时预算检查都集中在这里。
-- `context/` 负责上下文治理能力：`ContextManager` 编排 pre-model 与 reactive compact 重试，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
+- `budget/` 只保留 `BudgetGuard`：集中管理主循环的五维执行限制（turns / model_calls / token / cost / tool_calls），是 orchestration 层的运行时闸门。
+- `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextBudgetEvaluator`（含 `ContextBudgetSnapshot`）提供预算投影，`ContextManager` 编排 pre-model 与 reactive compact 重试，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
 - `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、MCP server 都从工作区 `.claw/` manifest 或环境变量发现并对外提供独立 API。
 - `interface/` 负责 CLI 和 slash 命令；`slash_commands_interface.py` 依赖预算投影和工具注册表，但不会触发模型调用。
 - `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
 
-这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界名称更明确了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`，预算能力也从 `context` 中抽出到 `budget`。
+这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`；token 估算与预算投影（`ContextTokenEstimator`、`ContextBudgetEvaluator`）归入 `context`，`budget` 只保留执行闸门 `BudgetGuard`，形成 `context` → `budget` → `orchestration` 的单向树状依赖。
 
 ## 测试镜像
 
@@ -259,12 +254,13 @@ test/
 - `test/planning/` 对应 task/plan/workflow 状态机测试。
 - `test/extensions/` 对应 plugin/policy/search/mcp 测试，并承接相关 patch 目标。
 - `test/budget/` 对应预算快照、估算、评估与闸门测试。
-- `test/context/` 现在包含 `test_context_management.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
+- `test/budget/` 现在只包含 `test_budget_guard.py`（五维闸门测试）。
+- `test/context/` 包含 `test_context_token_estimator.py`、`test_context_budget_evaluator.py`、`test_context_management.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
 
 ## 推荐阅读顺序
 
 1. 先看 `core_contracts/`，建立共享契约层边界。
 2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧的外部交互面。
-3. 再看 `budget/` 与 `context/`，理解预算投影、上下文剪裁和摘要压缩的职责切分。
+3. 再看 `context/`（含 token 估算与预算投影）和 `budget/`（执行闸门），理解预算预检、上下文剪裁和摘要压缩的职责切分。
 4. 再看 `planning/` 与 `extensions/`，理解工作区本地状态和外部扩展能力各自如何发现、持久化和暴露 API。
 5. 最后看 `orchestration/agent_runtime.py`、`interface/command_line_interface.py` 和 `main.py`，理解这些能力如何被装配成完整入口。

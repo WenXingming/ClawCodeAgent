@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
-from budget.budget_evaluator import ContextBudgetEvaluator
+from context.context_budget_evaluator import ContextBudgetEvaluator
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.protocol import JSONDict
 from session.session_state import AgentSessionState

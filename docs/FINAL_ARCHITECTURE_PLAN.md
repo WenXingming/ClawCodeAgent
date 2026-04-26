@@ -52,7 +52,7 @@
 2. 核心编排层：`src/orchestration/agent_runtime.py` 的 `LocalCodingAgent`
 3. 扩展能力层：`src/extensions/`（plugin / hook_policy / search / mcp）
 4. 计划状态机层：`src/planning/`（task / plan / workflow）
-5. 预算与上下文层：`src/budget/` + `src/context/`（`ContextManager` 统一编排 pre-model 与 reactive compact 上下文治理）
+5. 上下文与预算层：`src/context/`（token 估算、预算投影、snip/compact 上下文治理）+ `src/budget/`（`BudgetGuard` 五维执行闸门）；两层形成 `context` → `budget` 的单向依赖
 6. 状态与持久化层：`src/session/session_state.py` + `src/session/session_snapshot.py` + `src/session/session_store.py`
 7. 模型接入与共享契约层：`src/openai_client/openai_client.py` + `src/core_contracts/`
 

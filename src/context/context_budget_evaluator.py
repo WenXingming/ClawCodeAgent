@@ -5,8 +5,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from budget.budget_snapshot import TokenBudgetSnapshot
-from budget.token_estimator import ContextTokenEstimator
+from context.context_token_estimator import ContextTokenEstimator
+
+
+@dataclass(frozen=True)
+class ContextBudgetSnapshot:
+    """描述一次 token 预算预检的结果快照。
+    
+    由ContextBudgetEvaluator在判断当前模型调用是否会超预算时生成，
+    包含预估的token数、限制值、以及是否超过限制的标志。
+    """
+
+    projected_input_tokens: int  # 预估的本次输入 token 数量
+    output_reserve_tokens: int  # 为模型输出预留的 token 数量
+    hard_input_limit: int | None  # 硬限制（若超过则报错中止）；None表示无硬限制
+    soft_input_limit: int | None  # 软限制（若超过则警告但继续）；None表示无软限制
+    is_hard_over: bool  # 是否超过硬限制
+    is_soft_over: bool  # 是否超过软限制
 
 
 OUTPUT_RESERVE_TOKENS: int = 4_096
@@ -32,7 +47,7 @@ class ContextBudgetEvaluator:
         max_input_tokens: int | None = None,
         output_reserve_tokens: int | None = None,
         soft_buffer_tokens: int | None = None,
-    ) -> TokenBudgetSnapshot:
+    ) -> ContextBudgetSnapshot:
         """预检本次调用是否超预算。
         
         流程：
@@ -49,14 +64,14 @@ class ContextBudgetEvaluator:
             soft_buffer_tokens (int | None): 本次软限制缓冲；None使用默认值
             
         Returns:
-            TokenBudgetSnapshot: 预算预检快照，包含projected/limit/超限标志
+            ContextBudgetSnapshot: 预算预检快照，包含projected/limit/超限标志
         """
         output_reserve = self.output_reserve_tokens if output_reserve_tokens is None else output_reserve_tokens
         soft_buffer = self.soft_buffer_tokens if soft_buffer_tokens is None else soft_buffer_tokens
         projected = self.token_estimator.estimate_messages(messages) + self.token_estimator.estimate_tools(tools or [])
 
         if max_input_tokens is None:
-            return TokenBudgetSnapshot(
+            return ContextBudgetSnapshot(
                 projected_input_tokens=projected,
                 output_reserve_tokens=output_reserve,
                 hard_input_limit=None,
@@ -69,7 +84,7 @@ class ContextBudgetEvaluator:
         usable = hard_limit - output_reserve
         soft_limit = max(0, usable - soft_buffer)
 
-        return TokenBudgetSnapshot(
+        return ContextBudgetSnapshot(
             projected_input_tokens=projected,
             output_reserve_tokens=output_reserve,
             hard_input_limit=hard_limit,

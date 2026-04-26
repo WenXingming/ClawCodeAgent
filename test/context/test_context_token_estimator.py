@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from budget.token_estimator import ContextTokenEstimator
+from context.context_token_estimator import ContextTokenEstimator
 
 
 ESTIMATOR = ContextTokenEstimator()

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from budget.budget_evaluator import ContextBudgetEvaluator
+from context.context_budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from context.context_compactor import ContextCompactor
 from context.context_management import ContextManager
