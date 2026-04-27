@@ -17,6 +17,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from interface.exit_banner import SessionExitSummaryRenderer, SessionInteractionTracker
 from interface.startup_banner import StartupBannerRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.result import AgentRunResult
@@ -55,6 +56,7 @@ class CLI:
         agent_cls: type[LocalAgent] = LocalAgent,
         session_store_cls: type[AgentSessionStore] = AgentSessionStore,
         banner_renderer: StartupBannerRenderer | None = None,
+        exit_summary_renderer: SessionExitSummaryRenderer | None = None,
         chat_exit_commands: frozenset[str] | None = None,
     ) -> None:
         """初始化 CLI 协调器，注入全部可替换的外部依赖。
@@ -68,6 +70,8 @@ class CLI:
                 用于加载与定位持久化会话快照。
             banner_renderer (StartupBannerRenderer | None): 启动横幅渲染器；
                 为 None 时使用默认 StartupBannerRenderer 实例。
+            exit_summary_renderer (SessionExitSummaryRenderer | None): 会话结束提示框渲染器；
+                为 None 时使用默认 SessionExitSummaryRenderer 实例。
             chat_exit_commands (frozenset[str] | None): 交互循环的本地退出命令集合；
                 为 None 时使用默认的 {'/exit', '/quit'}。
         Returns:
@@ -84,6 +88,9 @@ class CLI:
 
         self._banner_renderer = banner_renderer or StartupBannerRenderer()
         # StartupBannerRenderer: 交互循环启动时输出欢迎横幅的渲染器实例。
+
+        self._exit_summary_renderer = exit_summary_renderer or SessionExitSummaryRenderer()
+        # SessionExitSummaryRenderer: 交互循环结束时输出总结提示框的渲染器实例。
 
         self._chat_exit_commands = chat_exit_commands or _DEFAULT_CHAT_EXIT_COMMANDS
         # frozenset[str]: 交互式聊天循环的本地退出命令集合，如 '/exit'、'/quit'。
@@ -625,21 +632,20 @@ class CLI:
             int: 交互循环退出码；用户主动退出、EOF、KeyboardInterrupt 均返回 0。
         """
         self._banner_renderer.render()
+        interaction_tracker = SessionInteractionTracker.start(current_session_id)
         while True:
             try:
                 prompt = input('agent> ')
             except EOFError:
-                print()
-                return 0
+                return self._finalize_interactive_loop(interaction_tracker, leading_blank_line=True)
             except KeyboardInterrupt:
-                print()
-                return 0
+                return self._finalize_interactive_loop(interaction_tracker, leading_blank_line=True)
 
             normalized = prompt.strip()
             if not normalized:
                 continue
             if normalized in self._chat_exit_commands:
-                return 0
+                return self._finalize_interactive_loop(interaction_tracker)
 
             result = self._execute_chat_turn(
                 agent,
@@ -654,6 +660,11 @@ class CLI:
                 result,
                 current_session_id=current_session_id,
                 current_session_directory=current_session_directory,
+            )
+            self._update_interaction_tracker(
+                interaction_tracker,
+                result,
+                current_session_id=current_session_id,
             )
 
     def _execute_chat_turn(
@@ -746,6 +757,32 @@ class CLI:
         if result.session_path:
             next_directory = Path(result.session_path).resolve().parent
         return next_session_id, next_directory
+
+    def _update_interaction_tracker(
+        self,
+        tracker: SessionInteractionTracker,
+        result: AgentRunResult,
+        *,
+        current_session_id: str | None,
+    ) -> None:
+        """把单轮结果中的增量统计写入交互期汇总。"""
+        tracker.update_session_id(result.session_id or current_session_id)
+        for event in result.events:
+            if event.get('type') != 'tool_result':
+                continue
+            tracker.observe_tool_result(ok=bool(event.get('ok')))
+
+    def _finalize_interactive_loop(
+        self,
+        tracker: SessionInteractionTracker,
+        *,
+        leading_blank_line: bool = False,
+    ) -> int:
+        """渲染交互结束提示框并返回退出码。"""
+        if leading_blank_line:
+            print()
+        self._exit_summary_renderer.render(tracker.to_summary())
+        return 0
 
     # ------------------------------------------------------------------
     # agent-resume 子命令：恢复会话

@@ -49,10 +49,13 @@ class StartupBannerRenderer:
         '   ██║    ╚██████╔╝ ██████╔╝ ╚██████╔╝ ╚██████╔╝',
         '   ╚═╝     ╚═════╝  ╚═════╝   ╚═════╝   ╚═════╝ ',
     )
-    
-    _DEFAULT_SUBTITLE = 'Tudou Code Agent - Empower Your Coding Journey with AI \nVersion 1.0.0'
+
+    _DEFAULT_SUBTITLE = 'Tudou Code Agent - Empower Your Coding Journey with AI\nVersion 1.0.0'
+    _FRAME_HORIZONTAL_PADDING = 2
+    _FRAME_VERTICAL_PADDING = 1
 
     # 渐变色三个锚点：蓝 → 青 → 粉（RGB 整数元组）
+    _SOFT_WHITE_RGB = (0xE4, 0xE8, 0xF0)
     _GRADIENT_STOPS = (
         (0x4B, 0x7B, 0xFF),  # 蓝
         (0x22, 0xC5, 0xC7),  # 青
@@ -95,8 +98,8 @@ class StartupBannerRenderer:
     def render(self, stream: TextIO | None = None) -> None:
         """将完整 Banner 输出到目标流。
 
-        输出顺序：上方留白 → 逐行 ASCII-art 标题（含着色）→
-        中间间距 → 副标题（含着色）→ 下方留白。
+        输出顺序：上方留白 → 圆角矩形边框 → 标题与副标题内容
+        （含着色）→ 圆角矩形边框 → 下方留白。
 
         Args:
             stream (TextIO | None): 目标文本流；为 None 时默认使用
@@ -106,12 +109,11 @@ class StartupBannerRenderer:
         """
         target = stream or sys.stdout
         use_ansi = self._stream_supports_ansi(target)
+        framed_lines = self._build_framed_lines(use_ansi)
 
         self._write_blank_lines(target, self._top_padding)
-        for line in self._lines:
-            self._write_line(target, self._colorize_line(line) if use_ansi else line)
-        self._write_blank_lines(target, self._gap_before_subtitle)
-        self._write_line(target, self._colorize_line(self._subtitle) if use_ansi else self._subtitle)
+        for line in framed_lines:
+            self._write_line(target, line)
         self._write_blank_lines(target, self._bottom_padding)
 
     # ------------------------------------------------------------------
@@ -157,6 +159,54 @@ class StartupBannerRenderer:
         """
         for _ in range(count):
             stream.write('\n')
+
+    def _build_framed_lines(self, use_ansi: bool) -> tuple[str, ...]:
+        """构建包含圆角边框的完整 Banner 行列表。"""
+        content_lines = self._apply_vertical_padding(self._build_content_lines())
+        content_width = max((len(line) for line in content_lines), default=0)
+        inner_width = content_width + self._FRAME_HORIZONTAL_PADDING * 2
+        rendered_lines = [self._frame_border_line(inner_width, top=True, use_ansi=use_ansi)]
+        rendered_lines.extend(
+            self._frame_content_line(line, content_width, use_ansi)
+            for line in content_lines
+        )
+        rendered_lines.append(self._frame_border_line(inner_width, top=False, use_ansi=use_ansi))
+        return tuple(rendered_lines)
+
+    def _apply_vertical_padding(self, content_lines: tuple[str, ...]) -> tuple[str, ...]:
+        """在边框内容上下追加空白行。"""
+        vertical_padding = ('',) * self._FRAME_VERTICAL_PADDING
+        return (*vertical_padding, *content_lines, *vertical_padding)
+
+    def _build_content_lines(self) -> tuple[str, ...]:
+        """组装边框内部的所有内容行。"""
+        subtitle_lines = tuple(self._subtitle.splitlines()) or ('',)
+        return (
+            *self._lines,
+            *([''] * self._gap_before_subtitle),
+            *subtitle_lines,
+        )
+
+    def _frame_border_line(self, inner_width: int, *, top: bool, use_ansi: bool) -> str:
+        """生成顶部或底部圆角边框。"""
+        left_corner, right_corner = ('╭', '╮') if top else ('╰', '╯')
+        border = f'{left_corner}{"─" * inner_width}{right_corner}'
+        return self._colorize_frame(border) if use_ansi else border
+
+    def _frame_content_line(self, text: str, content_width: int, use_ansi: bool) -> str:
+        """生成带左右边框的内容行。"""
+        padded_text = text.ljust(content_width)
+        rendered_text = self._colorize_line(padded_text) if use_ansi else padded_text
+        left_border = self._colorize_frame('│') if use_ansi else '│'
+        right_border = self._colorize_frame('│') if use_ansi else '│'
+        horizontal_padding = ' ' * self._FRAME_HORIZONTAL_PADDING
+        return f'{left_border}{horizontal_padding}{rendered_text}{horizontal_padding}{right_border}'
+
+    def _colorize_frame(self, text: str) -> str:
+        """为边框应用统一的强调色。"""
+        # red, green, blue = self._GRADIENT_STOPS[1]
+        red, green, blue = self._SOFT_WHITE_RGB
+        return f'\x1b[38;2;{red};{green};{blue}m{text}\x1b[0m'
 
     def _colorize_line(self, text: str) -> str:
         """为文本中的每个可见字符附加渐变色 ANSI 转义码。

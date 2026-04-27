@@ -21,6 +21,26 @@ def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
     testcase.assertIn('████████╗', output)
 
 
+def _assert_exit_summary_rendered(
+    testcase: unittest.TestCase,
+    output: str,
+    *,
+    session_id: str | None,
+    show_resume_hint: bool,
+) -> None:
+    testcase.assertIn('Agent powering down. Goodbye!', output)
+    testcase.assertIn('Interaction Summary', output)
+    testcase.assertIn('Tool Calls:', output)
+    testcase.assertIn('Success Rate:', output)
+    testcase.assertIn('Wall Time:', output)
+    testcase.assertIn(f'Session ID:   {session_id or "unavailable"}', output)
+    if show_resume_hint:
+        assert session_id is not None
+        testcase.assertIn(f'To resume this session: agent-resume {session_id}', output)
+        return
+    testcase.assertNotIn('To resume this session:', output)
+
+
 class _ChatFakeAgent:
     last_client = None
     last_runtime = None
@@ -117,6 +137,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(_ChatFakeAgent.run_prompts, ['第一轮'])
         self.assertEqual(_ChatFakeAgent.resume_calls, [])
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='chat-session-001', show_resume_hint=True)
         self.assertIn('run:第一轮', stdout.getvalue())
         self.assertIn('[session] chat-session-001', stdout.getvalue())
 
@@ -142,6 +163,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
         self.assertEqual(_ChatFakeAgent.resume_calls, [('继续', 'resume-test-001')])
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='resume-test-001', show_resume_hint=True)
         self.assertIn('resumed:继续', stdout.getvalue())
 
     def test_agent_chat_quit_command_exits_without_agent_call(self) -> None:
@@ -158,6 +180,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
         self.assertEqual(_ChatFakeAgent.resume_calls, [])
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id=None, show_resume_hint=False)
 
     def test_agent_chat_handles_eof(self) -> None:
         with (
@@ -173,6 +196,23 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
         self.assertEqual(_ChatFakeAgent.resume_calls, [])
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id=None, show_resume_hint=False)
+
+    def test_agent_chat_handles_keyboard_interrupt(self) -> None:
+        with (
+            patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
+            patch('main.LocalAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=KeyboardInterrupt),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent-chat'])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(_ChatFakeAgent.run_prompts, [])
+        self.assertEqual(_ChatFakeAgent.resume_calls, [])
+        _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id=None, show_resume_hint=False)
 
     def test_agent_chat_clear_updates_current_session_id(self) -> None:
         load_calls: list[str] = []
@@ -216,6 +256,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(load_calls, ['old-session', 'cleared-002'])
         self.assertEqual(_ChatFakeAgent.resume_calls, [('/clear', 'old-session'), ('继续处理', 'cleared-002')])
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='cleared-002', show_resume_hint=True)
         self.assertIn('Cleared session id: cleared-002', stdout.getvalue())
 
     # ------------------------------------------------------------------
@@ -243,6 +284,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(_ChatFakeAgent.run_prompts, ['第一轮'])
         self.assertEqual(_ChatFakeAgent.resume_calls, [('第二轮', 'chat-session-001')])
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='chat-session-001', show_resume_hint=True)
         self.assertIn('run:第一轮', stdout.getvalue())
         self.assertIn('resumed:第二轮', stdout.getvalue())
 
@@ -253,10 +295,14 @@ class MainChatEntryTests(unittest.TestCase):
             patch('main.LocalAgent', _ChatFakeAgent),
             patch('builtins.input', side_effect=EOFError),
         ):
-            code = main(['agent'])
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent'])
 
         self.assertEqual(code, 0)
         self.assertEqual(_ChatFakeAgent.run_prompts, [])
+        _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id=None, show_resume_hint=False)
         
 
     def test_agent_resume_enters_interactive_loop(self) -> None:
@@ -284,6 +330,7 @@ class MainChatEntryTests(unittest.TestCase):
             [('第一轮续跑', 'resume-loop-001'), ('第二轮续跑', 'resume-loop-001')],
         )
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='resume-loop-001', show_resume_hint=True)
         self.assertIn('resumed:第一轮续跑', stdout.getvalue())
         self.assertIn('resumed:第二轮续跑', stdout.getvalue())
 
@@ -307,6 +354,7 @@ class MainChatEntryTests(unittest.TestCase):
         self.assertEqual(len(_ChatFakeAgent.resume_calls), 1)
         self.assertEqual(_ChatFakeAgent.resume_calls[0][0], '有效输入')
         _assert_banner_rendered(self, stdout.getvalue())
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='resume-empty-001', show_resume_hint=True)
 
 
 if __name__ == '__main__':
