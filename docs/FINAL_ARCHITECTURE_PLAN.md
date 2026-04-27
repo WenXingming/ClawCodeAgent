@@ -1113,6 +1113,14 @@
 
 交付物：query_engine 增强实现与测试。
 
+实施落地决策（2026-04-27）：
+
+- 新增 `src/orchestration/query_engine.py`，把 QueryEngine 明确定位为**LocalAgent 之上的轻量 facade**，不直接改 CLI 或再引入旧兼容端口；当前版本只实现 runtime agent 模式。
+- `submit()` 与 `stream_submit()` 共用同一条 `_submit_runtime_message()` 路径：首轮走 `run()`，后续轮次按最近一次 `session_id` 自动 `load + resume()`，保证两种入口在会话连续性上行为一致。
+- `TurnResult.usage` 定义为**相对上一轮累计值的增量 usage**，同时保留 `usage_total` 字段给上层做累计展示，避免 facade 使用方重复推导差分。
+- 运行统计分两路采集：`events` 负责 runtime event / group status / child stop_reason / resumed child 计数；`transcript` 中 tool metadata 负责 mutation 与 lineage 统计，其中 mutation 当前按 `write_file` / `edit_file` 动作累计。
+- `persist_session()` 不重复落盘，而是直接返回最近一次 `LocalAgent` 已保存的 `session_path`；这样 QueryEngine 不会和 session store 写入职责发生重叠。
+
 #### ISSUE-026 测试矩阵与发布门禁收口
 
 类型：quality

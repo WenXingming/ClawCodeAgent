@@ -554,7 +554,44 @@ print(tool_result.content)
 
 说明：当前版本把 MCP 运行时平铺在 `src/tools/mcp_*` 模块下，不做远端 MCP 网关和长连接复用。`stdio` transport 仍按单次请求拉起 child process，HTTP/SSE transport 也按一次请求完成 `initialize` 和目标方法调用。失败会抛出带 `server_name`、`method`、`stderr` 和 `exit_code` 的 `MCPTransportError`，便于上层追踪。
 
-## 17. 预算控制（BudgetConfig）
+## 17. QueryEngine 门面与运行统计（ISSUE-025）
+
+当前版本支持通过 `orchestration.query_engine.QueryEngine` 为上层交互提供统一的：
+
+- `submit`：同步提交一轮输入
+- `stream_submit`：流式输出 runtime events + runtime summary + message_stop
+- `persist_session`：返回最近一次已经落盘的 session 文件路径
+- `render_summary`：输出累计事件、mutation、orchestration 与 lineage 统计摘要
+
+当前设计约束：
+
+- 只实现 runtime agent 模式，不引入旧兼容端口。
+- `submit` 与 `stream_submit` 共用同一条 run/resume 路径，首轮 `run`，后续自动 `load + resume`。
+- `TurnResult.usage` 是相对上一轮的增量 usage，`usage_total` 是当前会话累计 usage。
+
+代码示例：
+
+```python
+from orchestration.query_engine import QueryEngine
+
+engine = QueryEngine.from_runtime_agent(agent)
+first = engine.submit('先读取 README')
+second = engine.submit('基于上一轮继续总结')
+
+print(first.stop_reason)
+print(second.session_id)
+print(engine.persist_session())
+print(engine.render_summary())
+```
+
+统计口径：
+
+- runtime event counters：来自 `AgentRunResult.events`
+- runtime orchestration：来自 `delegate_group_complete` / `delegate_child_complete` / `delegate_child_skipped`
+- mutation：来自 transcript 中工具 metadata 的 `action` 字段，当前累计 `write_file` / `edit_file`
+- lineage：来自 delegate tool metadata 中的 `lineage`
+
+## 18. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -590,13 +627,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 18. CLI 迁移说明
+## 19. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 19. 说明
+## 20. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：

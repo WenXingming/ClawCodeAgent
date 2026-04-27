@@ -1,0 +1,215 @@
+"""ISSUE-025 QueryEngine 单元测试。"""
+
+from __future__ import annotations
+
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+from uuid import uuid4
+
+from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
+from core_contracts.protocol import OneTurnResponse, ToolCall
+from core_contracts.token_usage import TokenUsage
+from openai_client.openai_client import OpenAIClient
+from orchestration.local_agent import LocalAgent
+from orchestration.query_engine import QueryEngine
+from session.session_store import AgentSessionStore
+
+
+class _FakeOpenAIClient(OpenAIClient):
+    def __init__(self, responses: list[OneTurnResponse | Exception]) -> None:
+        super().__init__(
+            ModelConfig(
+                model='fake-model',
+                base_url='http://127.0.0.1:1/v1',
+                api_key='fake-key',
+                temperature=0.0,
+            )
+        )
+        self._responses = list(responses)
+        self.calls: list[list[dict]] = []
+
+    def complete(self, messages, tools=None, *, output_schema=None):  # type: ignore[override]
+        self.calls.append([dict(item) for item in messages])
+        if not self._responses:
+            raise AssertionError('No prepared response left for test')
+        current = self._responses.pop(0)
+        if isinstance(current, Exception):
+            raise current
+        return current
+
+
+class QueryEngineTests(unittest.TestCase):
+    def _make_test_dir(self) -> Path:
+        workspace = Path(tempfile.mkdtemp(prefix=f'claw-query-engine-{uuid4().hex}-'))
+        self.addCleanup(shutil.rmtree, workspace, ignore_errors=True)
+        return workspace
+
+    def _build_runtime_config(self, workspace: Path, *, budget: BudgetConfig | None = None) -> AgentRuntimeConfig:
+        return AgentRuntimeConfig(
+            cwd=workspace,
+            max_turns=6,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(
+                allow_file_write=True,
+                allow_shell_commands=False,
+                allow_destructive_shell_commands=False,
+            ),
+            budget_config=budget or BudgetConfig(),
+        )
+
+    def _build_engine(self, workspace: Path, responses: list[OneTurnResponse | Exception], *, budget: BudgetConfig | None = None) -> tuple[QueryEngine, _FakeOpenAIClient]:
+        fake_client = _FakeOpenAIClient(responses)
+        agent = LocalAgent(fake_client, self._build_runtime_config(workspace, budget=budget), AgentSessionStore(workspace / 'sessions'))
+        return QueryEngine.from_runtime_agent(agent), fake_client
+
+    def test_submit_uses_run_then_resume_and_can_return_persisted_session_path(self) -> None:
+        workspace = self._make_test_dir()
+        engine, fake_client = self._build_engine(
+            workspace,
+            [
+                OneTurnResponse(
+                    content='第一轮回答',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=3, output_tokens=2),
+                ),
+                OneTurnResponse(
+                    content='第二轮回答',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=4, output_tokens=2),
+                ),
+            ],
+        )
+
+        first = engine.submit('问题一')
+        second = engine.submit('问题二')
+
+        self.assertEqual(len(fake_client.calls), 2)
+        self.assertEqual(first.session_id, second.session_id)
+        self.assertEqual(second.output, '第二轮回答')
+        self.assertEqual(second.usage.input_tokens, 4)
+        self.assertEqual(second.usage.output_tokens, 2)
+        self.assertEqual(engine.persist_session(), second.session_path)
+
+    def test_stream_submit_emits_runtime_summary_and_message_stop(self) -> None:
+        workspace = self._make_test_dir()
+        engine, _ = self._build_engine(
+            workspace,
+            [
+                OneTurnResponse(
+                    content='流式回答',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=1),
+                ),
+            ],
+        )
+
+        events = list(engine.stream_submit('流式问题'))
+
+        self.assertEqual(events[0]['type'], 'message_start')
+        self.assertTrue(any(item.get('type') == 'runtime_summary' for item in events))
+        self.assertEqual(events[-1]['type'], 'message_stop')
+        self.assertEqual(events[-1]['stop_reason'], 'stop')
+        self.assertEqual(events[-1]['usage']['input_tokens'], 2)
+
+    def test_query_engine_tracks_delegate_events_and_lineage_stats(self) -> None:
+        workspace = self._make_test_dir()
+        engine, _ = self._build_engine(
+            workspace,
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(
+                            id='delegate_1',
+                            name='delegate_agent',
+                            arguments={
+                                'label': 'demo-group',
+                                'tasks': [
+                                    {'task_id': 'task-a', 'prompt': '执行子任务 A'},
+                                    {
+                                        'task_id': 'task-b',
+                                        'prompt': '执行子任务 B',
+                                        'dependencies': ['task-a'],
+                                    },
+                                ],
+                            },
+                        ),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=4, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='子任务 A 完成',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='子任务 B 完成',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='父任务完成',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ],
+        )
+
+        turn = engine.submit('执行委托任务')
+        summary = engine.render_summary()
+
+        self.assertEqual(turn.stop_reason, 'stop')
+        self.assertEqual(engine.runtime_event_counts.get('delegate_group_start'), 1)
+        self.assertEqual(engine.runtime_event_counts.get('delegate_child_complete'), 2)
+        self.assertEqual(engine.runtime_group_status_counts.get('completed'), 1)
+        self.assertEqual(engine.runtime_child_stop_reason_counts.get('stop'), 2)
+        self.assertEqual(engine.runtime_lineage_stats.get('unique_groups'), 1)
+        self.assertEqual(engine.runtime_lineage_stats.get('unique_parent_agents'), 1)
+        self.assertEqual(engine.runtime_lineage_stats.get('unique_child_agents'), 2)
+        self.assertIn('delegate_child_complete=2', summary)
+        self.assertIn('unique_child_agents=2', summary)
+
+    def test_query_engine_tracks_file_mutation_counts_from_tool_results(self) -> None:
+        workspace = self._make_test_dir()
+        engine, _ = self._build_engine(
+            workspace,
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(
+                            id='write_1',
+                            name='write_file',
+                            arguments={'path': 'note.txt', 'content': 'hello'},
+                        ),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=3, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='写入完成',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ],
+        )
+
+        turn = engine.submit('写入 note.txt')
+
+        self.assertEqual(turn.stop_reason, 'stop')
+        self.assertTrue((workspace / 'note.txt').is_file())
+        self.assertEqual(engine.runtime_mutation_counts.get('write_file'), 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

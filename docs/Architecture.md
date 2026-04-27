@@ -18,6 +18,7 @@ src/
 |- orchestration/
 |  |- agent_manager.py
 |  |- budget_context_orchestrator.py
+|  |- query_engine.py
 |  '- local_agent.py
 |- planning/
 |  |- task_runtime.py
@@ -76,6 +77,7 @@ graph TB
         n_agent_manager(["🧬 orchestration/agent_manager.py"])
         n_agent(["⚙️ orchestration/local_agent.py"])
         n_budget_context_orchestrator(["🧠 orchestration/budget_context_orchestrator.py"])
+        n_query_engine(["🧾 orchestration/query_engine.py"])
         style Orchestration fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -143,9 +145,13 @@ graph TB
     main --> n_cli
 
     n_cli --> n_agent
+    n_cli --> n_query_engine
     n_cli --> n_session_store
 
     n_agent --> n_agent_manager
+    n_query_engine --> n_agent
+    n_query_engine --> n_session_store
+
     n_agent --> n_slash
     n_agent --> n_hook_policy
     n_agent --> n_plugin
@@ -186,6 +192,7 @@ graph TB
     n_cli -.-> n_core_contracts
     n_slash -.-> n_core_contracts
     n_agent_manager -.-> n_core_contracts
+    n_query_engine -.-> n_core_contracts
     n_agent -.-> n_core_contracts
     n_hook_policy -.-> n_core_contracts
     n_plugin -.-> n_core_contracts
@@ -206,6 +213,7 @@ graph TB
     style n_cli fill:#6610f2,color:#fff,stroke:#520dc2
     style n_slash fill:#8a5cf6,color:#fff,stroke:#6f42c1
     style n_agent_manager fill:#0b7285,color:#fff,stroke:#095c69
+    style n_query_engine fill:#495057,color:#fff,stroke:#343a40
     style n_agent fill:#007bff,color:#fff,stroke:#0056b3
     style n_budget_context_orchestrator fill:#228be6,color:#fff,stroke:#1864ab
     style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
@@ -234,6 +242,7 @@ graph TB
 ## 当前边界
 
 - `orchestration/agent_manager.py` (`AgentManager`) 负责 delegate_agent 子代理的 lineage、group、dependency batch 与 stop_reason 汇总，是 orchestration 层的子任务编排状态容器。
+- `orchestration/query_engine.py` (`QueryEngine`) 负责把 `LocalAgent` 封装成统一的 submit / stream_submit / persist 门面，并累计 runtime events、mutation、orchestration 与 lineage 统计。
 - `orchestration/local_agent.py` (`LocalAgent`) 负责主循环编排职责：模型调用、工具回填、预算闸门、会话保存，通过 `BudgetContextOrchestrator` 调用上下文治理，并在 tool pipeline 中接入 delegate_agent 子代理执行。
 - `orchestration/budget_context_orchestrator.py` (`BudgetContextOrchestrator`) 统一编排 pre-model 阶段的 snip/compact/预算预检及 reactive compact 重试。
 - `budget/` 负责 token 预算的对象模型和闸门逻辑：`TokenBudgetSnapshot`、统一估算器、预算投影器和运行时预算检查都集中在这里。
