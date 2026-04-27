@@ -1159,6 +1159,13 @@
 2. 发布门禁清单。
 3. 演示脚本。
 
+实施落地决策（2026-04-27）：
+
+- ISSUE-026 不再新增一套平行测试框架，而是把当前已经存在的 `unittest` 入口、CLI smoke 与文档校验**收口成统一 release gate**；自动化入口固定为 `scripts/run_release_gate.ps1`。
+- 自动化脚本只覆盖**环境无关**的检查：full tests、orchestration regression、CLI `--help` smoke、release docs validation；需要真实模型后端的交互式演示保留在 `docs/DEMO_SCRIPT.md` 中手工执行。
+- 发布门禁文档拆分为三个职责清晰的文件：`docs/TEST_MATRIX.md` 负责覆盖面矩阵，`docs/RELEASE_GATE_CHECKLIST.md` 负责发布流程与结果模板，`docs/DEMO_SCRIPT.md` 负责人工演示脚本。
+- 新增 `test/test_release_gate_docs.py` 作为文档校验自动化，确保测试矩阵、清单、演示脚本和 release gate 脚本存在且关键命令不漂移。
+
 ## 13. Issue 使用规则（执行建议）
 
 1. 一次只推进一个 ISSUE 到完成态，避免并行修改主循环核心逻辑。
