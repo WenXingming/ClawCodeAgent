@@ -20,8 +20,8 @@ from pathlib import Path
 from interface.exit_banner import SessionExitSummaryRenderer, SessionInteractionTracker
 from interface.startup_banner import StartupBannerRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
-from core_contracts.result import AgentRunResult
-from core_contracts.usage import ModelPricing
+from core_contracts.model_pricing import ModelPricing
+from core_contracts.run_result import AgentRunResult
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
@@ -666,6 +666,7 @@ class CLI:
                 result,
                 current_session_id=current_session_id,
             )
+            print()  # turn separator, 每轮结束后输出一个空行分隔
 
     def _execute_chat_turn(
         self,

@@ -7,7 +7,7 @@ import unittest
 from context.context_compactor import ContextCompactor
 from core_contracts.config import ModelConfig
 from core_contracts.protocol import OneTurnResponse
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 
 

@@ -21,7 +21,7 @@ from urllib import error, request
 
 from core_contracts.config import ModelConfig, OutputSchemaConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, StreamEvent, ToolCall
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 
 
 # ---------------------------------------------------------------------------

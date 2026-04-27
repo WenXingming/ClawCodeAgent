@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 from session.session_snapshot import AgentSessionSnapshot
 
 

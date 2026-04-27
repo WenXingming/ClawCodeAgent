@@ -26,8 +26,8 @@ from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
-from core_contracts.result import AgentRunResult
-from core_contracts.usage import TokenUsage
+from core_contracts.run_result import AgentRunResult
+from core_contracts.token_usage import TokenUsage
 from extensions.search_runtime import SearchQueryError, SearchRuntime
 from openai_client.openai_client import OpenAIClient
 from extensions.hook_policy_runtime import HookPolicyRuntime
@@ -35,7 +35,7 @@ from extensions.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
-from tools.local_tools import LocalTool, ToolExecutionError, build_tool_context, default_tool_registry, execute_tool
+from tools.local_tools import LocalTool, LocalToolService, ToolExecutionError
 from tools.mcp_models import MCPTransportError
 from tools.mcp_runtime import MCPRuntime
 from tools.mcp_tool_adapter import MCPToolAdapter
@@ -48,7 +48,8 @@ class LocalAgent:
     client: OpenAIClient  # 模型客户端。
     runtime_config: AgentRuntimeConfig  # 运行配置。
     session_store: AgentSessionStore  # 会话持久化依赖。
-    tool_registry: dict[str, LocalTool] = field(default_factory=default_tool_registry)  # 可用工具集合。
+    tool_service: LocalToolService = field(default_factory=LocalToolService)
+    tool_registry: dict[str, LocalTool] = field(init=False)  # 可用工具集合。
     budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
@@ -136,6 +137,7 @@ class LocalAgent:
         Raises:
             Exception: 按调用链透传的异常。
         """
+        self.tool_registry = self.tool_service.default_registry()
         self.search_runtime = SearchRuntime.from_workspace(self.runtime_config.cwd)
         self.mcp_runtime = MCPRuntime.from_workspace(self.runtime_config.cwd)
         self.mcp_tool_adapter = MCPToolAdapter(self.mcp_runtime)
@@ -693,7 +695,7 @@ class LocalAgent:
             pricing=self.client.model_config.pricing,
             cost_baseline=cost_baseline,
         )
-        tool_context = build_tool_context(
+        tool_context = self.tool_service.build_context(
             self.runtime_config,
             tool_registry=self.tool_registry,
             safe_env=self.hook_policy_runtime.safe_env,
@@ -830,7 +832,7 @@ class LocalAgent:
                         }
                     )
                 else:
-                    tool_result = execute_tool(
+                    tool_result = self.tool_service.execute(
                         self.tool_registry,
                         tool_call.name,
                         tool_call.arguments,

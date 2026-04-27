@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator
 
-from .bash_security import check_shell_security
+from .bash_security import ShellSecurityPolicy
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, ToolExecutionResult
 
@@ -142,195 +142,230 @@ class _TextSlice:
     end_line: int | None = None  # int | None: 结束行号，含边界。
 
 
-def build_tool_context(
-    config: AgentRuntimeConfig,
-    *,
-    tool_registry: dict[str, LocalTool] | None = None,
-    safe_env: dict[str, str] | None = None,
-) -> ToolExecutionContext:
-    """根据运行时配置构造工具执行上下文。
+@dataclass(frozen=True)
+class LocalToolService:
+    """封装本地工具注册、上下文构造与执行流程。"""
 
-    Args:
-        config (AgentRuntimeConfig): 当前 agent 运行时配置。
-        tool_registry (dict[str, LocalTool] | None): 可选工具注册表。
-        safe_env (dict[str, str] | None): 可选安全环境变量覆盖。
-    Returns:
-        ToolExecutionContext: 标准化后的工具执行上下文。
-    """
-    return ToolExecutionContext(
-        root=config.cwd.resolve(),
-        command_timeout_seconds=config.command_timeout_seconds,
-        max_output_chars=config.max_output_chars,
-        permissions=config.permissions,
-        safe_env=dict(safe_env or {}),
-        tool_registry=tool_registry,
+    shell_security_policy: ShellSecurityPolicy = field(default_factory=ShellSecurityPolicy)
+
+    def build_context(
+        self,
+        config: AgentRuntimeConfig,
+        *,
+        tool_registry: dict[str, LocalTool] | None = None,
+        safe_env: dict[str, str] | None = None,
+    ) -> ToolExecutionContext:
+        """根据运行时配置构造工具执行上下文。"""
+        return ToolExecutionContext(
+            root=config.cwd.resolve(),
+            command_timeout_seconds=config.command_timeout_seconds,
+            max_output_chars=config.max_output_chars,
+            permissions=config.permissions,
+            safe_env=dict(safe_env or {}),
+            tool_registry=tool_registry,
+        )
+
+    def execute(
+        self,
+        tool_registry: dict[str, LocalTool],
+        name: str,
+        arguments: JSONDict,
+        context: ToolExecutionContext,
+    ) -> ToolExecutionResult:
+        """按工具名执行一次普通工具调用。"""
+        tool = tool_registry.get(name)
+        if tool is None:
+            return _unknown_tool_result(name)
+        return tool.execute(arguments, context)
+
+    def execute_streaming(
+        self,
+        tool_registry: dict[str, LocalTool],
+        name: str,
+        arguments: JSONDict,
+        context: ToolExecutionContext,
+    ) -> Iterator[ToolStreamUpdate]:
+        """按工具名执行一次流式工具调用。"""
+        tool = tool_registry.get(name)
+        if tool is None:
+            yield ToolStreamUpdate(kind='result', result=_unknown_tool_result(name))
+            return
+
+        if name != 'bash':
+            yield ToolStreamUpdate(kind='result', result=tool.execute(arguments, context))
+            return
+
+        try:
+            yield from self._run_bash_stream(arguments, context)
+        except ToolPermissionError as exc:
+            yield ToolStreamUpdate(
+                kind='result',
+                result=ToolExecutionResult(
+                    name='bash',
+                    ok=False,
+                    content=str(exc),
+                    metadata={'error_kind': 'permission_denied'},
+                ),
+            )
+        except (ToolExecutionError, OSError, UnicodeError) as exc:
+            yield ToolStreamUpdate(
+                kind='result',
+                result=ToolExecutionResult(
+                    name='bash',
+                    ok=False,
+                    content=str(exc),
+                    metadata={'error_kind': 'tool_execution_error'},
+                ),
+            )
+
+    def default_registry(self) -> dict[str, LocalTool]:
+        """返回内置基础工具注册表。"""
+        tools = [
+            LocalTool(
+                name='list_dir',
+                description='列出工作区目录下的文件和子目录。',
+                parameters={
+                    'type': 'object',
+                    'properties': {
+                        'path': {'type': 'string'},
+                        'max_entries': {'type': 'integer', 'minimum': 1, 'maximum': 500},
+                    },
+                },
+                handler=_list_dir,
+            ),
+            LocalTool(
+                name='read_file',
+                description='读取工作区内文本文件，可选按行区间截取。',
+                parameters={
+                    'type': 'object',
+                    'properties': {
+                        'path': {'type': 'string'},
+                        'start_line': {'type': 'integer', 'minimum': 1},
+                        'end_line': {'type': 'integer', 'minimum': 1},
+                    },
+                    'required': ['path'],
+                },
+                handler=_read_file,
+            ),
+            LocalTool(
+                name='write_file',
+                description='写入工作区文件，不存在时会自动创建父目录。',
+                parameters={
+                    'type': 'object',
+                    'properties': {
+                        'path': {'type': 'string'},
+                        'content': {'type': 'string'},
+                    },
+                    'required': ['path', 'content'],
+                },
+                handler=_write_file,
+            ),
+            LocalTool(
+                name='edit_file',
+                description='在工作区文件内替换精确文本，默认只替换首个匹配。',
+                parameters={
+                    'type': 'object',
+                    'properties': {
+                        'path': {'type': 'string'},
+                        'old_text': {'type': 'string'},
+                        'new_text': {'type': 'string'},
+                        'replace_all': {'type': 'boolean'},
+                    },
+                    'required': ['path', 'old_text', 'new_text'],
+                },
+                handler=_edit_file,
+            ),
+            LocalTool(
+                name='bash',
+                description='在当前工作区执行 shell 命令（受权限和安全策略约束）。',
+                parameters={
+                    'type': 'object',
+                    'properties': {
+                        'command': {'type': 'string'},
+                    },
+                    'required': ['command'],
+                },
+                handler=self._run_bash,
+            ),
+        ]
+        return {tool.name: tool for tool in tools}
+
+    def _run_bash(self, arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
+        """执行 shell 命令并返回结构化文本结果。"""
+        command = _require_string(arguments, 'command')
+        self._ensure_shell_allowed(command, context)
+
+        stdout, stderr, exit_code = _execute_shell_command(command, context)
+        rendered = _render_shell_output(stdout, stderr, exit_code)
+        output = _truncate_output(rendered, context.max_output_chars)
+
+        return (
+            output,
+            {
+                'action': 'bash',
+                'command': command,
+                'exit_code': exit_code,
+                'stdout_chars': len(stdout),
+                'stderr_chars': len(stderr),
+                'truncated_by_output_limit': len(rendered) > len(output),
+            },
+        )
+
+    def _run_bash_stream(
+        self,
+        arguments: JSONDict,
+        context: ToolExecutionContext,
+    ) -> Iterator[ToolStreamUpdate]:
+        """执行 shell 命令并按 stdout/stderr 分块输出流式事件。"""
+        command = _require_string(arguments, 'command')
+        self._ensure_shell_allowed(command, context)
+
+        stdout, stderr, exit_code = _execute_shell_command(command, context)
+
+        for chunk in _iter_output_chunks(stdout):
+            yield ToolStreamUpdate(kind='stdout', chunk=chunk)
+        for chunk in _iter_output_chunks(stderr):
+            yield ToolStreamUpdate(kind='stderr', chunk=chunk)
+
+        rendered = _render_shell_output(stdout, stderr, exit_code)
+        output = _truncate_output(rendered, context.max_output_chars)
+        yield ToolStreamUpdate(
+            kind='result',
+            result=ToolExecutionResult(
+                name='bash',
+                ok=True,
+                content=output,
+                metadata={
+                    'action': 'bash',
+                    'command': command,
+                    'exit_code': exit_code,
+                    'stdout_chars': len(stdout),
+                    'stderr_chars': len(stderr),
+                    'truncated_by_output_limit': len(rendered) > len(output),
+                },
+            ),
+        )
+
+    def _ensure_shell_allowed(self, command: str, context: ToolExecutionContext) -> None:
+        """检查 shell 权限和命令安全策略。"""
+        allowed, reason = self.shell_security_policy.check_shell_security(
+            command,
+            allow_shell=context.permissions.allow_shell_commands,
+            allow_destructive=context.permissions.allow_destructive_shell_commands,
+        )
+        if allowed:
+            return
+        raise ToolPermissionError(f'Shell command blocked: {reason}')
+
+
+def _unknown_tool_result(name: str) -> ToolExecutionResult:
+    """为未知工具返回统一的结构化错误结果。"""
+    return ToolExecutionResult(
+        name=name,
+        ok=False,
+        content=f'Unknown tool: {name}',
+        metadata={'error_kind': 'unknown_tool'},
     )
-
-
-def execute_tool(
-    tool_registry: dict[str, LocalTool],
-    name: str,
-    arguments: JSONDict,
-    context: ToolExecutionContext,
-) -> ToolExecutionResult:
-    """按工具名执行一次普通工具调用。
-
-    Args:
-        tool_registry (dict[str, LocalTool]): 当前可用工具注册表。
-        name (str): 目标工具名称。
-        arguments (JSONDict): 工具调用参数。
-        context (ToolExecutionContext): 当前调用上下文。
-    Returns:
-        ToolExecutionResult: 统一封装后的执行结果。
-    """
-    tool = tool_registry.get(name)
-    if tool is None:
-        return ToolExecutionResult(
-            name=name,
-            ok=False,
-            content=f'Unknown tool: {name}',
-            metadata={'error_kind': 'unknown_tool'},
-        )
-    return tool.execute(arguments, context)
-
-
-def execute_tool_streaming(
-    tool_registry: dict[str, LocalTool],
-    name: str,
-    arguments: JSONDict,
-    context: ToolExecutionContext,
-) -> Iterator[ToolStreamUpdate]:
-    """按工具名执行一次流式工具调用。
-
-    当前仅 bash 工具会真正输出增量 stdout/stderr 事件，其余工具直接返回单个
-    result 事件。
-
-    Args:
-        tool_registry (dict[str, LocalTool]): 当前可用工具注册表。
-        name (str): 目标工具名称。
-        arguments (JSONDict): 工具调用参数。
-        context (ToolExecutionContext): 当前调用上下文。
-    Returns:
-        Iterator[ToolStreamUpdate]: 流式更新事件序列。
-    """
-    tool = tool_registry.get(name)
-    if tool is None:
-        yield ToolStreamUpdate(
-            kind='result',
-            result=ToolExecutionResult(
-                name=name,
-                ok=False,
-                content=f'Unknown tool: {name}',
-                metadata={'error_kind': 'unknown_tool'},
-            ),
-        )
-        return
-
-    if name != 'bash':
-        yield ToolStreamUpdate(kind='result', result=tool.execute(arguments, context))
-        return
-
-    try:
-        yield from _run_bash_stream(arguments, context)
-    except ToolPermissionError as exc:
-        yield ToolStreamUpdate(
-            kind='result',
-            result=ToolExecutionResult(
-                name='bash',
-                ok=False,
-                content=str(exc),
-                metadata={'error_kind': 'permission_denied'},
-            ),
-        )
-    except (ToolExecutionError, OSError, UnicodeError) as exc:
-        yield ToolStreamUpdate(
-            kind='result',
-            result=ToolExecutionResult(
-                name='bash',
-                ok=False,
-                content=str(exc),
-                metadata={'error_kind': 'tool_execution_error'},
-            ),
-        )
-
-
-def default_tool_registry() -> dict[str, LocalTool]:
-    """返回内置基础工具注册表。
-
-    Args:
-        None: 无参数。
-    Returns:
-        dict[str, LocalTool]: 以工具名索引的内置工具映射。
-    """
-    tools = [
-        LocalTool(
-            name='list_dir',
-            description='列出工作区目录下的文件和子目录。',
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'path': {'type': 'string'},
-                    'max_entries': {'type': 'integer', 'minimum': 1, 'maximum': 500},
-                },
-            },
-            handler=_list_dir,
-        ),
-        LocalTool(
-            name='read_file',
-            description='读取工作区内文本文件，可选按行区间截取。',
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'path': {'type': 'string'},
-                    'start_line': {'type': 'integer', 'minimum': 1},
-                    'end_line': {'type': 'integer', 'minimum': 1},
-                },
-                'required': ['path'],
-            },
-            handler=_read_file,
-        ),
-        LocalTool(
-            name='write_file',
-            description='写入工作区文件，不存在时会自动创建父目录。',
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'path': {'type': 'string'},
-                    'content': {'type': 'string'},
-                },
-                'required': ['path', 'content'],
-            },
-            handler=_write_file,
-        ),
-        LocalTool(
-            name='edit_file',
-            description='在工作区文件内替换精确文本，默认只替换首个匹配。',
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'path': {'type': 'string'},
-                    'old_text': {'type': 'string'},
-                    'new_text': {'type': 'string'},
-                    'replace_all': {'type': 'boolean'},
-                },
-                'required': ['path', 'old_text', 'new_text'],
-            },
-            handler=_edit_file,
-        ),
-        LocalTool(
-            name='bash',
-            description='在当前工作区执行 shell 命令（受权限和安全策略约束）。',
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'command': {'type': 'string'},
-                },
-                'required': ['command'],
-            },
-            handler=_run_bash,
-        ),
-    ]
-    return {tool.name: tool for tool in tools}
 
 
 def _list_dir(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
@@ -596,104 +631,6 @@ def _parse_edit_request(arguments: JSONDict) -> _FileEditRequest:
         new_text=_require_string(arguments, 'new_text'),
         replace_all=_get_bool(arguments, 'replace_all', default=False),
     )
-
-
-def _run_bash(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
-    """执行 shell 命令并返回结构化文本结果。
-
-    Args:
-        arguments (JSONDict): 工具调用参数。
-        context (ToolExecutionContext): 当前调用上下文。
-    Returns:
-        str | tuple[str, JSONDict]: 文本结果，或带附加元数据的结果元组。
-    Raises:
-        ToolPermissionError: 当 shell 权限或安全策略拒绝执行时抛出。
-        ToolExecutionError: 当参数非法或命令执行失败时抛出。
-    """
-    command = _require_string(arguments, 'command')
-    _ensure_shell_allowed(command, context)
-
-    stdout, stderr, exit_code = _execute_shell_command(command, context)
-    rendered = _render_shell_output(stdout, stderr, exit_code)
-    output = _truncate_output(rendered, context.max_output_chars)
-
-    return (
-        output,
-        {
-            'action': 'bash',
-            'command': command,
-            'exit_code': exit_code,
-            'stdout_chars': len(stdout),
-            'stderr_chars': len(stderr),
-            'truncated_by_output_limit': len(rendered) > len(output),
-        },
-    )
-
-
-def _run_bash_stream(
-    arguments: JSONDict,
-    context: ToolExecutionContext,
-) -> Iterator[ToolStreamUpdate]:
-    """执行 shell 命令并按 stdout/stderr 分块输出流式事件。
-
-    Args:
-        arguments (JSONDict): 工具调用参数。
-        context (ToolExecutionContext): 当前调用上下文。
-    Returns:
-        Iterator[ToolStreamUpdate]: 依次产出的 stdout、stderr 和最终 result 事件。
-    Raises:
-        ToolPermissionError: 当 shell 权限或安全策略拒绝执行时抛出。
-        ToolExecutionError: 当参数非法或命令执行失败时抛出。
-    """
-    command = _require_string(arguments, 'command')
-    _ensure_shell_allowed(command, context)
-
-    stdout, stderr, exit_code = _execute_shell_command(command, context)
-
-    for chunk in _iter_output_chunks(stdout):
-        yield ToolStreamUpdate(kind='stdout', chunk=chunk)
-    for chunk in _iter_output_chunks(stderr):
-        yield ToolStreamUpdate(kind='stderr', chunk=chunk)
-
-    rendered = _render_shell_output(stdout, stderr, exit_code)
-    output = _truncate_output(rendered, context.max_output_chars)
-    yield ToolStreamUpdate(
-        kind='result',
-        result=ToolExecutionResult(
-            name='bash',
-            ok=True,
-            content=output,
-            metadata={
-                'action': 'bash',
-                'command': command,
-                'exit_code': exit_code,
-                'stdout_chars': len(stdout),
-                'stderr_chars': len(stderr),
-                'truncated_by_output_limit': len(rendered) > len(output),
-            },
-        ),
-    )
-
-
-def _ensure_shell_allowed(command: str, context: ToolExecutionContext) -> None:
-    """检查 shell 权限和命令安全策略。
-
-    Args:
-        command (str): 待执行的 shell 命令。
-        context (ToolExecutionContext): 当前调用上下文。
-    Returns:
-        None: 无返回值。
-    Raises:
-        ToolPermissionError: 当 shell 被禁用或命令命中安全策略时抛出。
-    """
-    allowed, reason = check_shell_security(
-        command,
-        allow_shell=context.permissions.allow_shell_commands,
-        allow_destructive=context.permissions.allow_destructive_shell_commands,
-    )
-    if allowed:
-        return
-    raise ToolPermissionError(f'Shell command blocked: {reason}')
 
 
 def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple[str, str, int]:

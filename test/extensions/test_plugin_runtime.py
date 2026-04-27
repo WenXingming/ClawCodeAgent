@@ -9,11 +9,14 @@ from pathlib import Path
 
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig
 from extensions.plugin_runtime import PluginRuntime
-from tools.local_tools import build_tool_context, default_tool_registry, execute_tool
+from tools.local_tools import LocalToolService
 
 
 class PluginRuntimeTests(unittest.TestCase):
     """验证 manifest 发现、alias/virtual 注册与冲突处理。"""
+
+    def setUp(self) -> None:
+        self.tool_service = LocalToolService()
 
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
         manifest_dir = workspace / '.claw' / 'plugins'
@@ -32,7 +35,7 @@ class PluginRuntimeTests(unittest.TestCase):
                 allow_destructive_shell_commands=False,
             ),
         )
-        return build_tool_context(config, tool_registry=registry)
+        return self.tool_service.build_context(config, tool_registry=registry)
 
     def test_from_workspace_registers_alias_and_virtual_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -62,13 +65,13 @@ class PluginRuntimeTests(unittest.TestCase):
                 },
             )
 
-            base_registry = default_tool_registry()
+            base_registry = self.tool_service.default_registry()
             plugin_runtime = PluginRuntime.from_workspace(workspace, base_registry)
             merged_registry = plugin_runtime.merge_tool_registry(base_registry)
             context = self._build_context(workspace, merged_registry)
 
-            alias_result = execute_tool(merged_registry, 'read_readme', {}, context)
-            virtual_result = execute_tool(merged_registry, 'workspace_banner', {}, context)
+            alias_result = self.tool_service.execute(merged_registry, 'read_readme', {}, context)
+            virtual_result = self.tool_service.execute(merged_registry, 'workspace_banner', {}, context)
 
         self.assertIn('read_readme', merged_registry)
         self.assertIn('workspace_banner', merged_registry)
@@ -107,7 +110,7 @@ class PluginRuntimeTests(unittest.TestCase):
                 },
             )
 
-            base_registry = default_tool_registry()
+            base_registry = self.tool_service.default_registry()
             plugin_runtime = PluginRuntime.from_workspace(workspace, base_registry)
             merged_registry = plugin_runtime.merge_tool_registry(base_registry)
 
@@ -136,7 +139,7 @@ class PluginRuntimeTests(unittest.TestCase):
                 },
             )
 
-            plugin_runtime = PluginRuntime.from_workspace(workspace, default_tool_registry())
+            plugin_runtime = PluginRuntime.from_workspace(workspace, self.tool_service.default_registry())
 
         self.assertEqual(plugin_runtime.get_before_hooks('bash_exec')[0]['content'], 'plugin before')
         self.assertEqual(plugin_runtime.get_after_hooks('bash_exec')[0]['content'], 'plugin after')

@@ -15,7 +15,7 @@ from unittest.mock import patch
 from urllib import error
 
 from core_contracts.config import ModelConfig, OutputSchemaConfig
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import (
     OpenAIClient,
     OpenAIConnectionError,

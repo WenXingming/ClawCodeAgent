@@ -21,7 +21,7 @@ from ._coerce import (
     _path_or_default,
 )
 from .protocol import JSONDict
-from .usage import ModelPricing
+from .model_pricing import ModelPricing
 
 
 @dataclass(frozen=True)

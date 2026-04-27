@@ -8,11 +8,14 @@ import unittest
 from pathlib import Path
 
 from extensions.hook_policy_runtime import HookPolicyRuntime
-from tools.local_tools import LocalTool, default_tool_registry
+from tools.local_tools import LocalTool, LocalToolService
 
 
 class HookPolicyRuntimeTests(unittest.TestCase):
     """验证 policy manifest 发现、合并与工具过滤。"""
+
+    def setUp(self) -> None:
+        self.tool_service = LocalToolService()
 
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
         manifest_dir = workspace / '.claw' / 'policies'
@@ -75,7 +78,7 @@ class HookPolicyRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.skipped_manifests[0].name, 'untrusted-policy')
 
     def test_filter_tool_registry_applies_deny_tools_and_prefixes(self) -> None:
-        registry = default_tool_registry()
+        registry = self.tool_service.default_registry()
         registry['workspace_banner'] = LocalTool(
             name='workspace_banner',
             description='plugin virtual tool',

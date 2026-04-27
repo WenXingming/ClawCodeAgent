@@ -13,7 +13,7 @@ from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.protocol import OneTurnResponse, ToolCall
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient
 from session.session_state import AgentSessionState
 

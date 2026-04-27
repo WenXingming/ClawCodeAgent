@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 from context.context_token_estimator import ContextTokenEstimator
 from core_contracts.protocol import JSONDict
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError, OpenAIResponseError
 
 # 标记“更早历史已被压缩”的 reminder 正文前缀。

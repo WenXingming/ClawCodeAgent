@@ -11,7 +11,7 @@ from context.context_compactor import CompactionResult, ContextCompactor
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
 
 

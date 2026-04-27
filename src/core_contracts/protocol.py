@@ -16,7 +16,7 @@ from ._coerce import (
     _as_str,
     _first_present,
 )
-from .usage import TokenUsage
+from .token_usage import TokenUsage
 
 
 @dataclass(frozen=True)

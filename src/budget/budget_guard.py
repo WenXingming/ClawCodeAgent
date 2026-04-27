@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 from context.context_budget_evaluator import ContextBudgetSnapshot
 from core_contracts.config import BudgetConfig
-from core_contracts.usage import ModelPricing, TokenUsage
+from core_contracts.model_pricing import ModelPricing
+from core_contracts.token_usage import TokenUsage
 
 
 @dataclass

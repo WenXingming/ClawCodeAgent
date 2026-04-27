@@ -10,8 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
-from core_contracts.result import AgentRunResult
-from core_contracts.usage import TokenUsage
+from core_contracts.run_result import AgentRunResult
+from core_contracts.token_usage import TokenUsage
 from main import main
 from session.session_snapshot import AgentSessionSnapshot
 

@@ -10,13 +10,12 @@ from uuid import uuid4
 
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.protocol import OneTurnResponse, ToolCall
-from core_contracts.usage import TokenUsage
+from core_contracts.token_usage import TokenUsage
 from extensions.search_runtime import SearchResult, SearchResponse, SearchProviderProfile
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
-from tools.local_tools import build_tool_context, execute_tool
 from tools.mcp_models import MCPTool, MCPToolCallResult
 
 
@@ -1223,8 +1222,8 @@ class LocalAgentTests(unittest.TestCase):
         agent.mcp_runtime.call_tool = mock.Mock()
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
 
-        context = build_tool_context(config, tool_registry=agent.tool_registry)
-        result = execute_tool(
+        context = agent.tool_service.build_context(config, tool_registry=agent.tool_registry)
+        result = agent.tool_service.execute(
             agent.tool_registry,
             'mcp_filesystem_write_file',
             {'path': 'demo.txt', 'content': 'hello'},
