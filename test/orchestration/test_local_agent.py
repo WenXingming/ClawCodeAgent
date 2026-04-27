@@ -11,11 +11,13 @@ from uuid import uuid4
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.usage import TokenUsage
+from extensions.mcp import MCPTool, MCPToolCallResult
 from extensions.search_runtime import SearchResult, SearchResponse, SearchProviderProfile
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
+from tools.agent_tools import build_tool_context, execute_tool
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -1086,8 +1088,8 @@ class LocalAgentTests(unittest.TestCase):
         self.assertEqual(result.final_output, '搜索完成')
         agent.search_runtime.search.assert_called_once()
 
-    def test_run_calls_mcp_tools_from_main_loop(self) -> None:
-        """验证 MCP 工具（list_resources, call_tool）在主循环被正确调用。"""
+    def test_run_calls_expanded_mcp_tools_from_main_loop(self) -> None:
+        """验证展开后的 MCP 顶层工具在主循环被正确调用。"""
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([
             OneTurnResponse(
@@ -1095,8 +1097,8 @@ class LocalAgentTests(unittest.TestCase):
                 tool_calls=(
                     ToolCall(
                         id='call-1',
-                        name='mcp_list_resources',
-                        arguments={'query': 'test'},
+                        name='tavily_search',
+                        arguments={'query': 'today tech news'},
                     ),
                 ),
                 finish_reason='tool_calls',
@@ -1110,23 +1112,41 @@ class LocalAgentTests(unittest.TestCase):
             ),
         ])
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
-        
-        # Mock MCP runtime 让它有资源以便工具被注册
-        agent.mcp_runtime.resources = [mock.Mock(uri='test://resource')]
-        agent.mcp_runtime.list_resources = mock.Mock(return_value=[])
-        
-        # 重新注册工具以应用模拟的资源
+
+        agent.mcp_runtime.servers = [mock.Mock(name='tavily')]
+        agent.mcp_runtime.list_tools = mock.Mock(return_value=(
+            MCPTool(
+                name='tavily_search',
+                server_name='tavily',
+                description='Search the web for current information.',
+                input_schema={
+                    'type': 'object',
+                    'properties': {'query': {'type': 'string'}},
+                    'required': ['query'],
+                },
+            ),
+        ))
+        agent.mcp_runtime.call_tool = mock.Mock(return_value=MCPToolCallResult(
+            server_name='tavily',
+            tool_name='tavily_search',
+            content='headline-1',
+            is_error=False,
+        ))
+
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
-        
-        result = agent.run('查询 MCP 资源')
-        
-        # 验证：MCP 工具被调用
+
+        result = agent.run('查询今天的科技新闻')
+
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.stop_reason, 'stop')
         self.assertEqual(result.final_output, 'MCP 查询完成')
-        # 验证工具至少被调用了一次
-        self.assertGreaterEqual(agent.mcp_runtime.list_resources.call_count, 1)
+        agent.mcp_runtime.call_tool.assert_called_once_with(
+            'tavily_search',
+            arguments={'query': 'today tech news'},
+            server_name='tavily',
+            max_chars=agent.runtime_config.max_output_chars,
+        )
 
     def test_workspace_search_and_mcp_tools_registered_when_configured(self) -> None:
         """验证当配置了 search providers 和 MCP 资源时，对应工具会被注册。"""
@@ -1141,6 +1161,21 @@ class LocalAgentTests(unittest.TestCase):
         
         mock_mcp_resource = mock.Mock()
         agent.mcp_runtime.resources = [mock_mcp_resource]
+        agent.mcp_runtime.servers = [mock.Mock(name='tavily'), mock.Mock(name='filesystem')]
+        agent.mcp_runtime.list_tools = mock.Mock(return_value=(
+            MCPTool(
+                name='tavily_search',
+                server_name='tavily',
+                description='Search the web for current information.',
+                input_schema={'type': 'object', 'properties': {'query': {'type': 'string'}}},
+            ),
+            MCPTool(
+                name='read_file',
+                server_name='filesystem',
+                description='Read file text.',
+                input_schema={'type': 'object', 'properties': {'path': {'type': 'string'}}},
+            ),
+        ))
         
         # 重新注册工具
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
@@ -1149,8 +1184,56 @@ class LocalAgentTests(unittest.TestCase):
         self.assertIn('workspace_search', agent.tool_registry)
         self.assertIn('mcp_list_resources', agent.tool_registry)
         self.assertIn('mcp_read_resource', agent.tool_registry)
-        self.assertIn('mcp_list_tools', agent.tool_registry)
-        self.assertIn('mcp_call_tool', agent.tool_registry)
+        self.assertIn('tavily_search', agent.tool_registry)
+        self.assertIn('mcp_filesystem_read_file', agent.tool_registry)
+        self.assertNotIn('mcp_list_tools', agent.tool_registry)
+        self.assertNotIn('mcp_call_tool', agent.tool_registry)
+
+    def test_expanded_filesystem_write_tool_requires_file_write_permission(self) -> None:
+        """验证展开后的 filesystem 写工具仍然受本地写权限控制。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([])
+        config = AgentRuntimeConfig(
+            cwd=workspace,
+            session_directory=workspace / 'sessions',
+            permissions=AgentPermissions(
+                allow_file_write=False,
+                allow_shell_commands=False,
+                allow_destructive_shell_commands=False,
+            ),
+        )
+        agent = self._build_agent(fake_client, config)
+
+        agent.mcp_runtime.servers = [mock.Mock(name='filesystem')]
+        agent.mcp_runtime.list_tools = mock.Mock(return_value=(
+            MCPTool(
+                name='write_file',
+                server_name='filesystem',
+                description='Create a new file or overwrite an existing file.',
+                input_schema={
+                    'type': 'object',
+                    'properties': {
+                        'path': {'type': 'string'},
+                        'content': {'type': 'string'},
+                    },
+                    'required': ['path', 'content'],
+                },
+            ),
+        ))
+        agent.mcp_runtime.call_tool = mock.Mock()
+        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+
+        context = build_tool_context(config, tool_registry=agent.tool_registry)
+        result = execute_tool(
+            agent.tool_registry,
+            'mcp_filesystem_write_file',
+            {'path': 'demo.txt', 'content': 'hello'},
+            context,
+        )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.metadata.get('error_kind'), 'permission_denied')
+        agent.mcp_runtime.call_tool.assert_not_called()
 
 
 if __name__ == '__main__':

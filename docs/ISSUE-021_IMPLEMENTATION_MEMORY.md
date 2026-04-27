@@ -4,7 +4,7 @@
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `src/extensions/mcp_runtime.py` | 新建 | 实现 MCP manifest 发现、本地资源读取和 stdio transport 资源/工具调用 |
+| `src/extensions/mcp/runtime.py` | 新建 | 实现 MCP manifest 发现、本地资源读取和 stdio transport 资源/工具调用 |
 | `test/extensions/test_mcp_runtime.py` | 新建 | 覆盖资源读取、工具调用、无效 server 错误追踪 |
 | `README.md` | 修改 | 补充 MCP Runtime 的 manifest 路径、stdio 能力与示例 |
 | `docs/Architecture.md` | 修改 | 把 mcp runtime 写回架构视图与运行时说明 |
@@ -12,7 +12,7 @@
 ## 关键设计决策
 
 ### 1. MCP Runtime 保持独立，不直接接 agent 主循环
-ISSUE-021 的目标是 MCP 资源/工具发现与 stdio transport 调用，不是立即把 MCP runtime 注入当前工具执行链。因此本期把 `extensions/mcp_runtime.py` 保持为独立模块，后续再由控制面或工具链相关 issue 接入。
+ISSUE-021 的目标是 MCP 资源/工具发现与 stdio transport 调用，不是立即把 MCP runtime 注入当前工具执行链。因此本期把 `extensions/mcp/runtime.py` 保持为独立模块，后续再由控制面或工具链相关 issue 接入。
 
 ### 2. manifest 统一走 `.claw/` 目录
 当前实现使用：

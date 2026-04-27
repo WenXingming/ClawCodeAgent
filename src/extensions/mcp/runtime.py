@@ -541,6 +541,20 @@ class MCPRuntime:
             lines.append('- ' + ' ; '.join(details))
         return '\n'.join(lines)
 
+    def render_tool_result(self, result: MCPToolCallResult) -> str:
+        """Render a previously collected MCP tool result without issuing another request."""
+        return '\n'.join(
+            [
+                '# MCP Tool Result',
+                '',
+                f'- Tool: {result.tool_name}',
+                f'- Server: {result.server_name}',
+                f'- is_error: {result.is_error}',
+                '',
+                result.content,
+            ]
+        )
+
     def render_tool_call(
         self,
         tool_name: str,
@@ -561,17 +575,7 @@ class MCPRuntime:
             Exception: 按调用链透传的异常。
         """
         result = self.call_tool(tool_name, arguments=arguments, server_name=server_name, max_chars=max_chars)
-        return '\n'.join(
-            [
-                '# MCP Tool Result',
-                '',
-                f'- Tool: {result.tool_name}',
-                f'- Server: {result.server_name}',
-                f'- is_error: {result.is_error}',
-                '',
-                result.content,
-            ]
-        )
+        return self.render_tool_result(result)
 
     def _list_remote_resources(self, *, server_name: str | None = None) -> tuple[MCPResource, ...]:
         """内部方法：执行 `_list_remote_resources` 相关逻辑。

@@ -28,7 +28,7 @@ from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
-from extensions.mcp_runtime import MCPRuntime, MCPTransportError
+from extensions.mcp import MCPRuntime, MCPToolAdapter, MCPTransportError
 from extensions.search_runtime import SearchQueryError, SearchRuntime
 from openai_client.openai_client import OpenAIClient
 from extensions.hook_policy_runtime import HookPolicyRuntime
@@ -53,6 +53,7 @@ class LocalAgent:
     budget_context_orchestrator: BudgetContextOrchestrator = field(init=False)
     search_runtime: SearchRuntime = field(init=False)
     mcp_runtime: MCPRuntime = field(init=False)
+    mcp_tool_adapter: MCPToolAdapter = field(init=False)
     plugin_runtime: PluginRuntime = field(init=False)
     hook_policy_runtime: HookPolicyRuntime = field(init=False)
     slash_dispatcher: SlashCommandDispatcher = field(init=False)
@@ -135,6 +136,7 @@ class LocalAgent:
         """
         self.search_runtime = SearchRuntime.from_workspace(self.runtime_config.cwd)
         self.mcp_runtime = MCPRuntime.from_workspace(self.runtime_config.cwd)
+        self.mcp_tool_adapter = MCPToolAdapter(self.mcp_runtime)
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
         self.plugin_runtime = PluginRuntime.from_workspace(self.runtime_config.cwd, self.tool_registry)
         self.tool_registry = self.plugin_runtime.merge_tool_registry(self.tool_registry)
@@ -209,39 +211,11 @@ class LocalAgent:
                         },
                         handler=self._run_mcp_read_resource,
                     ),
-                    'mcp_list_tools': AgentTool(
-                        name='mcp_list_tools',
-                        description='List tools exposed by configured MCP servers.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'query': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
-                            },
-                        },
-                        handler=self._run_mcp_list_tools,
-                    ),
-                    'mcp_call_tool': AgentTool(
-                        name='mcp_call_tool',
-                        description='Call a tool exposed by an MCP server with JSON object arguments.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'tool_name': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'arguments': {
-                                    'type': 'object',
-                                    'additionalProperties': True,
-                                },
-                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
-                            },
-                            'required': ['tool_name'],
-                        },
-                        handler=self._run_mcp_call_tool,
-                    ),
                 }
             )
+
+        if self.mcp_runtime.servers:
+            merged_registry.update(self.mcp_tool_adapter.build_tools(merged_registry))
 
         return merged_registry
 
@@ -421,12 +395,7 @@ class LocalAgent:
             raise ToolExecutionError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.mcp_runtime.render_tool_call(
-                tool_name,
-                arguments=dict(raw_tool_arguments),
-                server_name=server_name,
-                max_chars=max_chars,
-            ),
+            self.mcp_runtime.render_tool_result(result),
             context.max_output_chars,
         )
         return content, {'server_name': result.server_name, 'tool_name': result.tool_name, 'is_error': result.is_error}

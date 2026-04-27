@@ -464,7 +464,7 @@ print(response.results[0].title)
 ```python
 from pathlib import Path
 
-from extensions.mcp_runtime import MCPRuntime
+from extensions.mcp import MCPRuntime
 
 runtime = MCPRuntime.from_workspace(Path('.'))
 print(runtime.list_resources())

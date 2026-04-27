@@ -26,7 +26,7 @@ src/
 |  |- plugin_runtime.py
 |  |- hook_policy_runtime.py
 |  |- search_runtime.py
-|  '- mcp_runtime.py
+|  '- mcp/
 |- budget/
 |  '- budget_guard.py
 |- context/
@@ -81,7 +81,7 @@ graph TB
         n_hook_policy(["🛡️ extensions/hook_policy_runtime.py"])
         n_plugin(["🧩 extensions/plugin_runtime.py"])
         n_search(["🔎 extensions/search_runtime.py"])
-        n_mcp(["🛰️ extensions/mcp_runtime.py"])
+        n_mcp(["🛰️ extensions/mcp/runtime.py"])
         style Extensions fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
