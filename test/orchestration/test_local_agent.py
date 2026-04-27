@@ -499,6 +499,158 @@ class LocalAgentTests(unittest.TestCase):
         self.assertEqual(len([item for item in result.events if item.get('type') == 'tool_preflight']), 2)
         self.assertEqual(len([item for item in result.events if item.get('type') == 'tool_after_hook']), 2)
 
+    def test_run_delegate_agent_executes_children_and_records_group_summary(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(
+                            id='delegate_1',
+                            name='delegate_agent',
+                            arguments={
+                                'label': 'demo-group',
+                                'tasks': [
+                                    {'task_id': 'task-a', 'prompt': '执行子任务 A'},
+                                    {
+                                        'task_id': 'task-b',
+                                        'prompt': '执行子任务 B',
+                                        'dependencies': ['task-a'],
+                                    },
+                                ],
+                            },
+                        ),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=4, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='子任务 A 完成',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='子任务 B 完成',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='父任务汇总完成',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ]
+        )
+
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        result = agent.run('委托两个子任务并汇总')
+
+        self.assertEqual(result.stop_reason, 'stop')
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.final_output, '父任务汇总完成')
+        tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
+        self.assertEqual(len(tool_rows), 1)
+        group_summary = tool_rows[0].get('metadata', {}).get('group_summary', {})
+        self.assertEqual(group_summary.get('child_count'), 2)
+        self.assertEqual(group_summary.get('completed_children'), 2)
+        self.assertEqual(group_summary.get('failed_children'), 0)
+        self.assertEqual(group_summary.get('stop_reason_counts', {}).get('stop'), 2)
+        self.assertTrue(any(item.get('type') == 'delegate_group_start' for item in result.events))
+        self.assertEqual(len([item for item in result.events if item.get('type') == 'delegate_child_complete']), 2)
+        self.assertTrue(any(item.get('type') == 'delegate_group_complete' for item in result.events))
+
+    def test_run_delegate_agent_skips_dependents_after_child_failure(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(
+                            id='delegate_1',
+                            name='delegate_agent',
+                            arguments={
+                                'tasks': [
+                                    {'task_id': 'task-a', 'prompt': '执行子任务 A'},
+                                    {
+                                        'task_id': 'task-b',
+                                        'prompt': '执行子任务 B',
+                                        'dependencies': ['task-a'],
+                                    },
+                                ],
+                            },
+                        ),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=4, output_tokens=1),
+                ),
+                OpenAIConnectionError('child network down'),
+                OneTurnResponse(
+                    content='父任务收到失败摘要',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ]
+        )
+
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        result = agent.run('委托两个子任务，其中第二个依赖第一个')
+
+        self.assertEqual(result.stop_reason, 'stop')
+        tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
+        self.assertEqual(len(tool_rows), 1)
+        group_summary = tool_rows[0].get('metadata', {}).get('group_summary', {})
+        self.assertEqual(group_summary.get('failed_children'), 1)
+        self.assertEqual(group_summary.get('dependency_skips'), 1)
+        self.assertEqual(group_summary.get('stop_reason_counts', {}).get('backend_error'), 1)
+        self.assertEqual(group_summary.get('stop_reason_counts', {}).get('dependency_skipped'), 1)
+        self.assertTrue(any(item.get('type') == 'delegate_child_skipped' for item in result.events))
+        self.assertTrue(any(item.get('type') == 'delegate_group_complete' for item in result.events))
+
+    def test_run_delegate_agent_stops_when_max_delegated_tasks_would_be_exceeded(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(
+                            id='delegate_1',
+                            name='delegate_agent',
+                            arguments={
+                                'tasks': [
+                                    {'task_id': 'task-a', 'prompt': '执行子任务 A'},
+                                    {'task_id': 'task-b', 'prompt': '执行子任务 B'},
+                                ],
+                            },
+                        ),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=4, output_tokens=1),
+                ),
+            ]
+        )
+
+        agent = self._build_agent(
+            fake_client,
+            self._build_budget_config(workspace, BudgetConfig(max_delegated_tasks=1)),
+        )
+        result = agent.run('委托两个子任务，但预算只允许一个')
+
+        self.assertEqual(result.stop_reason, 'delegated_task_limit')
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(len(fake_client.calls), 1)
+        tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
+        self.assertEqual(len(tool_rows), 1)
+        self.assertEqual(tool_rows[0].get('metadata', {}).get('error_kind'), 'delegated_task_limit')
+        self.assertTrue(any(item.get('type') == 'delegate_group_blocked' for item in result.events))
+        self.assertTrue(any(item.get('type') == 'budget_stop' and item.get('reason') == 'delegated_task_limit' for item in result.events))
+
     def test_run_stops_with_max_turns(self) -> None:
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient(

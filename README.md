@@ -455,7 +455,45 @@ print(runtime.current_cwd)
 
 说明：当前版本先把 Worktree Runtime 保持为独立模块，不直接接入主循环和 CLI 控制面；后续 issue 可以在控制面层消费 `current_cwd`、active 记录和历史事件，把 cwd 切换行为暴露给最终用户。
 
-## 15. 工作区 MCP Runtime（ISSUE-021）
+## 15. delegate_agent 与 AgentManager（ISSUE-024）
+
+当前版本支持模型通过内置 `delegate_agent` 工具把任务拆给多个 child agent 顺序执行，并把 group、lineage、依赖跳过和 stop_reason 汇总回父代理的 tool result 与 runtime events。
+
+当前能力：
+
+- `delegate_agent`：在主循环内发起一组子任务委托，每个 child 使用新的 `LocalAgent` 实例执行。
+- `AgentManager`：记录 parent/child lineage、group、child index、resume 来源、session_id 与 stop_reason。
+- dependency batching：先按依赖拓扑把子任务切成 batch，再按 batch 串行执行；若上游失败，下游会被标记为 `dependency_skipped`。
+- delegated task budget：当 `BudgetConfig.max_delegated_tasks` 会被本次委托突破时，父代理会在当前轮直接以 `delegated_task_limit` 停止。
+
+当前设计约束：
+
+- batch 内仍是串行执行，不做并发 child agent。
+- `delegate_agent` 是 LocalAgent 的内置 orchestration 工具，不单独暴露为基础文件工具。
+- child agent 与父代理共享同一套 runtime/model 配置与 session 目录，但各自保存独立 session 文件。
+
+工具调用参数示例：
+
+```json
+{
+  "label": "demo-group",
+  "tasks": [
+    {
+      "task_id": "task-a",
+      "prompt": "先检查 README 里的命令示例"
+    },
+    {
+      "task_id": "task-b",
+      "prompt": "再根据检查结果整理变更说明",
+      "dependencies": ["task-a"]
+    }
+  ]
+}
+```
+
+行为说明：父代理拿到 delegate_agent 的 tool result 后，会在 metadata 中收到 `group_summary`、`delegate_children` 与 `lineage`，同时在 `events` 中追加 `delegate_group_start`、`delegate_child_complete`、`delegate_child_skipped`、`delegate_group_complete` 等运行事件，便于后续 QueryEngine 统计和展示。
+
+## 16. 工作区 MCP Runtime（ISSUE-021）
 
 当前版本支持从工作区发现 MCP manifest，读取本地 manifest 资源，并通过 stdio transport 调用 MCP server 的 `resources/list/read` 与 `tools/list/call`。
 
@@ -516,7 +554,7 @@ print(tool_result.content)
 
 说明：当前版本把 MCP 运行时平铺在 `src/tools/mcp_*` 模块下，不做远端 MCP 网关和长连接复用。`stdio` transport 仍按单次请求拉起 child process，HTTP/SSE transport 也按一次请求完成 `initialize` 和目标方法调用。失败会抛出带 `server_name`、`method`、`stderr` 和 `exit_code` 的 `MCPTransportError`，便于上层追踪。
 
-## 16. 预算控制（BudgetConfig）
+## 17. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -525,6 +563,7 @@ print(tool_result.content)
 | `max_input_tokens` | 输入 token 硬上限（char/4 估算） | `token_limit` |
 | `max_total_cost_usd` | 会话总成本上限（USD） | `cost_limit` |
 | `max_tool_calls` | 工具调用次数上限 | `tool_call_limit` |
+| `max_delegated_tasks` | 子代理委托数量上限 | `delegated_task_limit` |
 | `max_model_calls` | 模型调用次数上限 | `model_call_limit` |
 | `max_session_turns` | 会话累计轮数上限（含 resume 历史） | `session_turns_limit` |
 
@@ -551,13 +590,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 17. CLI 迁移说明
+## 18. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 18. 说明
+## 19. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：

@@ -1077,6 +1077,14 @@
 
 交付物：delegate 与 manager 实现、测试。
 
+实施落地决策（2026-04-27）：
+
+- 新增 `src/orchestration/agent_manager.py`，把 child agent record、group、dependency batch 与 stop_reason 汇总收敛到**独立编排对象**，不把这类运行期 lineage 状态混入 TaskRuntime。
+- `delegate_agent` 作为 **LocalAgent 内置工具** 暴露给模型，但实际执行走 LocalAgent 主循环里的专用分支，而不是完全复用 `LocalToolService.execute()`；这样可以保留 child/group runtime events，并对 `max_delegated_tasks` 给出专门的 stop_reason。
+- child agent 仍使用同一个 `OpenAIClient`、`AgentRuntimeConfig` 与 `AgentSessionStore`，但每个 child 都创建新的 `LocalAgent` 实例并共享同一个 `AgentManager`；本期以**串行执行 + 依赖拓扑分 batch** 作为“依赖批处理”的落地选择，不实现并发子代理。
+- `max_delegated_tasks` 不并入 ISSUE-009 的通用五维 `BudgetGuard`，而是在 `delegate_agent` 执行前做专门检查；一旦超限，会保留 tool result，并把父代理 stop_reason 收敛为 `delegated_task_limit`。
+- 当上游 child 失败时，下游依赖任务不会继续执行，而是被标记为 `dependency_skipped`；该状态会同时写入 AgentManager group summary、tool metadata 和 runtime events，供 ISSUE-025 统计层复用。
+
 #### ISSUE-025 QueryEngine 门面与运行事件统计
 
 类型：feature

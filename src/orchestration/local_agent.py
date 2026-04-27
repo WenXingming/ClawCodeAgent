@@ -23,6 +23,7 @@ from budget.budget_guard import BudgetGuard
 from interface.slash_commands_interface import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from context.context_compactor import ContextCompactor
 from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
+from orchestration.agent_manager import AgentManager, DelegatedTaskSpec
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
@@ -49,6 +50,8 @@ class LocalAgent:
     runtime_config: AgentRuntimeConfig  # 运行配置。
     session_store: AgentSessionStore  # 会话持久化依赖。
     tool_service: LocalToolService = field(default_factory=LocalToolService)
+    agent_manager: AgentManager = field(default_factory=AgentManager)  # AgentManager: 当前 run/resume 树共享的子代理编排器。
+    current_agent_id: str | None = None  # str | None: 当前 LocalAgent 对应的受管代理标识；根调用与 child 调用均会设置。
     tool_registry: dict[str, LocalTool] = field(init=False)  # 可用工具集合。
     budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
@@ -72,22 +75,14 @@ class LocalAgent:
         """
         session_state = AgentSessionState()
         session_id = uuid4().hex
-        local_result = self._prepare_prompt(
+        return self._run_managed_invocation(
             prompt=prompt,
             session_state=session_state,
             session_id=session_id,
             turns_offset=0,
             usage_baseline=TokenUsage(),
             cost_baseline=0.0,
-        )
-        if local_result is not None:
-            return local_result
-        return self._execute_loop(
-            session_state=session_state,
-            session_id=session_id,
-            turns_offset=0,
-            usage_baseline=TokenUsage(),
-            cost_baseline=0.0,
+            resumed_from_session_id=None,
         )
 
     def resume(self, prompt: str, session_snapshot: AgentSessionSnapshot) -> AgentRunResult:
@@ -110,23 +105,100 @@ class LocalAgent:
             transcript=list(session_snapshot.transcript),
             tool_call_count=session_snapshot.tool_calls,
         )
-        local_result = self._prepare_prompt(
+        return self._run_managed_invocation(
             prompt=prompt,
             session_state=session_state,
             session_id=session_snapshot.session_id,
             turns_offset=session_snapshot.turns,
             usage_baseline=session_snapshot.usage,
             cost_baseline=session_snapshot.total_cost_usd,
+            resumed_from_session_id=session_snapshot.session_id,
         )
-        if local_result is not None:
-            return local_result
-        return self._execute_loop(
-            session_state=session_state,
-            session_id=session_snapshot.session_id,
-            turns_offset=session_snapshot.turns,
-            usage_baseline=session_snapshot.usage,
-            cost_baseline=session_snapshot.total_cost_usd,
-        )
+
+    def _run_managed_invocation(
+        self,
+        *,
+        prompt: str,
+        session_state: AgentSessionState,
+        session_id: str,
+        turns_offset: int,
+        usage_baseline: TokenUsage,
+        cost_baseline: float,
+        resumed_from_session_id: str | None,
+    ) -> AgentRunResult:
+        """在受管代理上下文中执行一次 run 或 resume。
+
+        根调用会在进入前重置 `AgentManager`，并为当前 run 建立 root record；
+        child 调用则复用父级传入的 manager 与 current_agent_id。
+
+        Args:
+            prompt (str): 当前调用的用户输入。
+            session_state (AgentSessionState): 已初始化的会话状态。
+            session_id (str): 当前调用使用的会话标识。
+            turns_offset (int): 历史累计 turn 数。
+            usage_baseline (TokenUsage): 历史 token 使用基线。
+            cost_baseline (float): 历史成本基线。
+            resumed_from_session_id (str | None): 若为 resume，则记录来源 session_id。
+        Returns:
+            AgentRunResult: 当前 run/resume 的最终结果。
+        Raises:
+            Exception: 未被主循环吸收的异常会继续向上传播。
+        """
+        is_root_invocation = self.current_agent_id is None
+        if is_root_invocation:
+            self.agent_manager = AgentManager()
+            self.current_agent_id = self.agent_manager.start_agent(
+                prompt=prompt,
+                label='root',
+                resumed_from_session_id=resumed_from_session_id,
+            )
+
+        managed_agent_id = self.current_agent_id
+        try:
+            local_result = self._prepare_prompt(
+                prompt=prompt,
+                session_state=session_state,
+                session_id=session_id,
+                turns_offset=turns_offset,
+                usage_baseline=usage_baseline,
+                cost_baseline=cost_baseline,
+            )
+            if local_result is not None:
+                result = local_result
+            else:
+                result = self._execute_loop(
+                    session_state=session_state,
+                    session_id=session_id,
+                    turns_offset=turns_offset,
+                    usage_baseline=usage_baseline,
+                    cost_baseline=cost_baseline,
+                )
+        except Exception:
+            if managed_agent_id is not None:
+                self.agent_manager.finish_agent(
+                    managed_agent_id,
+                    session_id=None,
+                    session_path=None,
+                    turns=turns_offset,
+                    tool_calls=session_state.tool_call_count,
+                    stop_reason='exception',
+                )
+            if is_root_invocation:
+                self.current_agent_id = None
+            raise
+
+        if managed_agent_id is not None:
+            self.agent_manager.finish_agent(
+                managed_agent_id,
+                session_id=result.session_id,
+                session_path=result.session_path,
+                turns=result.turns,
+                tool_calls=result.tool_calls,
+                stop_reason=result.stop_reason,
+            )
+        if is_root_invocation:
+            self.current_agent_id = None
+        return result
 
     def __post_init__(self) -> None:
         """内部方法：执行 `__post_init__` 相关逻辑。
@@ -168,6 +240,34 @@ class LocalAgent:
             Exception: 按调用链透传的异常。
         """
         merged_registry = dict(tool_registry)
+
+        merged_registry['delegate_agent'] = LocalTool(
+            name='delegate_agent',
+            description='Delegate a batch of child tasks to managed sub-agents and return an aggregated summary.',
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'label': {'type': 'string'},
+                    'tasks': {
+                        'type': 'array',
+                        'minItems': 1,
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'task_id': {'type': 'string'},
+                                'prompt': {'type': 'string'},
+                                'label': {'type': 'string'},
+                                'dependencies': {'type': 'array', 'items': {'type': 'string'}},
+                                'resume_session_id': {'type': 'string'},
+                            },
+                            'required': ['prompt'],
+                        },
+                    },
+                },
+                'required': ['tasks'],
+            },
+            handler=self._run_delegate_agent,
+        )
 
         if self.search_runtime.providers:
             merged_registry['workspace_search'] = LocalTool(
@@ -403,6 +503,381 @@ class LocalAgent:
             context.max_output_chars,
         )
         return content, {'server_name': result.server_name, 'tool_name': result.tool_name, 'is_error': result.is_error}
+
+    def _run_delegate_agent(
+        self,
+        arguments: JSONDict,
+        context,
+    ) -> str | tuple[str, JSONDict]:
+        """构造 delegate_agent 的注册工具返回值。
+
+        该方法主要用于向模型暴露统一工具协议；真正的执行会在 LocalAgent 的工具循环中
+        通过 `_execute_delegate_agent_tool()` 走专门编排分支，以便保留 child/group 事件与
+        delegated task budget 语义。
+
+        Args:
+            arguments (JSONDict): 工具调用参数。
+            context (Any): 工具执行上下文。
+        Returns:
+            str | tuple[str, JSONDict]: delegate_agent 的文本摘要与结构化元数据。
+        """
+        result, _ = self._execute_delegate_agent_tool(arguments, context)
+        return result.content, dict(result.metadata)
+
+    def _execute_delegate_agent_tool(
+        self,
+        arguments: JSONDict,
+        context,
+    ) -> tuple[ToolExecutionResult, list[JSONDict]]:
+        """执行 delegate_agent 的专用编排逻辑。
+
+        Args:
+            arguments (JSONDict): delegate_agent 的调用参数。
+            context (Any): 当前工具执行上下文。
+        Returns:
+            tuple[ToolExecutionResult, list[JSONDict]]: 工具结果与需要写入 runtime 的事件列表。
+        """
+        if self.current_agent_id is None:
+            return (
+                ToolExecutionResult(
+                    name='delegate_agent',
+                    ok=False,
+                    content='delegate_agent requires an active parent agent context.',
+                    metadata={'error_kind': 'tool_execution_error'},
+                ),
+                [],
+            )
+
+        try:
+            group_label = self._optional_tool_string(arguments, 'label')
+            task_specs = self._parse_delegate_task_specs(arguments)
+            planned_child_count = self.agent_manager.child_agent_count() + len(task_specs)
+            max_delegated_tasks = self.runtime_config.budget_config.max_delegated_tasks
+            if max_delegated_tasks is not None and planned_child_count > max_delegated_tasks:
+                blocked_event = {
+                    'type': 'delegate_group_blocked',
+                    'parent_agent_id': self.current_agent_id,
+                    'requested_children': len(task_specs),
+                    'existing_children': self.agent_manager.child_agent_count(),
+                    'max_delegated_tasks': max_delegated_tasks,
+                }
+                return (
+                    ToolExecutionResult(
+                        name='delegate_agent',
+                        ok=False,
+                        content=(
+                            'delegate_agent blocked: '
+                            f'requested {len(task_specs)} child tasks would exceed '
+                            f'max_delegated_tasks={max_delegated_tasks}.'
+                        ),
+                        metadata={
+                            'error_kind': 'delegated_task_limit',
+                            'requested_children': len(task_specs),
+                            'existing_children': self.agent_manager.child_agent_count(),
+                            'max_delegated_tasks': max_delegated_tasks,
+                        },
+                    ),
+                    [blocked_event],
+                )
+
+            group_id = self.agent_manager.start_group(
+                label=group_label,
+                parent_agent_id=self.current_agent_id,
+                strategy='serial',
+            )
+            batches = self.agent_manager.plan_batches(task_specs)
+            delegate_events: list[JSONDict] = [
+                {
+                    'type': 'delegate_group_start',
+                    'group_id': group_id,
+                    'label': group_label,
+                    'parent_agent_id': self.current_agent_id,
+                    'child_count': len(task_specs),
+                    'batch_count': len(batches),
+                }
+            ]
+
+            child_agent_ids: dict[str, str] = {}
+            child_indices: dict[str, int] = {}
+            for child_index, task in enumerate(task_specs):
+                child_indices[task.task_id] = child_index
+                child_agent_ids[task.task_id] = self.agent_manager.start_agent(
+                    prompt=task.prompt,
+                    parent_agent_id=self.current_agent_id,
+                    group_id=group_id,
+                    child_index=child_index,
+                    label=task.label,
+                    task_id=task.task_id,
+                    resumed_from_session_id=task.resume_session_id,
+                )
+
+            completed_children = 0
+            failed_children = 0
+            dependency_skips = 0
+            child_outcomes: dict[str, dict[str, object]] = {}
+            max_batch_size = max((len(batch) for batch in batches), default=0)
+
+            for batch_index, batch in enumerate(batches, start=1):
+                for task in batch:
+                    child_index = child_indices[task.task_id]
+                    child_agent_id = child_agent_ids[task.task_id]
+                    failed_dependencies = [
+                        dependency_id
+                        for dependency_id in task.dependencies
+                        if not bool(child_outcomes.get(dependency_id, {}).get('ok', False))
+                    ]
+                    if failed_dependencies:
+                        self.agent_manager.skip_agent(child_agent_id, reason='dependency_skipped')
+                        dependency_skips += 1
+                        child_outcomes[task.task_id] = {
+                            'ok': False,
+                            'stop_reason': 'dependency_skipped',
+                            'agent_id': child_agent_id,
+                        }
+                        delegate_events.append(
+                            {
+                                'type': 'delegate_child_skipped',
+                                'group_id': group_id,
+                                'agent_id': child_agent_id,
+                                'task_id': task.task_id,
+                                'child_index': child_index,
+                                'dependencies': list(task.dependencies),
+                                'failed_dependencies': failed_dependencies,
+                                'reason': 'dependency_skipped',
+                            }
+                        )
+                        continue
+
+                    delegate_events.append(
+                        {
+                            'type': 'delegate_child_start',
+                            'group_id': group_id,
+                            'agent_id': child_agent_id,
+                            'task_id': task.task_id,
+                            'child_index': child_index,
+                            'batch_index': batch_index,
+                            'resumed_from_session_id': task.resume_session_id,
+                        }
+                    )
+
+                    child_agent = LocalAgent(
+                        self.client,
+                        self.runtime_config,
+                        self.session_store,
+                        tool_service=self.tool_service,
+                        agent_manager=self.agent_manager,
+                        current_agent_id=child_agent_id,
+                    )
+                    if task.resume_session_id:
+                        session_snapshot = self.session_store.load(task.resume_session_id)
+                        child_result = child_agent.resume(task.prompt, session_snapshot)
+                    else:
+                        child_result = child_agent.run(task.prompt)
+
+                    child_ok = self._is_successful_delegate_stop_reason(child_result.stop_reason)
+                    if child_ok:
+                        completed_children += 1
+                    else:
+                        failed_children += 1
+
+                    child_outcomes[task.task_id] = {
+                        'ok': child_ok,
+                        'stop_reason': child_result.stop_reason or 'completed',
+                        'agent_id': child_agent_id,
+                    }
+                    delegate_events.append(
+                        {
+                            'type': 'delegate_child_complete',
+                            'group_id': group_id,
+                            'agent_id': child_agent_id,
+                            'task_id': task.task_id,
+                            'child_index': child_index,
+                            'batch_index': batch_index,
+                            'ok': child_ok,
+                            'stop_reason': child_result.stop_reason,
+                            'session_id': child_result.session_id,
+                            'session_path': child_result.session_path,
+                            'turns': child_result.turns,
+                            'tool_calls': child_result.tool_calls,
+                        }
+                    )
+
+            group_status = 'completed' if failed_children == 0 and dependency_skips == 0 else 'completed_with_failures'
+            self.agent_manager.finish_group(
+                group_id,
+                status=group_status,
+                completed_children=completed_children,
+                failed_children=failed_children,
+                batch_count=len(batches),
+                max_batch_size=max_batch_size,
+                dependency_skips=dependency_skips,
+            )
+            group_summary = self.agent_manager.group_summary(group_id) or {}
+            delegate_events.append(
+                {
+                    'type': 'delegate_group_complete',
+                    'group_id': group_id,
+                    'status': group_status,
+                    'summary': dict(group_summary),
+                }
+            )
+
+            child_records = [
+                self._managed_agent_record_to_metadata(record)
+                for record in self.agent_manager.group_children(group_id)
+            ]
+            return (
+                ToolExecutionResult(
+                    name='delegate_agent',
+                    ok=True,
+                    content=self._truncate_tool_output(
+                        self._render_delegate_summary(group_summary, child_records),
+                        context.max_output_chars,
+                    ),
+                    metadata={
+                        'group_id': group_id,
+                        'group_summary': dict(group_summary),
+                        'delegate_children': child_records,
+                        'lineage': {
+                            'parent_agent_id': self.current_agent_id,
+                            'group_id': group_id,
+                            'child_agent_ids': [record['agent_id'] for record in child_records],
+                        },
+                    },
+                ),
+                delegate_events,
+            )
+        except (ToolExecutionError, ValueError) as exc:
+            return (
+                ToolExecutionResult(
+                    name='delegate_agent',
+                    ok=False,
+                    content=str(exc),
+                    metadata={'error_kind': 'tool_execution_error'},
+                ),
+                [],
+            )
+
+    def _parse_delegate_task_specs(self, arguments: JSONDict) -> tuple[DelegatedTaskSpec, ...]:
+        """解析 delegate_agent 的 tasks 参数。
+
+        Args:
+            arguments (JSONDict): delegate_agent 原始参数对象。
+        Returns:
+            tuple[DelegatedTaskSpec, ...]: 标准化后的子任务规格列表。
+        Raises:
+            ToolExecutionError: 当 tasks 字段缺失、为空或元素非法时抛出。
+        """
+        raw_tasks = arguments.get('tasks')
+        if not isinstance(raw_tasks, list) or not raw_tasks:
+            raise ToolExecutionError('tasks must be a non-empty array')
+
+        task_specs: list[DelegatedTaskSpec] = []
+        for index, item in enumerate(raw_tasks, start=1):
+            if not isinstance(item, dict):
+                raise ToolExecutionError('tasks must contain JSON objects')
+            payload = dict(item)
+            if 'task_id' not in payload and 'taskId' not in payload:
+                payload['task_id'] = f'task-{index:03d}'
+            try:
+                task_specs.append(DelegatedTaskSpec.from_dict(payload))
+            except ValueError as exc:
+                raise ToolExecutionError(str(exc)) from exc
+        return tuple(task_specs)
+
+    @staticmethod
+    def _is_successful_delegate_stop_reason(stop_reason: str | None) -> bool:
+        """判断 child agent 的 stop_reason 是否可视为成功完成。
+
+        Args:
+            stop_reason (str | None): child agent 最终 stop_reason。
+        Returns:
+            bool: 若可视为成功收敛则返回 True，否则返回 False。
+        """
+        if stop_reason is None:
+            return True
+        if stop_reason.endswith('_error'):
+            return False
+        return stop_reason not in {
+            'max_turns',
+            'token_limit',
+            'cost_limit',
+            'tool_call_limit',
+            'model_call_limit',
+            'session_turns_limit',
+            'delegated_task_limit',
+            'dependency_skipped',
+        }
+
+    @staticmethod
+    def _managed_agent_record_to_metadata(record) -> JSONDict:
+        """把 AgentManager child record 转为工具元数据友好的字典。
+
+        Args:
+            record (Any): AgentManager 返回的 child record。
+        Returns:
+            JSONDict: 适合写入 tool metadata 的轻量字典。
+        """
+        return {
+            'agent_id': record.agent_id,
+            'task_id': record.task_id,
+            'child_index': record.child_index,
+            'label': record.label,
+            'status': record.status.value,
+            'stop_reason': record.stop_reason,
+            'session_id': record.session_id,
+            'session_path': record.session_path,
+            'turns': record.turns,
+            'tool_calls': record.tool_calls,
+            'resumed_from_session_id': record.resumed_from_session_id,
+        }
+
+    @staticmethod
+    def _render_delegate_summary(group_summary: JSONDict, child_records: list[JSONDict]) -> str:
+        """把 delegate_agent 结果渲染为可读文本摘要。
+
+        Args:
+            group_summary (JSONDict): group 聚合摘要。
+            child_records (list[JSONDict]): child 记录列表。
+        Returns:
+            str: 面向模型和用户的可读文本摘要。
+        """
+        lines = [
+            '# Delegation Summary',
+            '',
+            f"- Group id: {group_summary.get('group_id', 'unknown')}",
+            f"- Parent agent id: {group_summary.get('parent_agent_id', 'unknown')}",
+            f"- Status: {group_summary.get('status', 'unknown')}",
+            f"- Child count: {group_summary.get('child_count', 0)}",
+            f"- Completed children: {group_summary.get('completed_children', 0)}",
+            f"- Failed children: {group_summary.get('failed_children', 0)}",
+            f"- Dependency skips: {group_summary.get('dependency_skips', 0)}",
+            f"- Batch count: {group_summary.get('batch_count', 0)}",
+            f"- Max batch size: {group_summary.get('max_batch_size', 0)}",
+            '',
+            '## Child Results',
+            '',
+        ]
+        stop_reason_counts = group_summary.get('stop_reason_counts', {})
+        if isinstance(stop_reason_counts, dict) and stop_reason_counts:
+            lines.append('- Stop reasons: ' + ', '.join(f'{key}={value}' for key, value in sorted(stop_reason_counts.items())))
+            lines.append('')
+
+        if not child_records:
+            lines.append('No child agents were executed.')
+            return '\n'.join(lines)
+
+        for record in child_records:
+            lines.extend(
+                [
+                    f"{record.get('child_index', '?')}. {record.get('task_id') or record.get('agent_id')}",
+                    f"Status: {record.get('status', 'unknown')}",
+                    f"Stop reason: {record.get('stop_reason', 'n/a')}",
+                    f"Session: {record.get('session_id', 'n/a')}",
+                    '',
+                ]
+            )
+        return '\n'.join(lines).rstrip()
 
     @staticmethod
     def _truncate_tool_output(content: str, max_chars: int) -> str:
@@ -832,12 +1307,19 @@ class LocalAgent:
                         }
                     )
                 else:
-                    tool_result = self.tool_service.execute(
-                        self.tool_registry,
-                        tool_call.name,
-                        tool_call.arguments,
-                        tool_context,
-                    )
+                    if tool_call.name == 'delegate_agent':
+                        tool_result, delegate_events = self._execute_delegate_agent_tool(
+                            tool_call.arguments,
+                            tool_context,
+                        )
+                        events.extend(delegate_events)
+                    else:
+                        tool_result = self.tool_service.execute(
+                            self.tool_registry,
+                            tool_call.name,
+                            tool_call.arguments,
+                            tool_context,
+                        )
                     tool_result = self._merge_tool_result_metadata(tool_result, metadata_updates)
 
                 session_state.append_tool_result(tool_call, tool_result)
@@ -860,6 +1342,15 @@ class LocalAgent:
                     'error_kind': tool_result.metadata.get('error_kind'),
                     'metadata': dict(tool_result.metadata),
                 })
+
+                if tool_result.metadata.get('error_kind') == 'delegated_task_limit':
+                    return self._early_stop(
+                        'delegated_task_limit',
+                        session_id=session_id, session_state=session_state, final_output=final_output,
+                        turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
+                        usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
+                        turn_index=turn_index, events=events,
+                    )
 
                 # 工具执行后预算检查
                 if stop := guard.check_post_tool(session_state.tool_call_count):
