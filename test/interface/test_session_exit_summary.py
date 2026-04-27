@@ -16,6 +16,25 @@ class _TtyStringIO(io.StringIO):
 
 
 class SessionExitSummaryRendererTests(unittest.TestCase):
+    def _extract_box_body(self, rendered_lines: list[str]) -> list[str]:
+        self.assertGreaterEqual(len(rendered_lines), 2)
+
+        top_border = rendered_lines[0]
+        bottom_border = rendered_lines[-1]
+        self.assertEqual(len(top_border), len(bottom_border))
+        self.assertTrue(top_border.startswith('╭'))
+        self.assertTrue(top_border.endswith('╮'))
+        self.assertTrue(bottom_border.startswith('╰'))
+        self.assertTrue(bottom_border.endswith('╯'))
+
+        body_lines = rendered_lines[1:-1]
+        for line in body_lines:
+            self.assertEqual(len(line), len(top_border))
+            self.assertTrue(line.startswith('│ '))
+            self.assertTrue(line.endswith(' │'))
+
+        return [line[2:-2].rstrip() for line in body_lines]
+
     def test_render_wraps_summary_in_single_rounded_box(self) -> None:
         stream = io.StringIO()
         renderer = SessionExitSummaryRenderer(top_padding=0)
@@ -29,24 +48,24 @@ class SessionExitSummaryRendererTests(unittest.TestCase):
 
         renderer.render(summary, stream=stream)
 
+        body = self._extract_box_body(stream.getvalue().splitlines())
+
         self.assertEqual(
-            stream.getvalue().splitlines(),
+            [body[0], body[1], body[2], body[6], body[7], body[9]],
             [
-                '╭──────────────────────────────────────────────────╮',
-                '│ Agent powering down. Goodbye!                    │',
-                '│                                                  │',
-                '│ Interaction Summary                              │',
-                '│ Session ID:   session-001                        │',
-                '│ Tool Calls:   3 (✓ 2 ✗ 1)                        │',
-                '│ Success Rate: 66.7%                              │',
-                '│                                                  │',
-                '│ Performance                                      │',
-                '│ Wall Time:    2m 18s                             │',
-                '│                                                  │',
-                '│ To resume this session: agent-resume session-001 │',
-                '╰──────────────────────────────────────────────────╯',
+                'Agent powering down. Goodbye!',
+                '',
+                'Interaction Summary',
+                '',
+                'Performance',
+                '',
             ],
         )
+        self.assertRegex(body[3], r'^Session ID:\s+session-001$')
+        self.assertRegex(body[4], r'^Tool Calls:\s+3 \(✓ 2 ✗ 1\)$')
+        self.assertRegex(body[5], r'^Success Rate:\s+66\.7%$')
+        self.assertRegex(body[8], r'^Wall Time:\s+2m 18s$')
+        self.assertRegex(body[10], r'^To resume this session:\s+agent-resume session-001$')
 
     def test_render_uses_soft_white_frame_on_ansi_stream(self) -> None:
         stream = _TtyStringIO()

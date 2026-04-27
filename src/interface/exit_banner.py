@@ -114,18 +114,18 @@ class SessionExitSummaryRenderer:
             self._title,
             '',
             'Interaction Summary',
-            f'Session ID:   {session_text}',
-            f'Tool Calls:   {tool_summary}',
-            f'Success Rate: {success_rate}',
+            f'Session ID:           {session_text}',
+            f'Tool Calls:           {tool_summary}',
+            f'Success Rate:         {success_rate}',
             '',
             'Performance',
-            f'Wall Time:    {wall_time}',
+            f'Wall Time:            {wall_time}',
         ]
         if summary.session_id:
             lines.extend(
                 [
                     '',
-                    f'To resume this session: agent-resume {summary.session_id}',
+                    f'To resume this session:   agent-resume {summary.session_id}',
                 ]
             )
         return tuple(lines)

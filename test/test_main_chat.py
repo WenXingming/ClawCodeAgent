@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -33,10 +34,16 @@ def _assert_exit_summary_rendered(
     testcase.assertIn('Tool Calls:', output)
     testcase.assertIn('Success Rate:', output)
     testcase.assertIn('Wall Time:', output)
-    testcase.assertIn(f'Session ID:   {session_id or "unavailable"}', output)
+    testcase.assertRegex(
+        output,
+        rf'Session ID:[ \t]+{re.escape(session_id or "unavailable")}',
+    )
     if show_resume_hint:
         assert session_id is not None
-        testcase.assertIn(f'To resume this session: agent-resume {session_id}', output)
+        testcase.assertRegex(
+            output,
+            rf'To resume this session:[ \t]+agent-resume {re.escape(session_id)}',
+        )
         return
     testcase.assertNotIn('To resume this session:', output)
 
