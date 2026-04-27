@@ -9,7 +9,7 @@ from pathlib import Path
 
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig
 from extensions.plugin_runtime import PluginRuntime
-from tools.agent_tools import build_tool_context, default_tool_registry, execute_tool
+from tools.local_tools import build_tool_context, default_tool_registry, execute_tool
 
 
 class PluginRuntimeTests(unittest.TestCase):

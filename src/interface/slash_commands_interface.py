@@ -15,7 +15,7 @@ from context.context_budget_evaluator import ContextBudgetEvaluator
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.protocol import JSONDict
 from session.session_state import AgentSessionState
-from tools.agent_tools import AgentTool
+from tools.local_tools import LocalTool
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class SlashCommandContext:
     turns_offset: int  # int: 历史已完成轮次，供 /status 与 /clear 判断是否已有历史。
     runtime_config: AgentRuntimeConfig  # AgentRuntimeConfig: 当前工作目录、权限与预算等运行配置。
     model_config: ModelConfig  # ModelConfig: 当前模型元数据，供 /status 展示模型名。
-    tool_registry: Mapping[str, AgentTool]  # Mapping[str, AgentTool]: 当前已注册工具集合。
+    tool_registry: Mapping[str, LocalTool]  # Mapping[str, LocalTool]: 当前已注册工具集合。
     plugin_summary: str = ''  # str: 插件运行时生成的摘要文本，供 /tools 追加展示。
 
 
@@ -249,11 +249,11 @@ class SlashCommandDispatcher:
             output='\n'.join(lines),
         )
 
-    def _build_openai_tools(self, tool_registry: Mapping[str, AgentTool]) -> list[JSONDict]:
+    def _build_openai_tools(self, tool_registry: Mapping[str, LocalTool]) -> list[JSONDict]:
         """把本地工具注册表投影为 OpenAI 工具 schema 列表。
 
         Args:
-            tool_registry (Mapping[str, AgentTool]): 当前会话可见的本地工具注册表。
+            tool_registry (Mapping[str, LocalTool]): 当前会话可见的本地工具注册表。
 
         Returns:
             list[JSONDict]: 供预算评估器计算 token 占用的工具 schema 列表。

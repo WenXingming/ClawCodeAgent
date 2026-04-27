@@ -12,7 +12,7 @@ from interface.slash_commands_interface import (
 )
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, ModelConfig
 from session.session_state import AgentSessionState
-from tools.agent_tools import default_tool_registry
+from tools.local_tools import default_tool_registry
 
 
 class SlashCommandModuleTests(unittest.TestCase):

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from extensions.hook_policy_runtime import HookPolicyRuntime
-from tools.agent_tools import AgentTool, default_tool_registry
+from tools.local_tools import LocalTool, default_tool_registry
 
 
 class HookPolicyRuntimeTests(unittest.TestCase):
@@ -76,7 +76,7 @@ class HookPolicyRuntimeTests(unittest.TestCase):
 
     def test_filter_tool_registry_applies_deny_tools_and_prefixes(self) -> None:
         registry = default_tool_registry()
-        registry['workspace_banner'] = AgentTool(
+        registry['workspace_banner'] = LocalTool(
             name='workspace_banner',
             description='plugin virtual tool',
             parameters={'type': 'object', 'properties': {}},

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from core_contracts.protocol import JSONDict
-from tools.agent_tools import AgentTool, ToolExecutionContext, ToolExecutionError, ToolPermissionError
+from tools.local_tools import LocalTool, ToolExecutionContext, ToolExecutionError, ToolPermissionError
 
 from .mcp_models import MCPTool, MCPTransportError
 from .mcp_runtime import MCPRuntime
@@ -24,23 +24,23 @@ class MCPToolAdapter:
     """把远端 MCP 工具展开为 Agent 可直接调用的工具。
 
     外部通常先注入一个已经完成 manifest 发现的 MCPRuntime，再调用
-    build_tools 生成一组 AgentTool。每个导出的工具会在运行时执行权限
+    build_tools 生成一组 LocalTool。每个导出的工具会在运行时执行权限
     检查，然后通过运行时回调远端 MCP server。
     """
 
     runtime: MCPRuntime  # MCPRuntime: 远端工具发现与调用入口。
 
-    def build_tools(self, occupied_registry: Mapping[str, AgentTool]) -> dict[str, AgentTool]:
+    def build_tools(self, occupied_registry: Mapping[str, LocalTool]) -> dict[str, LocalTool]:
         """生成可挂入本地工具注册表的 MCP 工具映射。
 
         Args:
-            occupied_registry (Mapping[str, AgentTool]): 当前已占用的工具名映射，用于避免命名冲突。
+            occupied_registry (Mapping[str, LocalTool]): 当前已占用的工具名映射，用于避免命名冲突。
         Returns:
-            dict[str, AgentTool]: 以导出工具名为键的 AgentTool 映射。
+            dict[str, LocalTool]: 以导出工具名为键的 LocalTool 映射。
         Raises:
             ValueError: 当工具名冲突无法通过前缀消解时抛出。
         """
-        expanded: dict[str, AgentTool] = {}
+        expanded: dict[str, LocalTool] = {}
         occupied_names = set(occupied_registry)
 
         for remote_tool in self.runtime.list_tools():
@@ -70,14 +70,14 @@ class MCPToolAdapter:
             raise ValueError(f'Expanded MCP tool name conflict: {prefixed!r}')
         return prefixed
 
-    def _build_tool(self, remote_tool: MCPTool, *, exported_name: str) -> AgentTool:
-        """把单个 MCPTool 包装为 AgentTool。
+    def _build_tool(self, remote_tool: MCPTool, *, exported_name: str) -> LocalTool:
+        """把单个 MCPTool 包装为 LocalTool。
 
         Args:
             remote_tool (MCPTool): 远端 MCP 工具定义。
             exported_name (str): 对外暴露给模型的工具名称。
         Returns:
-            AgentTool: 可直接注册到本地注册表的工具对象。
+            LocalTool: 可直接注册到本地注册表的工具对象。
         """
         parameters = dict(remote_tool.input_schema) if remote_tool.input_schema else {
             'type': 'object',
@@ -96,7 +96,7 @@ class MCPToolAdapter:
                 context=context,
             )
 
-        return AgentTool(
+        return LocalTool(
             name=exported_name,
             description=description,
             parameters=parameters,

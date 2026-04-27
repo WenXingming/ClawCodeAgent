@@ -16,7 +16,7 @@ from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, Ope
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
-from tools.agent_tools import build_tool_context, execute_tool
+from tools.local_tools import build_tool_context, execute_tool
 from tools.mcp_models import MCPTool, MCPToolCallResult
 
 

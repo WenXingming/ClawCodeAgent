@@ -1,4 +1,4 @@
-"""Agent 本地工具注册表与执行入口。
+"""本地工具注册表与执行入口。
 
 该模块统一承载工具定义、执行上下文、标准错误封装以及基础文件与 shell
 工具实现，并保持“公有入口在前、处理链局部辅助函数紧跟其后”的阅读顺序。
@@ -38,7 +38,7 @@ class ToolExecutionContext:
     max_output_chars: int  # int: 单次工具调用允许返回的最大文本长度。
     permissions: AgentPermissions  # AgentPermissions: 当前会话的权限开关集合。
     safe_env: dict[str, str] = field(default_factory=dict)  # dict[str, str]: 允许注入 shell 的安全环境变量。
-    tool_registry: dict[str, 'LocalTool'] | None = None  # dict[str, AgentTool] | None: 当前可见工具映射。
+    tool_registry: dict[str, 'LocalTool'] | None = None  # dict[str, LocalTool] | None: 当前可见工具映射。
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,7 @@ def build_tool_context(
 
     Args:
         config (AgentRuntimeConfig): 当前 agent 运行时配置。
-        tool_registry (dict[str, AgentTool] | None): 可选工具注册表。
+        tool_registry (dict[str, LocalTool] | None): 可选工具注册表。
         safe_env (dict[str, str] | None): 可选安全环境变量覆盖。
     Returns:
         ToolExecutionContext: 标准化后的工具执行上下文。
@@ -176,7 +176,7 @@ def execute_tool(
     """按工具名执行一次普通工具调用。
 
     Args:
-        tool_registry (dict[str, AgentTool]): 当前可用工具注册表。
+        tool_registry (dict[str, LocalTool]): 当前可用工具注册表。
         name (str): 目标工具名称。
         arguments (JSONDict): 工具调用参数。
         context (ToolExecutionContext): 当前调用上下文。
@@ -206,7 +206,7 @@ def execute_tool_streaming(
     result 事件。
 
     Args:
-        tool_registry (dict[str, AgentTool]): 当前可用工具注册表。
+        tool_registry (dict[str, LocalTool]): 当前可用工具注册表。
         name (str): 目标工具名称。
         arguments (JSONDict): 工具调用参数。
         context (ToolExecutionContext): 当前调用上下文。
@@ -260,7 +260,7 @@ def default_tool_registry() -> dict[str, LocalTool]:
     Args:
         None: 无参数。
     Returns:
-        dict[str, AgentTool]: 以工具名索引的内置工具映射。
+        dict[str, LocalTool]: 以工具名索引的内置工具映射。
     """
     tools = [
         LocalTool(

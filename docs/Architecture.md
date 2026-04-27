@@ -109,7 +109,7 @@ graph TB
 
     subgraph Tooling[tools package / 工具执行与安全]
         direction TB
-        n_tools(["🛠️ tools/agent_tools.py"])
+        n_tools(["🛠️ tools/local_tools.py"])
         n_mcp_runtime(["🛰️ tools/mcp_runtime.py"])
         n_mcp_adapter(["🔌 tools/mcp_tool_adapter.py"])
         n_bash_security(["🛡️ tools/bash_security.py"])
@@ -265,7 +265,7 @@ test/
 ## 推荐阅读顺序
 
 1. 先看 `core_contracts/`，建立共享契约层边界。
-2. 再看 `openai_client/openai_client.py` 与 `tools/agent_tools.py`，理解模型侧和工具侧的外部交互面。
+2. 再看 `openai_client/openai_client.py` 与 `tools/local_tools.py`，理解模型侧和工具侧的外部交互面。
 3. 再看 `context/`（含 token 估算与预算投影）和 `budget/`（执行闸门），理解预算预检、上下文剪裁和摘要压缩的职责切分。
 4. 再看 `planning/` 与 `extensions/`，理解工作区本地状态和外部扩展能力各自如何发现、持久化和暴露 API。
 5. 最后看 `orchestration/local_agent.py`、`interface/command_line_interface.py` 和 `main.py`，理解这些能力如何被装配成完整入口。

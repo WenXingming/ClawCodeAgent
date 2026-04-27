@@ -8,7 +8,7 @@ from pathlib import Path
 
 from core_contracts.config import AgentRuntimeConfig, BudgetConfig
 from core_contracts.protocol import JSONDict
-from tools.agent_tools import AgentTool
+from tools.local_tools import LocalTool
 
 
 _POLICY_MANIFEST_FILE = Path('.claw') / 'policies.json'
@@ -183,13 +183,13 @@ class HookPolicyRuntime:
 
     def filter_tool_registry(
         self,
-        tool_registry: dict[str, AgentTool],
-    ) -> dict[str, AgentTool]:
+        tool_registry: dict[str, LocalTool],
+    ) -> dict[str, LocalTool]:
         """执行 `filter_tool_registry` 逻辑。
         Args:
-            tool_registry (dict[str, AgentTool]): 参数 `tool_registry`。
+            tool_registry (dict[str, LocalTool]): 参数 `tool_registry`。
         Returns:
-            dict[str, AgentTool]: 函数返回结果。
+            dict[str, LocalTool]: 函数返回结果。
         Raises:
             Exception: 按调用链透传的异常。
         """

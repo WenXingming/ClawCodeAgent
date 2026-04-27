@@ -20,18 +20,18 @@
    - `check_shell_security(...)`
    - `get_destructive_command_warning(...)`
    - `is_command_read_only(...)`
-2. 扩展 `src/tools/agent_tools.py`：
+2. 扩展 `src/tools/local_tools.py`：
    - 新增 `bash` 工具注册。
    - 新增 `_ensure_shell_allowed(...)`。
    - 新增 `_run_bash(...)` 与 `_execute_shell_command(...)`。
    - 新增 `ToolStreamUpdate` 与 `execute_tool_streaming(...)`。
    - 新增 `_run_bash_stream(...)`，输出 `stdout/stderr/result` 三类事件。
-3. 公开能力继续在 `src/tools/agent_tools.py` 暴露：
+3. 公开能力继续在 `src/tools/local_tools.py` 暴露：
    - `ToolStreamUpdate`
    - `execute_tool_streaming`
 4. 新增测试：
    - `test/tools/test_bash_security.py`
-   - `test/tools/test_agent_tools_shell.py`
+   - `test/tools/test_local_tools_shell.py`
 
 ### 未实现（按计划故意延后）
 
@@ -72,14 +72,14 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 执行命令：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_agent_tools_shell.py" -v
+C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_local_tools_shell.py" -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_bash_security.py" -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test/tools/test_agent_tools_shell.py`：6/6 通过。
+1. `test/tools/test_local_tools_shell.py`：6/6 通过。
 2. `test/tools/test_bash_security.py`：8/8 通过。
 3. 全量 `discover`：64/64 通过。
 

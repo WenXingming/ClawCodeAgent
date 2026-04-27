@@ -35,7 +35,7 @@ from extensions.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
-from tools.agent_tools import AgentTool, ToolExecutionError, build_tool_context, default_tool_registry, execute_tool
+from tools.local_tools import LocalTool, ToolExecutionError, build_tool_context, default_tool_registry, execute_tool
 from tools.mcp_models import MCPTransportError
 from tools.mcp_runtime import MCPRuntime
 from tools.mcp_tool_adapter import MCPToolAdapter
@@ -48,7 +48,7 @@ class LocalAgent:
     client: OpenAIClient  # 模型客户端。
     runtime_config: AgentRuntimeConfig  # 运行配置。
     session_store: AgentSessionStore  # 会话持久化依赖。
-    tool_registry: dict[str, AgentTool] = field(default_factory=default_tool_registry)  # 可用工具集合。
+    tool_registry: dict[str, LocalTool] = field(default_factory=default_tool_registry)  # 可用工具集合。
     budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
@@ -155,20 +155,20 @@ class LocalAgent:
 
     def _register_workspace_runtime_tools(
         self,
-        tool_registry: dict[str, AgentTool],
-    ) -> dict[str, AgentTool]:
+        tool_registry: dict[str, LocalTool],
+    ) -> dict[str, LocalTool]:
         """内部方法：执行 `_register_workspace_runtime_tools` 相关逻辑。
         Args:
-            tool_registry (dict[str, AgentTool]): 参数 `tool_registry`。
+            tool_registry (dict[str, LocalTool]): 参数 `tool_registry`。
         Returns:
-            dict[str, AgentTool]: 函数返回结果。
+            dict[str, LocalTool]: 函数返回结果。
         Raises:
             Exception: 按调用链透传的异常。
         """
         merged_registry = dict(tool_registry)
 
         if self.search_runtime.providers:
-            merged_registry['workspace_search'] = AgentTool(
+            merged_registry['workspace_search'] = LocalTool(
                 name='workspace_search',
                 description='Search the configured workspace search provider and return structured web results.',
                 parameters={
@@ -187,7 +187,7 @@ class LocalAgent:
         if self.mcp_runtime.resources or self.mcp_runtime.servers:
             merged_registry.update(
                 {
-                    'mcp_list_resources': AgentTool(
+                    'mcp_list_resources': LocalTool(
                         name='mcp_list_resources',
                         description='List MCP resources discovered from local manifests and configured MCP servers.',
                         parameters={
@@ -200,7 +200,7 @@ class LocalAgent:
                         },
                         handler=self._run_mcp_list_resources,
                     ),
-                    'mcp_read_resource': AgentTool(
+                    'mcp_read_resource': LocalTool(
                         name='mcp_read_resource',
                         description='Read a specific MCP resource by URI.',
                         parameters={

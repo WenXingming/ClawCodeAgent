@@ -12,9 +12,9 @@
 
 ### 已完成
 
-1. 在 `src/tools/agent_tools.py` 增加工具层核心结构：
+1. 在 `src/tools/local_tools.py` 增加工具层核心结构：
    - `ToolExecutionContext`
-   - `AgentTool`
+   - `LocalTool`
    - `build_tool_context(...)`
    - `default_tool_registry(...)`
    - `execute_tool(...)`
@@ -27,8 +27,8 @@
    - `_resolve_workspace_path(...)` 负责工作区越界拦截
    - `_ensure_write_allowed(...)` 负责写权限拦截
    - `ToolPermissionError` 与 `ToolExecutionError` 统一映射到 `ToolExecutionResult.metadata.error_kind`
-4. 当前调用侧直接从 `src/tools/agent_tools.py` 导入 ISSUE-004 常用公开能力，不再依赖源码根聚合导出。
-5. 新增 `test/tools/test_agent_tools.py`，覆盖功能路径与安全路径。
+4. 当前调用侧直接从 `src/tools/local_tools.py` 导入 ISSUE-004 常用公开能力，不再依赖源码根聚合导出。
+5. 新增 `test/tools/test_local_tools.py`，覆盖功能路径与安全路径。
 
 ### 未实现（按计划故意延后）
 
@@ -46,8 +46,8 @@
 
 ## 4. 设计决策（简洁优先）
 
-1. 用 `dict[str, AgentTool]` 作为注册表，不额外引入复杂容器类。
-2. 工具处理函数统一返回 `(content, metadata)` 或 `content`，由 `AgentTool.execute()` 统一封装。
+1. 用 `dict[str, LocalTool]` 作为注册表，不额外引入复杂容器类。
+2. 工具处理函数统一返回 `(content, metadata)` 或 `content`，由 `LocalTool.execute()` 统一封装。
 3. 路径防护优先采用 `Path.resolve() + relative_to(...)`，实现清晰且可审计。
 4. 错误模型只保留两类执行错误：
    - `permission_denied`
@@ -63,20 +63,20 @@ DoD 来源：`docs/FINAL_ARCHITECTURE_PLAN.md`。
 2. 路径越界禁止：✅
    - 证据：`_resolve_workspace_path(...)` 对越界路径抛出 `ToolExecutionError`。
 3. 错误信息结构化：✅
-   - 证据：`AgentTool.execute()` 统一返回 `ToolExecutionResult`，并在 metadata 中标注 `error_kind`。
+   - 证据：`LocalTool.execute()` 统一返回 `ToolExecutionResult`，并在 metadata 中标注 `error_kind`。
 
 ## 6. 测试与结果
 
 执行命令：
 
 ```powershell
-C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_agent_tools.py" -v
+C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/tools -p "test_local_tools.py" -v
 C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v
 ```
 
 结果：
 
-1. `test/tools/test_agent_tools.py`：11/11 通过。
+1. `test/tools/test_local_tools.py`：11/11 通过。
 2. 全量 `discover`：50/50 通过。
 
 关键覆盖：

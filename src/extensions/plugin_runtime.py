@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Mapping
 
 from core_contracts.protocol import JSONDict
-from tools.agent_tools import AgentTool, ToolExecutionContext
+from tools.local_tools import LocalTool, ToolExecutionContext
 
 
 _PLUGIN_MANIFEST_FILE = Path('.claw') / 'plugins.json'
@@ -221,7 +221,7 @@ class PluginRuntime:
     """工作区插件运行时快照。"""
 
     manifests: tuple[PluginManifest, ...] = ()
-    plugin_registry: dict[str, AgentTool] = field(default_factory=dict)
+    plugin_registry: dict[str, LocalTool] = field(default_factory=dict)
     registrations: tuple[PluginRegistration, ...] = ()
     conflicts: tuple[PluginConflict, ...] = ()
     load_errors: tuple[PluginLoadError, ...] = ()
@@ -230,13 +230,13 @@ class PluginRuntime:
     def from_workspace(
         cls,
         workspace: Path,
-        base_tool_registry: Mapping[str, AgentTool],
+        base_tool_registry: Mapping[str, LocalTool],
     ) -> 'PluginRuntime':
         """从工作区加载插件清单并构建插件运行时。
 
         Args:
             workspace (Path): 工作区根目录。
-            base_tool_registry (Mapping[str, AgentTool]): 基础工具注册表。
+            base_tool_registry (Mapping[str, LocalTool]): 基础工具注册表。
 
         Returns:
             PluginRuntime: 含注册结果、冲突与错误信息的运行时对象。
@@ -256,7 +256,7 @@ class PluginRuntime:
                 )
 
         occupied_registry = dict(base_tool_registry)
-        plugin_registry: dict[str, AgentTool] = {}
+        plugin_registry: dict[str, LocalTool] = {}
         registrations: list[PluginRegistration] = []
         conflicts: list[PluginConflict] = []
 
@@ -327,12 +327,12 @@ class PluginRuntime:
             load_errors=tuple(load_errors),
         )
 
-    def merge_tool_registry(self, base_tool_registry: Mapping[str, AgentTool]) -> dict[str, AgentTool]:
+    def merge_tool_registry(self, base_tool_registry: Mapping[str, LocalTool]) -> dict[str, LocalTool]:
         """执行 `merge_tool_registry` 逻辑。
         Args:
-            base_tool_registry (Mapping[str, AgentTool]): 参数 `base_tool_registry`。
+            base_tool_registry (Mapping[str, LocalTool]): 参数 `base_tool_registry`。
         Returns:
-            dict[str, AgentTool]: 函数返回结果。
+            dict[str, LocalTool]: 函数返回结果。
         Raises:
             Exception: 按调用链透传的异常。
         """
@@ -556,14 +556,14 @@ def _validate_declared_tool_names(
         seen.add(tool_name)
 
 
-def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_tool: AgentTool) -> AgentTool:
+def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_tool: LocalTool) -> LocalTool:
     """内部方法：执行 `_build_alias_tool` 相关逻辑。
     Args:
         manifest (PluginManifest): 参数 `manifest`。
         alias (AliasToolSpec): 参数 `alias`。
-        target_tool (AgentTool): 参数 `target_tool`。
+        target_tool (LocalTool): 参数 `target_tool`。
     Returns:
-        AgentTool: 函数返回结果。
+        LocalTool: 函数返回结果。
     Raises:
         Exception: 按调用链透传的异常。
     """
@@ -595,7 +595,7 @@ def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_too
         )
         return content, rendered_metadata
 
-    return AgentTool(
+    return LocalTool(
         name=alias.name,
         description=alias.description or f'Alias for {alias.target} from plugin {manifest.name}.',
         parameters=alias.parameters or _derive_alias_parameters(target_tool.parameters, alias.arguments),
@@ -603,13 +603,13 @@ def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_too
     )
 
 
-def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec) -> AgentTool:
+def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec) -> LocalTool:
     """内部方法：执行 `_build_virtual_tool` 相关逻辑。
     Args:
         manifest (PluginManifest): 参数 `manifest`。
         virtual_tool (VirtualToolSpec): 参数 `virtual_tool`。
     Returns:
-        AgentTool: 函数返回结果。
+        LocalTool: 函数返回结果。
     Raises:
         Exception: 按调用链透传的异常。
     """
@@ -632,7 +632,7 @@ def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec)
         )
         return virtual_tool.content, metadata
 
-    return AgentTool(
+    return LocalTool(
         name=virtual_tool.name,
         description=virtual_tool.description,
         parameters=virtual_tool.parameters or dict(_EMPTY_OBJECT_SCHEMA),
@@ -675,14 +675,14 @@ def _derive_alias_parameters(target_parameters: JSONDict, forced_arguments: JSON
 
 def _describe_tool_source(
     tool_name: str,
-    base_tool_registry: Mapping[str, AgentTool],
-    plugin_registry: Mapping[str, AgentTool],
+    base_tool_registry: Mapping[str, LocalTool],
+    plugin_registry: Mapping[str, LocalTool],
 ) -> str:
     """内部方法：执行 `_describe_tool_source` 相关逻辑。
     Args:
         tool_name (str): 参数 `tool_name`。
-        base_tool_registry (Mapping[str, AgentTool]): 参数 `base_tool_registry`。
-        plugin_registry (Mapping[str, AgentTool]): 参数 `plugin_registry`。
+        base_tool_registry (Mapping[str, LocalTool]): 参数 `base_tool_registry`。
+        plugin_registry (Mapping[str, LocalTool]): 参数 `plugin_registry`。
     Returns:
         str: 函数返回结果。
     Raises:

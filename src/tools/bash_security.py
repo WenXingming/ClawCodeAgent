@@ -1,7 +1,7 @@
 """Shell 命令安全策略。
 
 该模块负责在真正执行 shell 之前做静态风险检查，并把权限开关与命令特征
-组合为统一的允许/拒绝结果，供 agent_tools 中的 bash 工具复用。
+组合为统一的允许/拒绝结果，供 local_tools 中的 bash 工具复用。
 """
 
 from __future__ import annotations
