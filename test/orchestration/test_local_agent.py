@@ -11,13 +11,13 @@ from uuid import uuid4
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.usage import TokenUsage
-from extensions.mcp import MCPTool, MCPToolCallResult
 from extensions.search_runtime import SearchResult, SearchResponse, SearchProviderProfile
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 from tools.agent_tools import build_tool_context, execute_tool
+from tools.mcp_models import MCPTool, MCPToolCallResult
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()

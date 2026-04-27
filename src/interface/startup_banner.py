@@ -50,7 +50,7 @@ class StartupBannerRenderer:
         '   ╚═╝     ╚═════╝  ╚═════╝   ╚═════╝   ╚═════╝ ',
     )
     
-    _DEFAULT_SUBTITLE = 'Tudou Code Agent - Empower Your Coding Journey with AI'
+    _DEFAULT_SUBTITLE = 'Tudou Code Agent - Empower Your Coding Journey with AI \nVersion 1.0.0'
 
     # 渐变色三个锚点：蓝 → 青 → 粉（RGB 整数元组）
     _GRADIENT_STOPS = (

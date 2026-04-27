@@ -464,7 +464,7 @@ print(response.results[0].title)
 ```python
 from pathlib import Path
 
-from extensions.mcp import MCPRuntime
+from tools.mcp_runtime import MCPRuntime
 
 runtime = MCPRuntime.from_workspace(Path('.'))
 print(runtime.list_resources())
@@ -474,7 +474,7 @@ tool_result = runtime.call_tool('echo', arguments={'text': 'hello'}, server_name
 print(tool_result.content)
 ```
 
-说明：当前版本不做远端 MCP 网关和长连接复用；每次 transport 请求都会拉起一次 stdio child process，完成 `initialize` 和目标方法调用。失败会抛出带 `server_name`、`method`、`stderr` 和 `exit_code` 的 `MCPTransportError`，便于上层追踪。
+说明：当前版本把 MCP 运行时平铺在 `src/tools/mcp_*` 模块下，不做远端 MCP 网关和长连接复用。`stdio` transport 仍按单次请求拉起 child process，HTTP/SSE transport 也按一次请求完成 `initialize` 和目标方法调用。失败会抛出带 `server_name`、`method`、`stderr` 和 `exit_code` 的 `MCPTransportError`，便于上层追踪。
 
 ## 15. 预算控制（BudgetConfig）
 

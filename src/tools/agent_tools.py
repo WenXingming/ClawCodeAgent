@@ -1,11 +1,7 @@
-"""ISSUE-004 基础工具集与执行上下文实现。
+"""Agent 本地工具注册表与执行入口。
 
-这个模块只负责本地文件工具能力，目标是提供：
-1) 简单可调用的工具注册表。
-2) 明确的执行上下文（工作目录、权限、输出限制）。
-3) 统一的结构化错误返回。
-
-当前仅实现四个基础工具：list_dir/read_file/write_file/edit_file。
+该模块统一承载工具定义、执行上下文、标准错误封装以及基础文件与 shell
+工具实现，并保持“公有入口在前、处理链局部辅助函数紧跟其后”的阅读顺序。
 """
 
 from __future__ import annotations
@@ -14,7 +10,7 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Callable, Iterator
 
 from .bash_security import check_shell_security
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig
@@ -22,33 +18,37 @@ from core_contracts.protocol import JSONDict, ToolExecutionResult
 
 
 class ToolPermissionError(RuntimeError):
-    """当工具执行被权限策略拒绝时抛出。"""
+    """表示工具调用被权限策略拒绝。"""
 
 
 class ToolExecutionError(RuntimeError):
-    """当工具参数或执行过程不合法时抛出。"""
+    """表示工具参数非法或执行过程失败。"""
 
 
 @dataclass(frozen=True)
 class ToolExecutionContext:
-    """工具执行上下文。"""
+    """描述一次工具调用共享的不可变执行上下文。
 
-    root: Path  # 工作区根目录。
-    command_timeout_seconds: float  # 命令超时时间（为后续工具保留）。
-    max_output_chars: int  # 工具文本输出最大长度。
-    permissions: AgentPermissions  # 当前会话权限开关。
-    safe_env: dict[str, str] = field(default_factory=dict)  # shell 执行可见的安全环境变量。
-    tool_registry: dict[str, 'AgentTool'] | None = None  # 当前可用工具映射（可选）。
+    上层会在进入工具执行前构造该对象，统一提供工作区根目录、权限开关、
+    输出限制和安全环境变量等信息。
+    """
+
+    root: Path  # Path: 当前工具调用可见的工作区根目录。
+    command_timeout_seconds: float  # float: shell 命令允许执行的最长时间。
+    max_output_chars: int  # int: 单次工具调用允许返回的最大文本长度。
+    permissions: AgentPermissions  # AgentPermissions: 当前会话的权限开关集合。
+    safe_env: dict[str, str] = field(default_factory=dict)  # dict[str, str]: 允许注入 shell 的安全环境变量。
+    tool_registry: dict[str, 'AgentTool'] | None = None  # dict[str, AgentTool] | None: 当前可见工具映射。
 
 
 @dataclass(frozen=True)
 class ToolStreamUpdate:
-    """工具流式执行更新。"""
+    """表示流式工具调用过程中产出的单个更新事件。"""
 
-    kind: str  # 更新类型：stdout/stderr/result。
-    chunk: str = ''  # 增量文本片段。
-    result: ToolExecutionResult | None = None  # 最终结果事件携带的结果对象。
-    metadata: JSONDict = field(default_factory=dict)  # 可选元数据。
+    kind: str  # str: 事件类型，通常为 stdout、stderr 或 result。
+    chunk: str = ''  # str: 当前增量文本片段。
+    result: ToolExecutionResult | None = None  # ToolExecutionResult | None: 最终结果事件携带的结果对象。
+    metadata: JSONDict = field(default_factory=dict)  # JSONDict: 附带的可选结构化元数据。
 
 
 ToolHandler = Callable[
@@ -59,15 +59,25 @@ ToolHandler = Callable[
 
 @dataclass(frozen=True)
 class AgentTool:
-    """单个工具定义。"""
+    """表示单个可暴露给模型的工具定义。
 
-    name: str  # 工具名称。
-    description: str  # 工具简述。
-    parameters: JSONDict  # 工具参数 JSON Schema。
-    handler: ToolHandler  # 工具处理函数。
+    每个工具对象同时包含 schema 信息和真正的处理函数，便于注册表直接完成
+    声明导出与实际执行。
+    """
+
+    name: str  # str: 工具名称。
+    description: str  # str: 面向模型的工具说明。
+    parameters: JSONDict  # JSONDict: 工具参数的 JSON Schema。
+    handler: ToolHandler  # ToolHandler: 实际执行该工具的处理函数。
 
     def to_openai_tool(self) -> JSONDict:
-        """转换为 OpenAI-compatible tool 定义。"""
+        """把工具定义转换为 OpenAI 兼容的函数 schema。
+
+        Args:
+            None: 无参数。
+        Returns:
+            JSONDict: OpenAI tools 兼容的函数定义对象。
+        """
         return {
             'type': 'function',
             'function': {
@@ -78,7 +88,14 @@ class AgentTool:
         }
 
     def execute(self, arguments: JSONDict, context: ToolExecutionContext) -> ToolExecutionResult:
-        """执行工具并统一封装返回结构。"""
+        """执行工具并统一封装成功或失败结果。
+
+        Args:
+            arguments (JSONDict): 工具调用参数。
+            context (ToolExecutionContext): 当前调用上下文。
+        Returns:
+            ToolExecutionResult: 统一结构化后的执行结果。
+        """
         try:
             result = self.handler(arguments, context)
             if isinstance(result, tuple):
@@ -109,20 +126,20 @@ class AgentTool:
 
 @dataclass
 class _FileEditRequest:
-    """edit_file 的标准化请求。"""
+    """表示 edit_file 的归一化请求参数。"""
 
-    path: str  # 目标文件路径。
-    old_text: str  # 待替换旧文本。
-    new_text: str  # 新文本。
-    replace_all: bool = False  # 是否替换全部匹配。
+    path: str  # str: 目标文件路径。
+    old_text: str  # str: 需要被匹配和替换的旧文本。
+    new_text: str  # str: 用于替换的新文本。
+    replace_all: bool = False  # bool: 是否替换全部匹配项。
 
 
 @dataclass
 class _TextSlice:
-    """read_file 的标准化行切片参数。"""
+    """表示 read_file 的 1-based 行切片范围。"""
 
-    start_line: int | None = None  # 起始行（1-based，含边界）。
-    end_line: int | None = None  # 结束行（1-based，含边界）。
+    start_line: int | None = None  # int | None: 起始行号，含边界。
+    end_line: int | None = None  # int | None: 结束行号，含边界。
 
 
 def build_tool_context(
@@ -131,15 +148,14 @@ def build_tool_context(
     tool_registry: dict[str, AgentTool] | None = None,
     safe_env: dict[str, str] | None = None,
 ) -> ToolExecutionContext:
-    """根据运行配置构建工具执行上下文。
+    """根据运行时配置构造工具执行上下文。
 
     Args:
-        config (AgentRuntimeConfig): 运行时配置。
-        tool_registry (dict[str, AgentTool] | None): 工具注册表。
-        safe_env (dict[str, str] | None): 允许注入的安全环境变量。
-
+        config (AgentRuntimeConfig): 当前 agent 运行时配置。
+        tool_registry (dict[str, AgentTool] | None): 可选工具注册表。
+        safe_env (dict[str, str] | None): 可选安全环境变量覆盖。
     Returns:
-        ToolExecutionContext: 标准化后的工具执行上下文对象。
+        ToolExecutionContext: 标准化后的工具执行上下文。
     """
     return ToolExecutionContext(
         root=config.cwd.resolve(),
@@ -157,16 +173,15 @@ def execute_tool(
     arguments: JSONDict,
     context: ToolExecutionContext,
 ) -> ToolExecutionResult:
-    """按工具名执行一次工具调用。
+    """按工具名执行一次普通工具调用。
 
     Args:
-        tool_registry (dict[str, AgentTool]): 工具注册表。
-        name (str): 目标工具名。
-        arguments (JSONDict): 工具参数。
-        context (ToolExecutionContext): 执行上下文。
-
+        tool_registry (dict[str, AgentTool]): 当前可用工具注册表。
+        name (str): 目标工具名称。
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
     Returns:
-        ToolExecutionResult: 统一封装的执行结果。
+        ToolExecutionResult: 统一封装后的执行结果。
     """
     tool = tool_registry.get(name)
     if tool is None:
@@ -185,16 +200,18 @@ def execute_tool_streaming(
     arguments: JSONDict,
     context: ToolExecutionContext,
 ) -> Iterator[ToolStreamUpdate]:
-    """按工具名执行一次工具调用，并输出流式更新。
+    """按工具名执行一次流式工具调用。
+
+    当前仅 bash 工具会真正输出增量 stdout/stderr 事件，其余工具直接返回单个
+    result 事件。
 
     Args:
-        tool_registry (dict[str, AgentTool]): 工具注册表。
-        name (str): 目标工具名。
-        arguments (JSONDict): 工具参数。
-        context (ToolExecutionContext): 执行上下文。
-
+        tool_registry (dict[str, AgentTool]): 当前可用工具注册表。
+        name (str): 目标工具名称。
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
     Returns:
-        Iterator[ToolStreamUpdate]: 增量输出及最终结果事件流。
+        Iterator[ToolStreamUpdate]: 流式更新事件序列。
     """
     tool = tool_registry.get(name)
     if tool is None:
@@ -238,10 +255,12 @@ def execute_tool_streaming(
 
 
 def default_tool_registry() -> dict[str, AgentTool]:
-    """返回 ISSUE-004 的最小工具注册表。
+    """返回内置基础工具注册表。
 
+    Args:
+        None: 无参数。
     Returns:
-        dict[str, AgentTool]: 默认启用的基础工具映射。
+        dict[str, AgentTool]: 以工具名索引的内置工具映射。
     """
     tools = [
         AgentTool(
@@ -315,7 +334,16 @@ def default_tool_registry() -> dict[str, AgentTool]:
 
 
 def _list_dir(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
-    """列出目录内容。"""
+    """列出工作区内目录内容。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        str | tuple[str, JSONDict]: 文本结果，或带附加元数据的结果元组。
+    Raises:
+        ToolExecutionError: 当参数非法、目录不存在或路径越界时抛出。
+    """
     raw_path = _get_string(arguments, 'path', default='.')
     max_entries = _get_int(arguments, 'max_entries', default=200, min_value=1, max_value=500)
 
@@ -365,7 +393,16 @@ def _list_dir(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple
 
 
 def _read_file(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
-    """读取文件内容。"""
+    """读取工作区内文本文件，可选按行裁剪。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        str | tuple[str, JSONDict]: 文本结果，或带附加元数据的结果元组。
+    Raises:
+        ToolExecutionError: 当参数非法、文件不存在或路径越界时抛出。
+    """
     raw_path = _require_string(arguments, 'path')
     line_slice = _parse_line_slice(arguments)
 
@@ -394,8 +431,58 @@ def _read_file(arguments: JSONDict, context: ToolExecutionContext) -> str | tupl
     )
 
 
+def _parse_line_slice(arguments: JSONDict) -> _TextSlice:
+    """把 start_line 与 end_line 参数归一化为行切片对象。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+    Returns:
+        _TextSlice: 归一化后的行切片对象。
+    Raises:
+        ToolExecutionError: 当行号类型非法或结束行早于开始行时抛出。
+    """
+    start_line = _get_optional_int(arguments, 'start_line', min_value=1)
+    end_line = _get_optional_int(arguments, 'end_line', min_value=1)
+
+    if start_line is not None and end_line is not None and end_line < start_line:
+        raise ToolExecutionError('end_line must be greater than or equal to start_line')
+
+    return _TextSlice(start_line=start_line, end_line=end_line)
+
+
+def _slice_text_by_line(text: str, line_slice: _TextSlice) -> str:
+    """按 1-based 闭区间切片截取文本。
+
+    Args:
+        text (str): 原始文本内容。
+        line_slice (_TextSlice): 目标行切片范围。
+    Returns:
+        str: 切片后的文本内容。
+    """
+    if line_slice.start_line is None and line_slice.end_line is None:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        return ''
+
+    start = line_slice.start_line or 1
+    end = line_slice.end_line or len(lines)
+    return ''.join(lines[start - 1:end])
+
+
 def _write_file(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
-    """写入文件。"""
+    """写入或创建工作区内文件。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        str | tuple[str, JSONDict]: 文本结果，或带附加元数据的结果元组。
+    Raises:
+        ToolPermissionError: 当当前权限不允许写文件时抛出。
+        ToolExecutionError: 当参数非法、路径越界或目标路径是目录时抛出。
+    """
     _ensure_write_allowed(context)
 
     raw_path = _require_string(arguments, 'path')
@@ -426,7 +513,17 @@ def _write_file(arguments: JSONDict, context: ToolExecutionContext) -> str | tup
 
 
 def _edit_file(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
-    """替换文件中的文本。"""
+    """在工作区文件内执行精确文本替换。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        str | tuple[str, JSONDict]: 文本结果，或带附加元数据的结果元组。
+    Raises:
+        ToolPermissionError: 当当前权限不允许写文件时抛出。
+        ToolExecutionError: 当参数非法、路径越界或 old_text 未匹配时抛出。
+    """
     _ensure_write_allowed(context)
 
     request = _parse_edit_request(arguments)
@@ -464,8 +561,55 @@ def _edit_file(arguments: JSONDict, context: ToolExecutionContext) -> str | tupl
     )
 
 
+def _ensure_write_allowed(context: ToolExecutionContext) -> None:
+    """检查当前上下文是否允许写文件。
+
+    Args:
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        None: 无返回值。
+    Raises:
+        ToolPermissionError: 当 allow_file_write 为 False 时抛出。
+    """
+    if context.permissions.allow_file_write:
+        return
+    raise ToolPermissionError('File write permission denied: allow_file_write=false')
+
+
+def _parse_edit_request(arguments: JSONDict) -> _FileEditRequest:
+    """把 edit_file 参数归一化为内部请求对象。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+    Returns:
+        _FileEditRequest: 归一化后的编辑请求对象。
+    Raises:
+        ToolExecutionError: 当字段缺失、类型错误或 old_text 为空时抛出。
+    """
+    old_text = _require_string(arguments, 'old_text')
+    if not old_text:
+        raise ToolExecutionError('old_text cannot be empty')
+
+    return _FileEditRequest(
+        path=_require_string(arguments, 'path'),
+        old_text=old_text,
+        new_text=_require_string(arguments, 'new_text'),
+        replace_all=_get_bool(arguments, 'replace_all', default=False),
+    )
+
+
 def _run_bash(arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
-    """执行 shell 命令并返回结构化结果。"""
+    """执行 shell 命令并返回结构化文本结果。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        str | tuple[str, JSONDict]: 文本结果，或带附加元数据的结果元组。
+    Raises:
+        ToolPermissionError: 当 shell 权限或安全策略拒绝执行时抛出。
+        ToolExecutionError: 当参数非法或命令执行失败时抛出。
+    """
     command = _require_string(arguments, 'command')
     _ensure_shell_allowed(command, context)
 
@@ -490,7 +634,17 @@ def _run_bash_stream(
     arguments: JSONDict,
     context: ToolExecutionContext,
 ) -> Iterator[ToolStreamUpdate]:
-    """执行 shell 命令并输出 stdout/stderr 增量与最终结果。"""
+    """执行 shell 命令并按 stdout/stderr 分块输出流式事件。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        Iterator[ToolStreamUpdate]: 依次产出的 stdout、stderr 和最终 result 事件。
+    Raises:
+        ToolPermissionError: 当 shell 权限或安全策略拒绝执行时抛出。
+        ToolExecutionError: 当参数非法或命令执行失败时抛出。
+    """
     command = _require_string(arguments, 'command')
     _ensure_shell_allowed(command, context)
 
@@ -521,8 +675,38 @@ def _run_bash_stream(
     )
 
 
+def _ensure_shell_allowed(command: str, context: ToolExecutionContext) -> None:
+    """检查 shell 权限和命令安全策略。
+
+    Args:
+        command (str): 待执行的 shell 命令。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        None: 无返回值。
+    Raises:
+        ToolPermissionError: 当 shell 被禁用或命令命中安全策略时抛出。
+    """
+    allowed, reason = check_shell_security(
+        command,
+        allow_shell=context.permissions.allow_shell_commands,
+        allow_destructive=context.permissions.allow_destructive_shell_commands,
+    )
+    if allowed:
+        return
+    raise ToolPermissionError(f'Shell command blocked: {reason}')
+
+
 def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple[str, str, int]:
-    """执行 shell 命令并返回 stdout/stderr/exit_code。"""
+    """执行 shell 命令并返回 stdout、stderr 与退出码。
+
+    Args:
+        command (str): 待执行的 shell 命令。
+        context (ToolExecutionContext): 当前调用上下文。
+    Returns:
+        tuple[str, str, int]: 依次为 stdout、stderr 和 exit_code。
+    Raises:
+        ToolExecutionError: 当命令执行超时时抛出。
+    """
     environment = dict(os.environ)
     environment.update(context.safe_env)
     process = subprocess.Popen(
@@ -543,7 +727,6 @@ def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple
         try:
             process.communicate(timeout=0.2)
         except subprocess.TimeoutExpired:
-            # 进程被 kill 后仍未及时回收时，直接进入统一超时错误返回。
             pass
         raise ToolExecutionError(
             f'Shell command timed out after {context.command_timeout_seconds} seconds'
@@ -553,7 +736,15 @@ def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple
 
 
 def _render_shell_output(stdout: str, stderr: str, exit_code: int) -> str:
-    """统一 shell 输出文本格式。"""
+    """把 shell 执行结果渲染成 transcript 友好的文本格式。
+
+    Args:
+        stdout (str): 标准输出文本。
+        stderr (str): 标准错误文本。
+        exit_code (int): 进程退出码。
+    Returns:
+        str: 标准化后的 shell 输出文本。
+    """
     lines = [
         f'exit_code={exit_code}',
         '[stdout]',
@@ -564,64 +755,6 @@ def _render_shell_output(stdout: str, stderr: str, exit_code: int) -> str:
     return '\n'.join(lines).strip()
 
 
-def _ensure_write_allowed(context: ToolExecutionContext) -> None:
-    """统一写权限检查。"""
-    if context.permissions.allow_file_write:
-        return
-    raise ToolPermissionError('File write permission denied: allow_file_write=false')
-
-
-def _ensure_shell_allowed(command: str, context: ToolExecutionContext) -> None:
-    """统一 shell 权限与安全策略检查。"""
-    allowed, reason = check_shell_security(
-        command,
-        allow_shell=context.permissions.allow_shell_commands,
-        allow_destructive=context.permissions.allow_destructive_shell_commands,
-    )
-    if allowed:
-        return
-    raise ToolPermissionError(f'Shell command blocked: {reason}')
-
-
-def _parse_edit_request(arguments: JSONDict) -> _FileEditRequest:
-    """解析 edit_file 参数。"""
-    old_text = _require_string(arguments, 'old_text')
-    if not old_text:
-        raise ToolExecutionError('old_text cannot be empty')
-
-    return _FileEditRequest(
-        path=_require_string(arguments, 'path'),
-        old_text=old_text,
-        new_text=_require_string(arguments, 'new_text'),
-        replace_all=_get_bool(arguments, 'replace_all', default=False),
-    )
-
-
-def _parse_line_slice(arguments: JSONDict) -> _TextSlice:
-    """解析 read_file 行切片参数。"""
-    start_line = _get_optional_int(arguments, 'start_line', min_value=1)
-    end_line = _get_optional_int(arguments, 'end_line', min_value=1)
-
-    if start_line is not None and end_line is not None and end_line < start_line:
-        raise ToolExecutionError('end_line must be greater than or equal to start_line')
-
-    return _TextSlice(start_line=start_line, end_line=end_line)
-
-
-def _slice_text_by_line(text: str, line_slice: _TextSlice) -> str:
-    """按 1-based 行号截取文本。"""
-    if line_slice.start_line is None and line_slice.end_line is None:
-        return text
-
-    lines = text.splitlines(keepends=True)
-    if not lines:
-        return ''
-
-    start = line_slice.start_line or 1
-    end = line_slice.end_line or len(lines)
-    return ''.join(lines[start - 1:end])
-
-
 def _resolve_workspace_path(
     *,
     context: ToolExecutionContext,
@@ -630,7 +763,19 @@ def _resolve_workspace_path(
     expect_file: bool = False,
     expect_dir: bool = False,
 ) -> Path:
-    """解析并校验路径必须位于工作区内。"""
+    """解析路径并强制其位于工作区根目录之内。
+
+    Args:
+        context (ToolExecutionContext): 当前调用上下文。
+        raw_path (str): 原始路径字符串。
+        must_exist (bool): 是否要求目标路径必须存在。
+        expect_file (bool): 是否要求目标路径是文件。
+        expect_dir (bool): 是否要求目标路径是目录。
+    Returns:
+        Path: 解析后的绝对路径。
+    Raises:
+        ToolExecutionError: 当路径越界、缺失或类型不符合预期时抛出。
+    """
     candidate = Path(raw_path)
     resolved = candidate.resolve() if candidate.is_absolute() else (context.root / candidate).resolve()
 
@@ -652,7 +797,14 @@ def _resolve_workspace_path(
 
 
 def _truncate_output(text: str, limit: int) -> str:
-    """按上限截断输出，保留头尾信息。"""
+    """按上限裁剪输出，同时尽量保留头尾信息。
+
+    Args:
+        text (str): 原始输出文本。
+        limit (int): 允许返回的最大字符数。
+    Returns:
+        str: 裁剪后的输出文本。
+    """
     if limit <= 0 or len(text) <= limit:
         return text
 
@@ -663,7 +815,14 @@ def _truncate_output(text: str, limit: int) -> str:
 
 
 def _to_relative_display(path: Path, root: Path) -> str:
-    """把绝对路径转换为工作区内相对显示路径。"""
+    """把绝对路径转换为工作区内相对显示路径。
+
+    Args:
+        path (Path): 待转换路径。
+        root (Path): 工作区根目录。
+    Returns:
+        str: 相对路径字符串；不在工作区内时返回绝对路径字符串。
+    """
     try:
         relative = path.relative_to(root)
     except ValueError:
@@ -673,7 +832,14 @@ def _to_relative_display(path: Path, root: Path) -> str:
 
 
 def _iter_output_chunks(text: str, chunk_size: int = 512) -> Iterator[str]:
-    """把输出按固定大小切成可回放片段。"""
+    """把文本按固定块大小拆分为流式片段。
+
+    Args:
+        text (str): 原始文本。
+        chunk_size (int): 每个片段的最大字符数。
+    Returns:
+        Iterator[str]: 顺序产出的文本片段迭代器。
+    """
     if not text:
         return
     for start in range(0, len(text), chunk_size):
@@ -681,7 +847,16 @@ def _iter_output_chunks(text: str, chunk_size: int = 512) -> Iterator[str]:
 
 
 def _require_string(arguments: JSONDict, key: str) -> str:
-    """读取必填字符串参数。"""
+    """读取必填字符串参数。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        key (str): 目标字段名。
+    Returns:
+        str: 字段对应的字符串值。
+    Raises:
+        ToolExecutionError: 当字段缺失或不是字符串时抛出。
+    """
     value = arguments.get(key)
     if not isinstance(value, str):
         raise ToolExecutionError(f'Argument "{key}" must be a string')
@@ -689,7 +864,17 @@ def _require_string(arguments: JSONDict, key: str) -> str:
 
 
 def _get_string(arguments: JSONDict, key: str, *, default: str) -> str:
-    """读取可选字符串参数。"""
+    """读取可选字符串参数，并在缺失时回退默认值。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        key (str): 目标字段名。
+        default (str): 默认值。
+    Returns:
+        str: 字段对应的字符串值。
+    Raises:
+        ToolExecutionError: 当字段存在但不是字符串时抛出。
+    """
     value = arguments.get(key, default)
     if not isinstance(value, str):
         raise ToolExecutionError(f'Argument "{key}" must be a string')
@@ -697,7 +882,17 @@ def _get_string(arguments: JSONDict, key: str, *, default: str) -> str:
 
 
 def _get_bool(arguments: JSONDict, key: str, *, default: bool) -> bool:
-    """读取可选布尔参数。"""
+    """读取可选布尔参数，并在缺失时回退默认值。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        key (str): 目标字段名。
+        default (bool): 默认值。
+    Returns:
+        bool: 字段对应的布尔值。
+    Raises:
+        ToolExecutionError: 当字段存在但不是布尔值时抛出。
+    """
     value = arguments.get(key, default)
     if not isinstance(value, bool):
         raise ToolExecutionError(f'Argument "{key}" must be a boolean')
@@ -712,7 +907,19 @@ def _get_int(
     min_value: int | None = None,
     max_value: int | None = None,
 ) -> int:
-    """读取可选整数参数并校验范围。"""
+    """读取整数参数并校验取值范围。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        key (str): 目标字段名。
+        default (int): 默认值。
+        min_value (int | None): 可选最小值约束。
+        max_value (int | None): 可选最大值约束。
+    Returns:
+        int: 字段对应的整数值。
+    Raises:
+        ToolExecutionError: 当字段不是整数或超出范围时抛出。
+    """
     value = arguments.get(key, default)
     if not isinstance(value, int) or isinstance(value, bool):
         raise ToolExecutionError(f'Argument "{key}" must be an integer')
@@ -730,7 +937,17 @@ def _get_optional_int(
     *,
     min_value: int | None = None,
 ) -> int | None:
-    """读取可选整数参数。"""
+    """读取可选整数参数。
+
+    Args:
+        arguments (JSONDict): 工具调用参数。
+        key (str): 目标字段名。
+        min_value (int | None): 可选最小值约束。
+    Returns:
+        int | None: 字段对应的整数值；缺失时返回 None。
+    Raises:
+        ToolExecutionError: 当字段存在但不是整数或小于最小值时抛出。
+    """
     value = arguments.get(key)
     if value is None:
         return None

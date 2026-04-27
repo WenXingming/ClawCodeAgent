@@ -28,7 +28,6 @@ from core_contracts.config import AgentRuntimeConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.result import AgentRunResult
 from core_contracts.usage import TokenUsage
-from extensions.mcp import MCPRuntime, MCPToolAdapter, MCPTransportError
 from extensions.search_runtime import SearchQueryError, SearchRuntime
 from openai_client.openai_client import OpenAIClient
 from extensions.hook_policy_runtime import HookPolicyRuntime
@@ -37,6 +36,9 @@ from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
 from tools.agent_tools import AgentTool, ToolExecutionError, build_tool_context, default_tool_registry, execute_tool
+from tools.mcp_models import MCPTransportError
+from tools.mcp_runtime import MCPRuntime
+from tools.mcp_tool_adapter import MCPToolAdapter
 
 
 @dataclass
@@ -303,7 +305,7 @@ class LocalAgent:
             raise ToolExecutionError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.mcp_runtime.render_resource_index(query=query, limit=limit),
+            self.mcp_runtime.render_resource_index(query=query, server_name=server_name, limit=limit),
             context.max_output_chars,
         )
         return content, {'resource_count': len(resources), 'server_name': server_name or ''}

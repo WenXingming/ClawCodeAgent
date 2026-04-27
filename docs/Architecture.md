@@ -81,7 +81,6 @@ graph TB
         n_hook_policy(["🛡️ extensions/hook_policy_runtime.py"])
         n_plugin(["🧩 extensions/plugin_runtime.py"])
         n_search(["🔎 extensions/search_runtime.py"])
-        n_mcp(["🛰️ extensions/mcp/runtime.py"])
         style Extensions fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -111,6 +110,8 @@ graph TB
     subgraph Tooling[tools package / 工具执行与安全]
         direction TB
         n_tools(["🛠️ tools/agent_tools.py"])
+        n_mcp_runtime(["🛰️ tools/mcp_runtime.py"])
+        n_mcp_adapter(["🔌 tools/mcp_tool_adapter.py"])
         n_bash_security(["🛡️ tools/bash_security.py"])
         style Tooling fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
@@ -145,6 +146,8 @@ graph TB
     n_agent --> n_plugin
     n_agent --> n_openai_client
     n_agent --> n_tools
+    n_agent --> n_mcp_runtime
+    n_agent --> n_mcp_adapter
     n_agent --> n_session_state
     n_agent --> n_session_store
     n_agent --> n_budget_context_orchestrator
@@ -162,6 +165,8 @@ graph TB
     n_workflow --> n_task
     n_hook_policy --> n_tools
     n_plugin --> n_tools
+    n_mcp_adapter --> n_tools
+    n_mcp_adapter --> n_mcp_runtime
     n_tools --> n_bash_security
 
     n_session_store --> n_session_snapshot
@@ -178,7 +183,6 @@ graph TB
     n_hook_policy -.-> n_core_contracts
     n_plugin -.-> n_core_contracts
     n_search -.-> n_core_contracts
-    n_mcp -.-> n_core_contracts
     n_task -.-> n_core_contracts
     n_plan -.-> n_core_contracts
     n_workflow -.-> n_core_contracts
@@ -186,6 +190,8 @@ graph TB
     n_session_state -.-> n_core_contracts
     n_session_snapshot -.-> n_core_contracts
     n_tools -.-> n_core_contracts
+    n_mcp_runtime -.-> n_core_contracts
+    n_mcp_adapter -.-> n_core_contracts
     n_openai_client -.-> n_core_contracts
 
     style main fill:#343a40,color:#fff,stroke:#1d2124
@@ -196,7 +202,6 @@ graph TB
     style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
     style n_plugin fill:#0d6efd,color:#fff,stroke:#0a58ca
     style n_search fill:#f76707,color:#fff,stroke:#d9480f
-    style n_mcp fill:#1098ad,color:#fff,stroke:#0c8599
     style n_task fill:#20c997,color:#fff,stroke:#0f8f6b
     style n_plan fill:#ff922b,color:#fff,stroke:#d97706
     style n_workflow fill:#e8590c,color:#fff,stroke:#c2410c
@@ -206,6 +211,8 @@ graph TB
     style n_snip fill:#2f9e44,color:#fff,stroke:#1b5e20
     style n_compact fill:#1c7ed6,color:#fff,stroke:#1864ab
     style n_tools fill:#fd7e14,color:#fff,stroke:#d9480f
+    style n_mcp_runtime fill:#1098ad,color:#fff,stroke:#0c8599
+    style n_mcp_adapter fill:#15aabf,color:#fff,stroke:#0b7285
     style n_bash_security fill:#ffc107,color:#000,stroke:#d39e00
     style n_session_state fill:#17a2b8,color:#fff,stroke:#117a8b
     style n_session_snapshot fill:#17a2b8,color:#fff,stroke:#117a8b
