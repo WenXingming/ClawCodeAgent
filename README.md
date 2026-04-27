@@ -415,7 +415,47 @@ print(response.results[0].title)
 
 说明：当前版本不做多 provider 融合排序；查询失败时会按 `max_retries` 重试，重试耗尽后抛出带 `provider_id`、`attempts` 和错误文本的 `SearchQueryError`，便于上层做可控处理。
 
-## 14. 工作区 MCP Runtime（ISSUE-021）
+## 14. 工作区 Worktree Runtime（ISSUE-023）
+
+当前版本支持在本地 git 仓库上创建和管理“受管工作树”，用于把分支切到独立目录，并把逻辑 cwd 的切换、退出回退和历史记录稳定持久化下来。
+
+持久化路径：
+
+- `.claw/worktree_state.json`
+- `.claw/worktree_history.json`
+
+当前能力：
+
+- `from_workspace`：探测仓库顶层目录与 git common dir，并恢复已保存的 worktree 状态。
+- `enter_worktree`：创建新分支、新增 git worktree，并把 runtime 的 `current_cwd` 切到目标目录。
+- `exit_worktree(remove=False)`：退出当前 worktree，保留目录并把 `current_cwd` 回退到 enter 前位置。
+- `exit_worktree(remove=True)`：删除当前 worktree 目录；删除前若检测到脏工作树会直接阻断。
+
+当前设计约束：
+
+- 只允许一个 active managed worktree。
+- 默认 worktree 目录落在仓库父目录下，命名为 `<workspace-name>--wt--<sanitized-branch>`。
+- `remove=True` 只移除 worktree 目录，不删除分支，优先保证可回滚性。
+
+代码示例：
+
+```python
+from pathlib import Path
+
+from extensions.worktree_runtime import WorktreeRuntime
+
+runtime = WorktreeRuntime.from_workspace(Path('.'))
+record = runtime.enter_worktree('feature/demo-worktree')
+print(record.path)
+print(runtime.current_cwd)
+
+runtime.exit_worktree(remove=False)
+print(runtime.current_cwd)
+```
+
+说明：当前版本先把 Worktree Runtime 保持为独立模块，不直接接入主循环和 CLI 控制面；后续 issue 可以在控制面层消费 `current_cwd`、active 记录和历史事件，把 cwd 切换行为暴露给最终用户。
+
+## 15. 工作区 MCP Runtime（ISSUE-021）
 
 当前版本支持从工作区发现 MCP manifest，读取本地 manifest 资源，并通过 stdio transport 调用 MCP server 的 `resources/list/read` 与 `tools/list/call`。
 
@@ -476,7 +516,7 @@ print(tool_result.content)
 
 说明：当前版本把 MCP 运行时平铺在 `src/tools/mcp_*` 模块下，不做远端 MCP 网关和长连接复用。`stdio` transport 仍按单次请求拉起 child process，HTTP/SSE transport 也按一次请求完成 `initialize` 和目标方法调用。失败会抛出带 `server_name`、`method`、`stderr` 和 `exit_code` 的 `MCPTransportError`，便于上层追踪。
 
-## 15. 预算控制（BudgetConfig）
+## 16. 预算控制（BudgetConfig）
 
 通过 `BudgetConfig` 可以为每次运行设置多维度的安全上限：
 
@@ -511,13 +551,13 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 
 **软超限（is_soft_over）**：当 prompt 接近上限但尚未触发硬停止时，`token_budget` event 中的 `is_soft_over=True`，ISSUE-010/011 的 snip/compact 将据此压缩上下文。
 
-## 16. CLI 迁移说明
+## 17. CLI 迁移说明
 
 - 旧用法 `python src/main.py "prompt"` 已不再支持。
 - 旧用法 `python src/main.py --session-id <id> "prompt"` 已不再支持。
 - 新命令面固定为：`agent`、`agent-chat`、`agent-resume`。
 
-## 17. 说明
+## 18. 说明
 
 - `--model`、`--base-url`、`--api-key` 都支持命令行覆盖。
 - 若不传命令行参数，程序会回退读取环境变量：

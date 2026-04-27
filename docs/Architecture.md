@@ -26,6 +26,7 @@ src/
 |  |- plugin_runtime.py
 |  |- hook_policy_runtime.py
 |  |- search_runtime.py
+|  |- worktree_runtime.py
 |  '- mcp/
 |- budget/
 |  '- budget_guard.py
@@ -81,6 +82,7 @@ graph TB
         n_hook_policy(["🛡️ extensions/hook_policy_runtime.py"])
         n_plugin(["🧩 extensions/plugin_runtime.py"])
         n_search(["🔎 extensions/search_runtime.py"])
+        n_worktree(["🌿 extensions/worktree_runtime.py"])
         style Extensions fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -144,6 +146,7 @@ graph TB
     n_agent --> n_slash
     n_agent --> n_hook_policy
     n_agent --> n_plugin
+    n_agent --> n_worktree
     n_agent --> n_openai_client
     n_agent --> n_tools
     n_agent --> n_mcp_runtime
@@ -183,6 +186,7 @@ graph TB
     n_hook_policy -.-> n_core_contracts
     n_plugin -.-> n_core_contracts
     n_search -.-> n_core_contracts
+    n_worktree -.-> n_core_contracts
     n_task -.-> n_core_contracts
     n_plan -.-> n_core_contracts
     n_workflow -.-> n_core_contracts
@@ -202,6 +206,7 @@ graph TB
     style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
     style n_plugin fill:#0d6efd,color:#fff,stroke:#0a58ca
     style n_search fill:#f76707,color:#fff,stroke:#d9480f
+    style n_worktree fill:#2b8a3e,color:#fff,stroke:#1f6f2d
     style n_task fill:#20c997,color:#fff,stroke:#0f8f6b
     style n_plan fill:#ff922b,color:#fff,stroke:#d97706
     style n_workflow fill:#e8590c,color:#fff,stroke:#c2410c
@@ -229,7 +234,7 @@ graph TB
 - `budget/` 只保留 `BudgetGuard`：集中管理主循环的五维执行限制（turns / model_calls / token / cost / tool_calls），是 orchestration 层的运行时闸门。
 - `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextBudgetEvaluator`（含 `ContextBudgetSnapshot`）提供预算投影，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
-- `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、MCP server 都从工作区 `.claw/` manifest 或环境变量发现并对外提供独立 API。
+- `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、worktree runtime、MCP server 都从工作区 `.claw/` manifest、git 状态或环境变量发现并对外提供独立 API。
 - `interface/` 负责 CLI 和 slash 命令；`slash_commands_interface.py` 依赖预算投影和工具注册表，但不会触发模型调用。
 - `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
 

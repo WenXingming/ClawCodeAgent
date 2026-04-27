@@ -1041,6 +1041,14 @@
 
 交付物：worktree runtime 与测试。
 
+实施落地决策（2026-04-27）：
+
+- 新增 `src/extensions/worktree_runtime.py`，保持为**独立 runtime**，本期不直接接入主循环、CLI 或 slash 控制面；上层后续只需消费 `current_cwd`、`active_worktree()` 与历史记录即可完成集成。
+- 持久化统一落在工作区 `.claw/`：当前使用 `.claw/worktree_state.json` 保存逻辑 cwd 与受管工作树列表，`.claw/worktree_history.json` 保存 enter/exit 历史事件。
+- 默认 worktree 路径采用**仓库父目录下的 sibling 目录策略**：`<workspace-name>--wt--<sanitized-branch>`；若调用方显式传入相对路径，也按 `workspace.parent` 解析，避免默认把受管 worktree 放回仓库内部。
+- runtime 只允许**一个 active managed worktree**；已退出保留或已移除的记录会继续留在状态文件中，满足“状态文件和历史完整”的验收要求，但本期不实现多 active worktree 调度。
+- `exit_worktree(remove=True)` 仅执行 `git worktree remove`，**不删除分支**；这是刻意的保守策略，用来降低误删分支和回滚成本。脏工作树在 remove 前会先用 `git status --porcelain` 阻断。
+
 #### ISSUE-024 delegate_agent 与 AgentManager 编排
 
 类型：feature
