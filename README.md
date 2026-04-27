@@ -40,15 +40,20 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent --cwd . --max-turns 8 --
 
 `agent-chat` 与 `agent` 完全等价，均进入多轮交互循环。推荐在需要指定 `--session-id` 直接续接历史会话时使用：
 
+交互式命令默认会在任务执行期间输出 `[progress]` 逐行过程日志；如需保持旧式静默输出，可显式追加 `--no-show-progress`。
+
 ```powershell
 # 新会话进入交互模式
 C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat
 
 # 直接续接指定 session_id（无需单独执行 agent-resume）
 C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --session-id <session_id>
+
+# 禁用执行中 progress 日志
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat --no-show-progress
 ```
 
-进入循环后可继续输入新问题；输入 `.exit` 或 `.quit` 退出。
+进入循环后可继续输入新问题；输入 `/exit` 或 `/quit` 退出。
 
 ## 6. 续跑已保存会话（agent-resume）
 
@@ -61,6 +66,9 @@ Get-ChildItem .port_sessions\agent\
 
 # 进入 Resume 交互循环（默认继承上次保存的 model/runtime 配置，也可显式覆盖部分参数）
 C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id>
+
+# 如需关闭执行中 progress 日志，可追加 --no-show-progress
+C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id> --no-show-progress
 ```
 
 **常见错误**

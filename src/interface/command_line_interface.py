@@ -18,6 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from interface.exit_banner import SessionExitSummaryRenderer, SessionInteractionTracker
+from interface.runtime_event_printer import RuntimeEventPrinter
 from interface.startup_banner import StartupBannerRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.model_pricing import ModelPricing
@@ -232,6 +233,12 @@ class CLI:
             default=None,
             help='Enable or disable streaming model responses.',
         )
+        group.add_argument(
+            '--show-progress',
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help='Enable or disable runtime progress logs during interactive turns.',
+        )
         group.add_argument('--auto-snip-threshold-tokens', type=int, default=None, help='Auto snip threshold override.')
         group.add_argument('--auto-compact-threshold-tokens', type=int, default=None, help='Auto compact threshold override.')
         group.add_argument('--compact-preserve-messages', type=int, default=None, help='Tail messages preserved during compact/snip.')
@@ -323,6 +330,7 @@ class CLI:
             current_session_id=None,
             current_session_directory=current_session_directory,
             pending_session_snapshot=None,
+            show_progress=self._resolve_show_progress(args),
         )
 
     def _build_agent_from_args(self, args: argparse.Namespace) -> tuple[LocalAgent, AgentRuntimeConfig]:
@@ -617,6 +625,7 @@ class CLI:
         current_session_id: str | None,
         current_session_directory: Path | None,
         pending_session_snapshot: AgentSessionSnapshot | None,
+        show_progress: bool,
     ) -> int:
         """执行通用多轮交互循环，供三条子命令共用。
 
@@ -632,19 +641,24 @@ class CLI:
             int: 交互循环退出码；用户主动退出、EOF、KeyboardInterrupt 均返回 0。
         """
         self._banner_renderer.render()
+        progress_printer = RuntimeEventPrinter() if show_progress else None
+        self._configure_agent_progress(agent, progress_printer)
         interaction_tracker = SessionInteractionTracker.start(current_session_id)
         while True:
             try:
                 prompt = input('agent> ')
             except EOFError:
+                self._flush_progress_printer(progress_printer)
                 return self._finalize_interactive_loop(interaction_tracker, leading_blank_line=True)
             except KeyboardInterrupt:
+                self._flush_progress_printer(progress_printer)
                 return self._finalize_interactive_loop(interaction_tracker, leading_blank_line=True)
 
             normalized = prompt.strip()
             if not normalized:
                 continue
             if normalized in self._chat_exit_commands:
+                self._flush_progress_printer(progress_printer)
                 return self._finalize_interactive_loop(interaction_tracker)
 
             result = self._execute_chat_turn(
@@ -655,6 +669,7 @@ class CLI:
                 session_snapshot=pending_session_snapshot,
             )
             pending_session_snapshot = None
+            self._flush_progress_printer(progress_printer)
             self._render_chat_result(result, previous_session_id=current_session_id)
             current_session_id, current_session_directory = self._advance_chat_state(
                 result,
@@ -667,6 +682,28 @@ class CLI:
                 current_session_id=current_session_id,
             )
             print()  # turn separator, 每轮结束后输出一个空行分隔
+
+    @staticmethod
+    def _resolve_show_progress(args: argparse.Namespace) -> bool:
+        """解析交互式 progress 输出开关，默认开启。"""
+        if args.show_progress is None:
+            return True
+        return bool(args.show_progress)
+
+    @staticmethod
+    def _configure_agent_progress(
+        agent: object,
+        progress_printer: RuntimeEventPrinter | None,
+    ) -> None:
+        """为当前 agent 动态挂载 progress reporter。"""
+        reporter = progress_printer.emit if progress_printer is not None else None
+        setattr(agent, 'progress_reporter', reporter)
+
+    @staticmethod
+    def _flush_progress_printer(progress_printer: RuntimeEventPrinter | None) -> None:
+        """输出 progress printer 中尚未刷新的残留片段。"""
+        if progress_printer is not None:
+            progress_printer.flush()
 
     def _execute_chat_turn(
         self,
@@ -734,8 +771,31 @@ class CLI:
         """
         if result.final_output:
             print(result.final_output)
-        if result.session_id and result.session_id != previous_session_id:
-            print(f'[session] {result.session_id}')
+        elif fallback_message := self._derive_empty_result_message(result):
+            print(fallback_message)
+        # if result.session_id and result.session_id != previous_session_id:
+        #     print(f'[session] {result.session_id}')
+
+    @staticmethod
+    def _derive_empty_result_message(result: AgentRunResult) -> str | None:
+        """当 final_output 为空时，从 stop_reason 或 events 里提取可读诊断信息。"""
+        for event in reversed(result.events):
+            if event.get('type') != 'backend_error':
+                continue
+            error_text = event.get('error')
+            if isinstance(error_text, str) and error_text.strip():
+                return f'[error] {error_text.strip()}'
+
+        for event in reversed(result.events):
+            if event.get('type') != 'budget_stop':
+                continue
+            reason = event.get('reason')
+            if isinstance(reason, str) and reason.strip():
+                return f'[warning] Agent stopped: {reason.strip()}'
+
+        if result.stop_reason and result.stop_reason not in {'stop', 'completed', 'slash_command'}:
+            return f'[warning] Agent stopped: {result.stop_reason}'
+        return None
 
     def _advance_chat_state(
         self,
@@ -809,6 +869,7 @@ class CLI:
             current_session_id=args.session_id,
             current_session_directory=current_session_directory,
             pending_session_snapshot=pending_session_snapshot,
+            show_progress=self._resolve_show_progress(args),
         )
 
     def _build_resumed_agent(
@@ -882,6 +943,7 @@ class CLI:
             current_session_id=current_session_id,
             current_session_directory=current_session_directory,
             pending_session_snapshot=pending_session_snapshot,
+            show_progress=self._resolve_show_progress(args),
         )
 
     # ------------------------------------------------------------------

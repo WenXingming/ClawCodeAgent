@@ -14,7 +14,7 @@ ISSUE-008 扩展：
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, Iterable
 from dataclasses import dataclass, field
 from uuid import uuid4
 
@@ -52,6 +52,7 @@ class LocalAgent:
     tool_service: LocalToolService = field(default_factory=LocalToolService)
     agent_manager: AgentManager = field(default_factory=AgentManager)  # AgentManager: 当前 run/resume 树共享的子代理编排器。
     current_agent_id: str | None = None  # str | None: 当前 LocalAgent 对应的受管代理标识；根调用与 child 调用均会设置。
+    progress_reporter: Callable[[JSONDict], None] | None = None  # Callable[[JSONDict], None] | None: 可选的实时进度上报回调。
     tool_registry: dict[str, LocalTool] = field(init=False)  # 可用工具集合。
     budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
@@ -226,6 +227,27 @@ class LocalAgent:
             context_compactor=self.context_compactor,
         )
         self.slash_dispatcher = SlashCommandDispatcher(self.budget_evaluator)
+
+    def _emit_progress_event(self, event: JSONDict) -> None:
+        """向可选 reporter 发送一个实时事件。"""
+        if self.progress_reporter is None:
+            return
+        self.progress_reporter(dict(event))
+
+    def _record_event(self, events: list[JSONDict], event: JSONDict) -> None:
+        """把事件写入持久化列表，并同步推送到实时 reporter。"""
+        stored_event = dict(event)
+        events.append(stored_event)
+        self._emit_progress_event(stored_event)
+
+    def _extend_recorded_events(
+        self,
+        events: list[JSONDict],
+        new_events: Iterable[JSONDict],
+    ) -> None:
+        """批量写入并推送事件。"""
+        for event in new_events:
+            self._record_event(events, event)
 
     def _register_workspace_runtime_tools(
         self,
@@ -668,6 +690,7 @@ class LocalAgent:
                         agent_manager=self.agent_manager,
                         current_agent_id=child_agent_id,
                     )
+                    child_agent.progress_reporter = self.progress_reporter
                     if task.resume_session_id:
                         session_snapshot = self.session_store.load(task.resume_session_id)
                         child_result = child_agent.resume(task.prompt, session_snapshot)
@@ -1194,7 +1217,7 @@ class LocalAgent:
             usage_delta = pre_model_outcome.usage_delta
             model_call_count = pre_model_outcome.model_call_count
             pre_model_stop = pre_model_outcome.pre_model_stop
-            events.extend(pre_model_outcome.events)
+            self._extend_recorded_events(events, pre_model_outcome.events)
 
             # 模型调用前四维预算检查（session_turns / model_calls / token / cost）
             if pre_model_stop is not None:
@@ -1206,6 +1229,7 @@ class LocalAgent:
                     turn_index=turn_index, events=events,
                 )
 
+            self._emit_progress_event({'type': 'model_start', 'turn': turn_index})
             response = self._complete_with_reactive_compact(
                 session_state=session_state,
                 openai_tools=openai_tools,
@@ -1244,12 +1268,15 @@ class LocalAgent:
             if response.content:
                 final_output = response.content
 
-            events.append({
-                'type': 'model_turn',
-                'turn': turn_index,
-                'finish_reason': response.finish_reason,
-                'tool_calls': len(response.tool_calls),
-            })
+            self._record_event(
+                events,
+                {
+                    'type': 'model_turn',
+                    'turn': turn_index,
+                    'finish_reason': response.finish_reason,
+                    'tool_calls': len(response.tool_calls),
+                },
+            )
 
             # 没有工具调用时，说明当前任务已收敛
             if not response.tool_calls:
@@ -1285,6 +1312,15 @@ class LocalAgent:
                     'after_hook_sources': [hook['source'] for hook in after_hooks],
                 }
 
+                self._emit_progress_event(
+                    {
+                        'type': 'tool_start',
+                        'turn': turn_index,
+                        'tool_call_id': tool_call.id,
+                        'tool_name': tool_call.name,
+                    }
+                )
+
                 block_decision = self.hook_policy_runtime.resolve_block(tool_call.name)
                 if block_decision is None:
                     block_decision = self.plugin_runtime.resolve_block(tool_call.name)
@@ -1295,7 +1331,8 @@ class LocalAgent:
                         block_decision,
                         metadata_updates,
                     )
-                    events.append(
+                    self._record_event(
+                        events,
                         {
                             'type': 'tool_blocked',
                             'turn': turn_index,
@@ -1304,7 +1341,7 @@ class LocalAgent:
                             'source': block_decision['source'],
                             'source_name': block_decision['source_name'],
                             'reason': block_decision['reason'],
-                        }
+                        },
                     )
                 else:
                     if tool_call.name == 'delegate_agent':
@@ -1312,13 +1349,12 @@ class LocalAgent:
                             tool_call.arguments,
                             tool_context,
                         )
-                        events.extend(delegate_events)
+                        self._extend_recorded_events(events, delegate_events)
                     else:
-                        tool_result = self.tool_service.execute(
-                            self.tool_registry,
-                            tool_call.name,
-                            tool_call.arguments,
-                            tool_context,
+                        tool_result = self._execute_tool_call(
+                            tool_call=tool_call,
+                            turn_index=turn_index,
+                            tool_context=tool_context,
                         )
                     tool_result = self._merge_tool_result_metadata(tool_result, metadata_updates)
 
@@ -1333,15 +1369,18 @@ class LocalAgent:
                         events=events,
                     )
 
-                events.append({
-                    'type': 'tool_result',
-                    'turn': turn_index,
-                    'tool_call_id': tool_call.id,
-                    'tool_name': tool_call.name,
-                    'ok': tool_result.ok,
-                    'error_kind': tool_result.metadata.get('error_kind'),
-                    'metadata': dict(tool_result.metadata),
-                })
+                self._record_event(
+                    events,
+                    {
+                        'type': 'tool_result',
+                        'turn': turn_index,
+                        'tool_call_id': tool_call.id,
+                        'tool_name': tool_call.name,
+                        'ok': tool_result.ok,
+                        'error_kind': tool_result.metadata.get('error_kind'),
+                        'metadata': dict(tool_result.metadata),
+                    },
+                )
 
                 if tool_result.metadata.get('error_kind') == 'delegated_task_limit':
                     return self._early_stop(
@@ -1394,7 +1433,7 @@ class LocalAgent:
         统一追加 budget_stop 事件并调用 _build_run_result，
         消除六处重复的事件追加 + 结果构建模式。
         """
-        events.append({'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
+        self._record_event(events, {'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
         return self._build_run_result(
             session_id=session_id,
             session_state=session_state,
@@ -1433,12 +1472,61 @@ class LocalAgent:
             usage_delta=usage_delta,
             model_call_count=model_call_count,
         )
-        events.extend(reactive_outcome.events)
+        self._extend_recorded_events(events, reactive_outcome.events)
         return (
             reactive_outcome.response,
             reactive_outcome.usage_delta,
             reactive_outcome.model_call_count,
             reactive_outcome.stop_reason,
+        )
+
+    def _execute_tool_call(
+        self,
+        *,
+        tool_call: ToolCall,
+        turn_index: int,
+        tool_context,
+    ) -> ToolExecutionResult:
+        """执行单个工具调用，必要时发射实时 stdout 或 stderr 事件。"""
+        if tool_call.name != 'bash' or self.progress_reporter is None:
+            return self.tool_service.execute(
+                self.tool_registry,
+                tool_call.name,
+                tool_call.arguments,
+                tool_context,
+            )
+
+        final_result: ToolExecutionResult | None = None
+        for update in self.tool_service.execute_streaming(
+            self.tool_registry,
+            tool_call.name,
+            tool_call.arguments,
+            tool_context,
+        ):
+            if update.kind == 'result':
+                final_result = update.result
+                continue
+            if not update.chunk:
+                continue
+            self._emit_progress_event(
+                {
+                    'type': 'tool_stream',
+                    'turn': turn_index,
+                    'tool_call_id': tool_call.id,
+                    'tool_name': tool_call.name,
+                    'stream': update.kind,
+                    'chunk': update.chunk,
+                    'metadata': dict(update.metadata),
+                }
+            )
+
+        if final_result is not None:
+            return final_result
+        return ToolExecutionResult(
+            name=tool_call.name,
+            ok=False,
+            content='Streaming tool execution returned no final result.',
+            metadata={'error_kind': 'tool_execution_error'},
         )
 
     def _build_openai_tools(self) -> list[JSONDict]:
@@ -1502,8 +1590,8 @@ class LocalAgent:
             metadata=merged_metadata,
         )
 
-    @staticmethod
     def _append_tool_hook_message(
+        self,
         session_state: AgentSessionState,
         *,
         hook: JSONDict,
@@ -1533,7 +1621,8 @@ class LocalAgent:
             'source_name': hook.get('source_name', 'unknown'),
         }
         session_state.append_runtime_message(str(hook.get('content', '')), metadata=metadata)
-        events.append(
+        self._record_event(
+            events,
             {
                 'type': event_type,
                 'turn': turn_index,
@@ -1542,7 +1631,7 @@ class LocalAgent:
                 'source': hook.get('source', 'unknown'),
                 'source_name': hook.get('source_name', 'unknown'),
                 'phase': phase,
-            }
+            },
         )
 
     def _build_run_result(

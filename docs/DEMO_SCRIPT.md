@@ -44,6 +44,8 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent
 
 ## 4. agent-chat / agent-resume 演示
 
+说明：交互式命令默认会打印 `[progress]` 过程日志；如果需要更干净的终端录屏，可改用 `--no-show-progress`。
+
 ```powershell
 C:/ProgramData/anaconda3/python.exe ./src/main.py agent-chat
 ```

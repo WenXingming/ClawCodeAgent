@@ -105,6 +105,8 @@ class LocalToolsShellTests(unittest.TestCase):
 
         stdout_text = ''.join(update.chunk for update in updates if update.kind == 'stdout')
         result_updates = [update for update in updates if update.kind == 'result']
+        stdout_positions = [index for index, update in enumerate(updates) if update.kind == 'stdout']
+        result_position = next(index for index, update in enumerate(updates) if update.kind == 'result')
 
         self.assertIn('alpha', stdout_text)
         self.assertIn('beta', stdout_text)
@@ -112,6 +114,7 @@ class LocalToolsShellTests(unittest.TestCase):
         self.assertIsNotNone(result_updates[0].result)
         self.assertTrue(result_updates[0].result.ok)
         self.assertIn('exit_code=', result_updates[0].result.content)
+        self.assertLess(max(stdout_positions), result_position)
 
     @patch('tools.local_tools.subprocess.Popen')
     def test_bash_timeout_returns_structured_error(self, mock_popen: object) -> None:

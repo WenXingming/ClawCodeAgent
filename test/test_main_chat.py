@@ -74,11 +74,20 @@ class _ChatFakeAgent:
         _ChatFakeAgent.last_runtime = runtime_config
         _ChatFakeAgent.last_session_store = session_store
 
+    def _emit_progress_events(self, result: AgentRunResult) -> None:
+        reporter = getattr(self, 'progress_reporter', None)
+        if reporter is None:
+            return
+        for event in result.events:
+            reporter(dict(event))
+
     def run(self, prompt: str) -> AgentRunResult:
         _ChatFakeAgent.run_prompts.append(prompt)
         if _ChatFakeAgent.queued_results:
-            return _ChatFakeAgent.queued_results.pop(0)
-        return AgentRunResult(
+            result = _ChatFakeAgent.queued_results.pop(0)
+            self._emit_progress_events(result)
+            return result
+        result = AgentRunResult(
             final_output=f'run:{prompt}',
             turns=1,
             tool_calls=0,
@@ -87,12 +96,16 @@ class _ChatFakeAgent:
             session_id='chat-session-001',
             session_path=str((Path.cwd() / '.port_sessions' / 'agent' / 'chat-session-001.json').resolve()),
         )
+        self._emit_progress_events(result)
+        return result
 
     def resume(self, prompt: str, session_snapshot) -> AgentRunResult:
         _ChatFakeAgent.resume_calls.append((prompt, session_snapshot.session_id))
         if _ChatFakeAgent.queued_results:
-            return _ChatFakeAgent.queued_results.pop(0)
-        return AgentRunResult(
+            result = _ChatFakeAgent.queued_results.pop(0)
+            self._emit_progress_events(result)
+            return result
+        result = AgentRunResult(
             final_output=f'resumed:{prompt}',
             turns=2,
             tool_calls=0,
@@ -101,6 +114,8 @@ class _ChatFakeAgent:
             session_id=session_snapshot.session_id,
             session_path=str((Path.cwd() / '.port_sessions' / 'agent' / f'{session_snapshot.session_id}.json').resolve()),
         )
+        self._emit_progress_events(result)
+        return result
 
 
 def _make_session_store_cls(load_impl):
@@ -146,7 +161,7 @@ class MainChatEntryTests(unittest.TestCase):
         _assert_banner_rendered(self, stdout.getvalue())
         _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='chat-session-001', show_resume_hint=True)
         self.assertIn('run:第一轮', stdout.getvalue())
-        self.assertIn('[session] chat-session-001', stdout.getvalue())
+        self.assertNotIn('[session] chat-session-001', stdout.getvalue())
 
     def test_agent_chat_resumes_existing_session_from_loop(self) -> None:
         stored = self._make_session_snapshot('resume-test-001')
@@ -265,6 +280,121 @@ class MainChatEntryTests(unittest.TestCase):
         _assert_banner_rendered(self, stdout.getvalue())
         _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='cleared-002', show_resume_hint=True)
         self.assertIn('Cleared session id: cleared-002', stdout.getvalue())
+
+    def test_agent_chat_prints_progress_events_by_default(self) -> None:
+        _ChatFakeAgent.queue_results(
+            AgentRunResult(
+                final_output='已完成',
+                turns=1,
+                tool_calls=1,
+                transcript=(),
+                events=(
+                    {'type': 'model_turn', 'turn': 1, 'finish_reason': 'tool_calls', 'tool_calls': 1},
+                    {
+                        'type': 'tool_result',
+                        'turn': 1,
+                        'tool_call_id': 'call_001',
+                        'tool_name': 'bash',
+                        'ok': True,
+                        'metadata': {'action': 'bash'},
+                    },
+                ),
+                usage=TokenUsage(),
+                session_id='chat-session-001',
+                session_path=str((Path.cwd() / '.port_sessions' / 'agent' / 'chat-session-001.json').resolve()),
+            )
+        )
+
+        with (
+            patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
+            patch('main.LocalAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=['显示进度', '/exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent-chat'])
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn('[progress] turn 1 model finished: finish_reason=tool_calls tool_calls=1', output)
+        self.assertIn('[progress] turn 1 tool bash finished: ok=True', output)
+        self.assertLess(
+            output.index('[progress] turn 1 model finished: finish_reason=tool_calls tool_calls=1'),
+            output.index('已完成'),
+        )
+
+    def test_agent_chat_can_disable_progress_output(self) -> None:
+        _ChatFakeAgent.queue_results(
+            AgentRunResult(
+                final_output='静默完成',
+                turns=1,
+                tool_calls=1,
+                transcript=(),
+                events=(
+                    {'type': 'model_turn', 'turn': 1, 'finish_reason': 'tool_calls', 'tool_calls': 1},
+                    {
+                        'type': 'tool_result',
+                        'turn': 1,
+                        'tool_call_id': 'call_002',
+                        'tool_name': 'bash',
+                        'ok': True,
+                        'metadata': {'action': 'bash'},
+                    },
+                ),
+                usage=TokenUsage(),
+                session_id='chat-session-001',
+                session_path=str((Path.cwd() / '.port_sessions' / 'agent' / 'chat-session-001.json').resolve()),
+            )
+        )
+
+        with (
+            patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
+            patch('main.LocalAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=['关闭进度', '/exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent-chat', '--no-show-progress'])
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn('静默完成', output)
+        self.assertNotIn('[progress]', output)
+
+    def test_agent_chat_surfaces_backend_error_when_final_output_is_empty(self) -> None:
+        _ChatFakeAgent.queue_results(
+            AgentRunResult(
+                final_output='',
+                turns=1,
+                tool_calls=0,
+                transcript=(),
+                events=(
+                    {
+                        'type': 'backend_error',
+                        'turn': 1,
+                        'error': 'HTTP 403 from model backend: quota exhausted',
+                    },
+                ),
+                usage=TokenUsage(),
+                stop_reason='backend_error',
+                session_id='chat-session-001',
+                session_path=str((Path.cwd() / '.port_sessions' / 'agent' / 'chat-session-001.json').resolve()),
+            )
+        )
+
+        with (
+            patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
+            patch('main.LocalAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=['失败请求', '/exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent-chat'])
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn('[error] HTTP 403 from model backend: quota exhausted', output)
+        self.assertNotIn('[session] chat-session-001', output)
 
     # ------------------------------------------------------------------
     # agent / agent-resume 与 agent-chat 共用同一交互循环

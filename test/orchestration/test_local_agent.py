@@ -107,6 +107,43 @@ class LocalAgentTests(unittest.TestCase):
         self.assertEqual(stored.messages[0]['content'], '你好')
         self.assertEqual(len(result.transcript), 2)  # user + assistant
 
+    def test_run_reports_progress_events_to_reporter(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient(
+            [
+                OneTurnResponse(
+                    content='',
+                    tool_calls=(
+                        ToolCall(id='call_list_001', name='list_dir', arguments={'path': '.'}),
+                    ),
+                    finish_reason='tool_calls',
+                    usage=TokenUsage(input_tokens=3, output_tokens=1),
+                ),
+                OneTurnResponse(
+                    content='目录已列出',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=TokenUsage(input_tokens=2, output_tokens=2),
+                ),
+            ]
+        )
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+        progress_events: list[dict] = []
+        agent.progress_reporter = lambda event: progress_events.append(dict(event))
+
+        result = agent.run('列出当前目录')
+
+        event_types = [item.get('type') for item in progress_events]
+        self.assertIn('model_start', event_types)
+        self.assertIn('model_turn', event_types)
+        self.assertIn('tool_start', event_types)
+        self.assertIn('tool_result', event_types)
+        self.assertLess(event_types.index('model_start'), event_types.index('model_turn'))
+        self.assertLess(event_types.index('tool_start'), event_types.index('tool_result'))
+        self.assertFalse(any(item.get('type') == 'model_start' for item in result.events))
+        self.assertTrue(any(item.get('type') == 'tool_result' for item in result.events))
+        self.assertEqual(result.final_output, '目录已列出')
+
     def test_run_help_slash_bypasses_model_and_transcript(self) -> None:
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([])
