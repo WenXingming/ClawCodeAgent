@@ -181,7 +181,7 @@ class WorktreeHistoryRecord:
 
 
 @dataclass
-class WorktreeRuntime:
+class WorktreeService:
     """工作区本地 worktree 运行时。
 
     当前实现只维护一个“激活中的受管工作树”，同时保留完整历史和已退出记录。
@@ -200,13 +200,13 @@ class WorktreeRuntime:
     schema_version: int = _SCHEMA_VERSION  # int: 当前状态文件 schema 版本号。
 
     @classmethod
-    def from_workspace(cls, workspace: Path) -> 'WorktreeRuntime':
+    def from_workspace(cls, workspace: Path) -> 'WorktreeService':
         """从工作区加载 worktree runtime。
 
         Args:
             workspace (Path): 工作区根目录。
         Returns:
-            WorktreeRuntime: 解析并校验后的 runtime 对象。
+            WorktreeService: 解析并校验后的工作区 worktree 服务对象。
         Raises:
             ValueError: 当工作区不在 git 仓库内，或持久化状态与当前仓库不一致时抛出。
         """

@@ -8,10 +8,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from extensions.worktree_runtime import WorktreeHistoryAction, WorktreeRuntime, WorktreeStatus
+from workspace import WorktreeHistoryAction, WorktreeService, WorktreeStatus
 
 
-class WorktreeRuntimeTests(unittest.TestCase):
+class WorktreeServiceTests(unittest.TestCase):
     def _run_git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ['git', *args],
@@ -36,7 +36,7 @@ class WorktreeRuntimeTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             self._init_repo(workspace)
 
-            runtime = WorktreeRuntime.from_workspace(workspace)
+            runtime = WorktreeService.from_workspace(workspace)
             record = runtime.enter_worktree('feature/worktree-enter')
             persisted = json.loads((workspace / '.claw' / 'worktree_state.json').read_text(encoding='utf-8'))
             branch_name = self._run_git(record.path, 'branch', '--show-current').stdout.strip()
@@ -53,10 +53,10 @@ class WorktreeRuntimeTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             self._init_repo(workspace)
 
-            runtime = WorktreeRuntime.from_workspace(workspace)
+            runtime = WorktreeService.from_workspace(workspace)
             entered = runtime.enter_worktree('feature/worktree-keep')
             exited = runtime.exit_worktree(remove=False)
-            reloaded = WorktreeRuntime.from_workspace(workspace)
+            reloaded = WorktreeService.from_workspace(workspace)
 
         self.assertEqual(exited.status, WorktreeStatus.EXITED)
         self.assertEqual(runtime.current_cwd, workspace.resolve())
@@ -70,7 +70,7 @@ class WorktreeRuntimeTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             self._init_repo(workspace)
 
-            runtime = WorktreeRuntime.from_workspace(workspace)
+            runtime = WorktreeService.from_workspace(workspace)
             entered = runtime.enter_worktree('feature/worktree-remove')
             removed = runtime.exit_worktree(remove=True)
             persisted_history = json.loads(
@@ -88,14 +88,14 @@ class WorktreeRuntimeTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             self._init_repo(workspace)
 
-            runtime = WorktreeRuntime.from_workspace(workspace)
+            runtime = WorktreeService.from_workspace(workspace)
             entered = runtime.enter_worktree('feature/worktree-dirty')
             (entered.path / 'README.md').write_text('dirty change\n', encoding='utf-8')
 
             with self.assertRaisesRegex(ValueError, 'dirty worktree'):
                 runtime.exit_worktree(remove=True)
 
-            reloaded = WorktreeRuntime.from_workspace(workspace)
+            reloaded = WorktreeService.from_workspace(workspace)
 
         self.assertTrue(entered.path.exists())
         self.assertIsNotNone(reloaded.active_worktree())

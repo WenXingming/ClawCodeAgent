@@ -799,9 +799,9 @@ class CLI:
         """
         return EnvironmentLoadSummary(
             mcp_servers=self._count_runtime_items(agent, 'mcp_runtime', 'servers'),
-            plugins=self._count_runtime_items(agent, 'plugin_runtime', 'manifests'),
-            hook_policies=self._count_runtime_items(agent, 'hook_policy_runtime', 'manifests'),
-            search_providers=self._count_runtime_items(agent, 'search_runtime', 'providers'),
+            plugins=self._count_workspace_items(agent, 'plugin_count'),
+            hook_policies=self._count_workspace_items(agent, 'policy_count'),
+            search_providers=self._count_workspace_items(agent, 'search_provider_count'),
             load_errors=self._count_runtime_load_errors(agent),
         )
 
@@ -833,10 +833,19 @@ class CLI:
         Returns:
             int: 各 runtime 的 load_errors 字段长度之和。
         """
-        total = 0
-        for runtime_name in ('mcp_runtime', 'plugin_runtime', 'hook_policy_runtime', 'search_runtime'):
-            total += self._count_runtime_items(agent, runtime_name, 'load_errors')
-        return total
+        return self._count_runtime_items(agent, 'mcp_runtime', 'load_errors') + self._count_workspace_items(agent, 'load_error_count')
+
+    @staticmethod
+    def _count_workspace_items(agent: object, attribute_name: str) -> int:
+        """读取 workspace gateway 上某个计数字段的值。"""
+        gateway = getattr(agent, 'workspace_gateway', None)
+        if gateway is None:
+            return 0
+        value = getattr(gateway, attribute_name, 0)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _configure_agent_progress(

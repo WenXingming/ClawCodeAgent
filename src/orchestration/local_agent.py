@@ -24,10 +24,7 @@ from core_contracts.run_result import AgentRunResult
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
-from extensions.search_runtime import SearchQueryError, SearchRuntime
 from openai_client.openai_client import OpenAIClient
-from extensions.hook_policy_runtime import HookPolicyRuntime
-from extensions.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
@@ -35,6 +32,7 @@ from tools.executor import ToolExecutionError, ToolPermissionError, ToolStreamUp
 from tools.registry import LocalTool
 from tools.tool_gateway import ToolGateway
 from tools.mcp import MCPRuntime, MCPTool, MCPTransportError
+from workspace import SearchQueryError, WorkspaceGateway
 
 
 _FILESYSTEM_WRITE_TOOL_NAMES = frozenset({'write_file', 'edit_file', 'create_directory', 'move_file'})
@@ -68,10 +66,8 @@ class LocalAgent:
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
     budget_context_orchestrator: BudgetContextOrchestrator = field(init=False)
-    search_runtime: SearchRuntime = field(init=False)
+    workspace_gateway: WorkspaceGateway = field(init=False)
     mcp_runtime: MCPRuntime = field(init=False)
-    plugin_runtime: PluginRuntime = field(init=False)
-    hook_policy_runtime: HookPolicyRuntime = field(init=False)
     slash_dispatcher: SlashCommandDispatcher = field(init=False)
 
     def run(self, prompt: str) -> AgentRunResult:
@@ -206,14 +202,11 @@ class LocalAgent:
             None: 该方法原地补全实例的运行时依赖。
         """
         self.tool_registry = self.tool_gateway.default_registry()
-        self.search_runtime = SearchRuntime.from_workspace(self.workspace_scope.cwd)
+        self.workspace_gateway = WorkspaceGateway.from_workspace(self.workspace_scope.cwd)
         self.mcp_runtime = MCPRuntime.from_workspace(self.workspace_scope.cwd)
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
-        self.plugin_runtime = PluginRuntime.from_workspace(self.workspace_scope.cwd, self.tool_registry)
-        self.tool_registry = self.plugin_runtime.merge_tool_registry(self.tool_registry)
-        self.hook_policy_runtime = HookPolicyRuntime.from_workspace(self.workspace_scope.cwd)
-        self.tool_registry = self.hook_policy_runtime.filter_tool_registry(self.tool_registry)
-        self.budget_config = self.hook_policy_runtime.apply_budget_config(self.budget_config)
+        self.tool_registry = self.workspace_gateway.prepare_tool_registry(self.tool_registry)
+        self.budget_config = self.workspace_gateway.apply_budget_config(self.budget_config)
         self.context_compactor = ContextCompactor(self.client)
         self.budget_context_orchestrator = BudgetContextOrchestrator(
             budget_evaluator=self.budget_evaluator,
@@ -284,7 +277,7 @@ class LocalAgent:
             handler=self._run_delegate_agent,
         )
 
-        if self.search_runtime.providers:
+        if self.workspace_gateway.has_search_providers():
             merged_registry['workspace_search'] = LocalTool(
                 name='workspace_search',
                 description='Search the configured workspace search provider and return structured web results.',
@@ -398,7 +391,7 @@ class LocalAgent:
         max_retries = self._optional_tool_int(arguments, 'max_retries', min_value=0, max_value=3) or 0
 
         try:
-            response = self.search_runtime.search(
+            response = self.workspace_gateway.search(
                 query,
                 provider_id=provider_id,
                 max_results=max_results,
@@ -1248,7 +1241,7 @@ class LocalAgent:
                 budget_config=self.budget_config,
                 model_config=self.client.model_config,
                 tool_registry=self.tool_registry,
-                plugin_summary=self.plugin_runtime.render_summary(),
+                plugin_summary=self.workspace_gateway.render_plugin_summary(),
             ),
             prompt,
         )
@@ -1392,7 +1385,7 @@ class LocalAgent:
                 self.execution_policy,
                 self.permissions,
                 tool_registry=effective_tool_registry,
-                safe_env=self.hook_policy_runtime.safe_env,
+                safe_env=self.workspace_gateway.safe_env,
             )
             openai_tools = self.tool_gateway.to_openai_tools(effective_tool_registry)
             pre_model_outcome = self.budget_context_orchestrator.run_pre_model_cycle(
@@ -1442,8 +1435,8 @@ class LocalAgent:
 
             # 执行工具调用并回填结果
             for tool_call in response.tool_calls:
-                before_hooks = self.plugin_runtime.get_before_hooks(tool_call.name) + self.hook_policy_runtime.get_before_hooks(tool_call.name)
-                after_hooks = self.plugin_runtime.get_after_hooks(tool_call.name) + self.hook_policy_runtime.get_after_hooks(tool_call.name)
+                before_hooks = self.workspace_gateway.get_before_hooks(tool_call.name)
+                after_hooks = self.workspace_gateway.get_after_hooks(tool_call.name)
 
                 for hook in before_hooks:
                     self._append_tool_hook_message(
@@ -1466,9 +1459,7 @@ class LocalAgent:
                     }
                 )
 
-                block_decision = self.hook_policy_runtime.resolve_block(tool_call.name)
-                if block_decision is None:
-                    block_decision = self.plugin_runtime.resolve_block(tool_call.name)
+                block_decision = self.workspace_gateway.resolve_block(tool_call.name)
 
                 if block_decision is not None:
                     tool_result = self._make_blocked_tool_result(

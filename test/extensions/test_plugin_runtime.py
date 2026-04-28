@@ -9,11 +9,11 @@ from pathlib import Path
 
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
-from extensions.plugin_runtime import PluginRuntime
 from tools.tool_gateway import ToolGateway
+from workspace import PluginCatalog
 
 
-class PluginRuntimeTests(unittest.TestCase):
+class PluginCatalogTests(unittest.TestCase):
     """验证 manifest 发现、alias/virtual 注册与冲突处理。"""
 
     def setUp(self) -> None:
@@ -68,8 +68,8 @@ class PluginRuntimeTests(unittest.TestCase):
             )
 
             base_registry = self.tool_gateway.default_registry()
-            plugin_runtime = PluginRuntime.from_workspace(workspace, base_registry)
-            merged_registry = plugin_runtime.merge_tool_registry(base_registry)
+            plugin_catalog = PluginCatalog.from_workspace(workspace, base_registry)
+            merged_registry = plugin_catalog.merge_tool_registry(base_registry)
             context = self._build_context(workspace, merged_registry)
 
             alias_result = self.tool_gateway.execute(merged_registry, 'read_readme', {}, context)
@@ -86,7 +86,7 @@ class PluginRuntimeTests(unittest.TestCase):
         self.assertEqual(virtual_result.metadata.get('plugin_name'), 'demo-plugin')
         self.assertEqual(virtual_result.metadata.get('plugin_tool_kind'), 'virtual')
 
-        summary = plugin_runtime.render_summary()
+        summary = plugin_catalog.render_summary()
         self.assertIn('demo-plugin', summary)
         self.assertIn('Expose README alias and workspace banner.', summary)
         self.assertIn('read_readme', summary)
@@ -113,15 +113,15 @@ class PluginRuntimeTests(unittest.TestCase):
             )
 
             base_registry = self.tool_gateway.default_registry()
-            plugin_runtime = PluginRuntime.from_workspace(workspace, base_registry)
-            merged_registry = plugin_runtime.merge_tool_registry(base_registry)
+            plugin_catalog = PluginCatalog.from_workspace(workspace, base_registry)
+            merged_registry = plugin_catalog.merge_tool_registry(base_registry)
 
         self.assertEqual(merged_registry['read_file'].description, base_registry['read_file'].description)
-        self.assertEqual(len(plugin_runtime.conflicts), 1)
-        self.assertEqual(plugin_runtime.conflicts[0].tool_name, 'read_file')
-        self.assertEqual(plugin_runtime.conflicts[0].plugin_name, 'conflict-plugin')
+        self.assertEqual(len(plugin_catalog.conflicts), 1)
+        self.assertEqual(plugin_catalog.conflicts[0].tool_name, 'read_file')
+        self.assertEqual(plugin_catalog.conflicts[0].plugin_name, 'conflict-plugin')
 
-        summary = plugin_runtime.render_summary()
+        summary = plugin_catalog.render_summary()
         self.assertIn('conflict-plugin', summary)
         self.assertIn('read_file', summary)
         self.assertIn('skipped', summary)
@@ -141,12 +141,12 @@ class PluginRuntimeTests(unittest.TestCase):
                 },
             )
 
-            plugin_runtime = PluginRuntime.from_workspace(workspace, self.tool_gateway.default_registry())
+            plugin_catalog = PluginCatalog.from_workspace(workspace, self.tool_gateway.default_registry())
 
-        self.assertEqual(plugin_runtime.get_before_hooks('bash_exec')[0]['content'], 'plugin before')
-        self.assertEqual(plugin_runtime.get_after_hooks('bash_exec')[0]['content'], 'plugin after')
-        self.assertEqual(plugin_runtime.resolve_block('bash_exec')['source'], 'plugin')
-        self.assertEqual(plugin_runtime.resolve_block('bash_exec')['reason'], 'deny_prefixes')
+        self.assertEqual(plugin_catalog.get_before_hooks('bash_exec')[0]['content'], 'plugin before')
+        self.assertEqual(plugin_catalog.get_after_hooks('bash_exec')[0]['content'], 'plugin after')
+        self.assertEqual(plugin_catalog.resolve_block('bash_exec')['source'], 'plugin')
+        self.assertEqual(plugin_catalog.resolve_block('bash_exec')['reason'], 'deny_prefixes')
 
 
 if __name__ == '__main__':

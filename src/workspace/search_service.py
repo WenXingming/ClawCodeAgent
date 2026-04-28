@@ -185,7 +185,7 @@ class SearchQueryError(RuntimeError):
 
 
 @dataclass
-class SearchRuntime:
+class SearchService:
     """表示工作区本地搜索 provider 运行时。
 
     典型工作流如下：
@@ -201,14 +201,14 @@ class SearchRuntime:
     schema_version: int = _SCHEMA_VERSION  # int：当前搜索状态文件使用的 schema 版本。
 
     @classmethod
-    def from_workspace(cls, workspace: Path) -> 'SearchRuntime':
+    def from_workspace(cls, workspace: Path) -> 'SearchService':
         """从工作区与环境变量加载搜索 provider 配置。
 
         Args:
             workspace (Path): 工作区根目录。
 
         Returns:
-            SearchRuntime: 包含 provider 列表与加载错误的运行时对象。
+            SearchService: 包含 provider 列表与加载错误的工作区搜索服务对象。
         """
         resolved_workspace = workspace.resolve()
         providers: list[SearchProviderProfile] = []

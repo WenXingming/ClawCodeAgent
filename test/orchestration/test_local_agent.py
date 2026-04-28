@@ -15,12 +15,12 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
-from extensions.search_runtime import SearchResult, SearchResponse, SearchProviderProfile
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 from tools.mcp import MCPCapability, MCPTool, MCPToolCallResult
+from workspace import SearchProviderProfile, SearchResponse, SearchResult
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -1319,7 +1319,7 @@ class LocalAgentTests(unittest.TestCase):
             base_url='http://test.com',
             source_path=Path('test.json'),
         )
-        agent.search_runtime.providers = [mock_provider]
+        agent.workspace_gateway.search_service.providers = [mock_provider]
         
         # 重新注册工具以应用模拟的 provider
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
@@ -1338,7 +1338,7 @@ class LocalAgentTests(unittest.TestCase):
             results=(mock_result,),
             attempts=1,
         )
-        agent.search_runtime.search = mock.Mock(return_value=mock_response)
+        agent.workspace_gateway.search_service.search = mock.Mock(return_value=mock_response)
         
         result = agent.run('搜索一下内容')
         
@@ -1347,7 +1347,7 @@ class LocalAgentTests(unittest.TestCase):
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.stop_reason, 'stop')
         self.assertEqual(result.final_output, '搜索完成')
-        agent.search_runtime.search.assert_called_once()
+        agent.workspace_gateway.search_service.search.assert_called_once()
 
     def test_run_calls_mcp_search_capabilities_from_main_loop(self) -> None:
         """验证主循环通过 mcp_search_capabilities 搜索远端能力。"""
@@ -1575,7 +1575,7 @@ class LocalAgentTests(unittest.TestCase):
         # 配置 search provider 和 MCP 资源
         mock_search_provider = mock.Mock()
         mock_search_provider.provider_id = 'test_provider'
-        agent.search_runtime.providers = [mock_search_provider]
+        agent.workspace_gateway.search_service.providers = [mock_search_provider]
         
         mock_mcp_resource = mock.Mock()
         agent.mcp_runtime.resources = [mock_mcp_resource]

@@ -112,9 +112,12 @@ class _ChatFakeAgent:
         )
         _ChatFakeAgent.last_session_store = session_store
         self.mcp_runtime = SimpleNamespace(servers=('mcp-server-1',), load_errors=())
-        self.plugin_runtime = SimpleNamespace(manifests=('plugin-a', 'plugin-b'), load_errors=())
-        self.hook_policy_runtime = SimpleNamespace(manifests=('policy-a',), load_errors=())
-        self.search_runtime = SimpleNamespace(providers=('provider-a',), load_errors=())
+        self.workspace_gateway = SimpleNamespace(
+            plugin_count=2,
+            policy_count=1,
+            search_provider_count=1,
+            load_error_count=0,
+        )
 
     def _emit_progress_events(self, result: AgentRunResult) -> None:
         reporter = getattr(self, 'progress_reporter', None)
