@@ -34,7 +34,7 @@ src/
 |  '- budget_guard.py
 |- context/
 |  |- context_token_estimator.py
-|  |- context_budget_evaluator.py
+|  |- context_token_budget_evaluator.py
 |  |- context_snipper.py
 |  '- context_compactor.py
 |- session/
@@ -107,7 +107,7 @@ graph TB
     subgraph ContextPkg[context package / 上下文治理与预算]
         direction TB
         n_token_estimator(["🔢 context/context_token_estimator.py"])
-        n_budget_evaluator(["📏 context/context_budget_evaluator.py"])
+        n_budget_evaluator(["📏 context/context_token_budget_evaluator.py"])
         n_snip(["✂️ context/context_snipper.py"])
         n_compact(["🗜️ context/context_compactor.py"])
         style ContextPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
@@ -245,15 +245,14 @@ graph TB
 - `orchestration/query_engine.py` (`QueryEngine`) 负责把 `LocalAgent` 封装成统一的 submit / stream_submit / persist 门面，并累计 runtime events、mutation、orchestration 与 lineage 统计。
 - `orchestration/local_agent.py` (`LocalAgent`) 负责主循环编排职责：模型调用、工具回填、预算闸门、会话保存，通过 `BudgetContextOrchestrator` 调用上下文治理，并在 tool pipeline 中接入 delegate_agent 子代理执行。
 - `orchestration/budget_context_orchestrator.py` (`BudgetContextOrchestrator`) 统一编排 pre-model 阶段的 snip/compact/预算预检及 reactive compact 重试。
-- `budget/` 负责 token 预算的对象模型和闸门逻辑：`TokenBudgetSnapshot`、统一估算器、预算投影器和运行时预算检查都集中在这里。
-- `budget/` 只保留 `BudgetGuard`：集中管理主循环的五维执行限制（turns / model_calls / token / cost / tool_calls），是 orchestration 层的运行时闸门。
-- `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextBudgetEvaluator`（含 `ContextBudgetSnapshot`）提供预算投影，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
+- `budget/` 只保留执行预算闸门 `BudgetGuard`，负责在主循环中统一裁决 turns / model_calls / token / cost / tool_calls 等运行时限制。
+- `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextTokenBudgetEvaluator`（含 `ContextTokenBudgetSnapshot`）提供预算投影，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
 - `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、worktree runtime、MCP server 都从工作区 `.claw/` manifest、git 状态或环境变量发现并对外提供独立 API。
 - `interaction/` 负责 CLI 和 slash 命令；`slash_commands_interaction.py` 依赖预算投影和工具注册表，但不会触发模型调用。
 - `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
 
-这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`；token 估算与预算投影（`ContextTokenEstimator`、`ContextBudgetEvaluator`）归入 `context`，`budget` 只保留执行闸门 `BudgetGuard`，形成 `context` → `budget` → `orchestration` 的单向树状依赖。
+这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`；token 估算与预算投影（`ContextTokenEstimator`、`ContextTokenBudgetEvaluator`）归入 `context`，`budget` 只保留执行闸门 `BudgetGuard`，形成 `context` → `budget` → `orchestration` 的单向树状依赖。
 
 ## 测试镜像
 
@@ -279,7 +278,7 @@ test/
 - `test/extensions/` 对应 plugin/policy/search/mcp 测试，并承接相关 patch 目标。
 - `test/budget/` 对应预算快照、估算、评估与闸门测试。
 - `test/budget/` 现在只包含 `test_budget_guard.py`（五维闸门测试）。
-- `test/context/` 包含 `test_context_token_estimator.py`、`test_context_budget_evaluator.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
+- `test/context/` 包含 `test_context_token_estimator.py`、`test_context_token_budget_evaluator.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
 - `test/orchestration/` 包含 `test_budget_context_orchestrator.py` 与 `test_local_agent.py`。
 
 ## 推荐阅读顺序

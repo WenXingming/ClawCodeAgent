@@ -1,24 +1,24 @@
-"""ISSUE-009 单元测试：ContextBudgetEvaluator。"""
+"""ISSUE-009 单元测试：ContextTokenBudgetEvaluator。"""
 
 from __future__ import annotations
 
 import unittest
 
-from context.context_budget_evaluator import (
-    ContextBudgetEvaluator,
+from context.context_token_budget_evaluator import (
+    ContextTokenBudgetEvaluator,
     OUTPUT_RESERVE_TOKENS,
     SOFT_BUFFER_TOKENS,
 )
-from context.context_budget_evaluator import ContextBudgetSnapshot
+from context.context_token_budget_evaluator import ContextTokenBudgetSnapshot
 from context.context_token_estimator import ContextTokenEstimator
 
 
 ESTIMATOR = ContextTokenEstimator()
-EVALUATOR = ContextBudgetEvaluator(token_estimator=ESTIMATOR)
+EVALUATOR = ContextTokenBudgetEvaluator(token_estimator=ESTIMATOR)
 
 
 class CheckTokenBudgetTests(unittest.TestCase):
-    """ContextBudgetEvaluator.evaluate 的核心行为测试。"""
+    """ContextTokenBudgetEvaluator.evaluate 的核心行为测试。"""
 
     def _simple_messages(self) -> list[dict]:
         return [{'role': 'user', 'content': 'hello'}]
@@ -89,7 +89,7 @@ class CheckTokenBudgetTests(unittest.TestCase):
         self.assertGreaterEqual(snapshot.soft_input_limit, 0)
 
     def test_defaults_exposed_from_module(self) -> None:
-        snapshot = ContextBudgetSnapshot(
+        snapshot = ContextTokenBudgetSnapshot(
             projected_input_tokens=1,
             output_reserve_tokens=OUTPUT_RESERVE_TOKENS,
             hard_input_limit=10,

@@ -5,11 +5,11 @@
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
 | `src/context/context_token_estimator.py` | 新建（后迁移） | `ContextTokenEstimator` 与统一 token 估算逻辑；初建于 `src/budget/token_estimator.py`，架构重构后移入 `context` |
-| `src/context/context_budget_evaluator.py` | 新建（后迁移） | `ContextBudgetSnapshot`（原 `TokenBudgetSnapshot`）与 `ContextBudgetEvaluator`；初建于 `src/budget/budget_evaluator.py` 和 `src/budget/budget_snapshot.py`，架构重构后合并移入 `context` |
+| `src/context/context_token_budget_evaluator.py` | 新建（后迁移） | `ContextTokenBudgetSnapshot` 与 `ContextTokenBudgetEvaluator`；初建于 `src/budget/budget_evaluator.py` 和 `src/budget/budget_snapshot.py`，架构重构后合并移入 `context` |
 | `src/budget/budget_guard.py` | 新建 | `BudgetGuard` 五维预算闸门与私有 `_check_*` 子方法 |
 | `src/orchestration/agent_runtime.py` | 修改 | `_execute_loop` 接入 token / cost / tool_calls / model_calls / session_turns 闸门 |
 | `test/context/test_context_token_estimator.py` | 新建（后迁移） | token 估算单测；初建于 `test/budget/test_token_estimator.py` |
-| `test/context/test_context_budget_evaluator.py` | 新建（后迁移） | 预算快照与投影单测；初建于 `test/budget/test_budget_evaluator.py` |
+| `test/context/test_context_token_budget_evaluator.py` | 新建（后迁移） | 预算快照与投影单测；初建于 `test/budget/test_budget_evaluator.py` |
 | `test/budget/test_budget_guard.py` | 新建 | 预算闸门单测 |
 | `test/orchestration/test_agent_runtime.py` | 追加 | 5 个预算闸门集成测试 |
 | `docs/FINAL_ARCHITECTURE_PLAN.md` | 追加 | ISSUE-009 实施决策归档 |
@@ -67,7 +67,7 @@
 |----------|---------------|--------|
 | `test/context/test_context_token_estimator.py` | message/token 估算基础 | 空消息、内容长度、多模态 list、非字符串内容的估算路径正确 |
 | `test/context/test_context_token_estimator.py` | messages/tools 聚合估算 | 空消息列表、多消息累积、空工具、非空工具 schema 投影正确 |
-| `test/context/test_context_budget_evaluator.py` | ContextBudgetSnapshot 语义 | 无上限、不过限、软超限、硬超限、双超限、snapshot 投影字段、soft limit 下限为 0 |
+| `test/context/test_context_token_budget_evaluator.py` | ContextTokenBudgetSnapshot 语义 | 无上限、不过限、软超限、硬超限、双超限、snapshot 投影字段、soft limit 下限为 0 |
 | `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_token_limit` | token 硬超限在模型调用前拦截 |
 | `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_cost_limit` | 累计成本超限在模型调用前拦截 |
 | `test/orchestration/test_agent_runtime.py` | `test_run_stops_on_tool_call_limit` | 第一个工具执行后即触发 tool_call_limit |

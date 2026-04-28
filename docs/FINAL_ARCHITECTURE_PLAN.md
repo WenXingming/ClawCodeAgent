@@ -598,7 +598,7 @@
 
 **实施决策（已落地）**
 
-- 新建 `src/context/` 子包，导出 `TokenBudgetSnapshot, ContextTokenEstimator, ContextBudgetEvaluator`，并统一从包级导出 `ContextSnipper` 与 `ContextCompactor` 等上下文治理对象。
+- 新建 `src/context/` 子包，导出 `ContextTokenBudgetSnapshot`、`ContextTokenEstimator`、`ContextTokenBudgetEvaluator`，并统一从包级导出 `ContextSnipper` 与 `ContextCompactor` 等上下文治理对象。
 - token 估算使用 **char/4 启发式**（1 token ≈ 4 chars），每条消息加 4 token 结构开销，工具 schema 序列化后按 char/4 计；如需精确计数可替换内部实现，公共接口不变。
 - 常量：`OUTPUT_RESERVE_TOKENS=4096`（输出预留），`SOFT_BUFFER_TOKENS=13000`（auto-compact 触发缓冲）。
 - 硬超限 `is_hard_over`：`projected > hard_limit - output_reserve` → `stop_reason='token_limit'`。
@@ -641,7 +641,7 @@
 **实施决策（已落地）**
 
 - `src/context/context_snipper.py` 提供 `ContextSnipper` 与 `SnipResult`；公开入口为 `ContextSnipper.snip(messages, *)`，接口直接接收裸 `list[JSONDict]` 并就地修改，不依赖 `AgentSessionState` 容器。
-- 触发条件固定为 `ContextBudgetEvaluator.evaluate(...).is_soft_over`；snip 发生在 turn loop 每轮 token preflight 之后、`token_budget` event 记录之前。
+- 触发条件固定为 `ContextTokenBudgetEvaluator.evaluate(...).is_soft_over`；snip 发生在 turn loop 每轮 token preflight 之后、`token_budget` event 记录之前。
 - 保留区间固定为“前缀连续 `system` 消息 + 尾部 `compact_preserve_messages` 条最近消息”；仅中间段候选允许被替换。
 - 可 snip 候选限定为：`role='tool'`、带 `tool_calls` 的 assistant 消息、或 `content` 长度超过 300 字符的 assistant 消息；已是 tombstone 的消息通过 `<system-reminder>\nOlder ` 前缀识别并跳过。
 - tombstone 内容统一写成 `<system-reminder>` 摘要块，仅替换 `content`；同时保留 `role / tool_call_id / name / tool_calls` 等协议字段，避免工具调用链断裂。
@@ -718,7 +718,7 @@
 - 当前稳定入口为 `src/interaction/slash_commands_interaction.py`，集中承载 slash parse、命令规格注册和高频本地命令。
 - slash 分流发生在 `LocalAgent.run/resume` 把 prompt 写入 `AgentSessionState` 之前，从根上保证本地命令不污染 `messages` 与 `transcript`。
 - 本地 slash 命令统一返回 `stop_reason='slash_command'`，并写入 `slash_command` event；只记录 event，不写入 transcript。
-- `/context` 复用 `ContextBudgetEvaluator.evaluate(messages, tools, max_input_tokens)` 做本地上下文投影，展示当前 messages、transcript、tool_calls 与 projected tokens。
+- `/context` 复用 `ContextTokenBudgetEvaluator.evaluate(messages, tools, max_input_tokens)` 做本地上下文投影，展示当前 messages、transcript、tool_calls 与 projected tokens。
 - `/clear` 采用 fork 语义：不覆盖旧 session 文件，而是生成新的 cleared `session_id` 并保存空会话快照；输出中同时提示旧 session_id 与新 session_id。
 - 首版不改 `src/main.py` 参数面；slash 命令仍通过现有 `prompt` 入口传入，ISSUE-013 再处理 CLI 子命令扩展。
 - 测试面拆为 `test/interaction/test_slash_commands.py` 单测与 `test/orchestration/test_local_agent.py` 集成测试，覆盖 `/help`、`/status`、`/clear` 的 no-model-call 路径。

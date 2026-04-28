@@ -1,11 +1,11 @@
 """维护代理单次运行期间的最小会话状态。
 
-模块职责聚焦在一轮代理执行过程中最核心的三类数据：
+本模块聚焦在运行态会话的三类核心数据：
 1. 发给模型的消息上下文 `messages`。
-2. 便于审计和恢复的转录条目 `transcript_entries`。
-3. 用于预算和统计的工具调用计数 `tool_call_count`。
+2. 便于审计与恢复的转录条目 `transcript_entries`。
+3. 用于预算统计的工具调用计数 `tool_call_count`。
 
-本模块不负责模型调用、工具执行或落盘持久化，只负责在内存中稳定维护会话状态，并向上层提供可序列化的消息/转录视图。
+模块本身不负责模型调用、工具执行或磁盘持久化，只负责稳定维护内存态会话，并向上层提供可序列化视图。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ class AgentSessionState:
     """表示代理单次运行期间的可变会话状态。
 
     典型工作流如下：
-    1. 调用 `create()` 用首条用户输入初始化会话。
+    1. 调用 `create()` 或 `from_persisted()` 建立运行态会话。
     2. 每轮模型调用前通过 `to_messages()` 取出当前消息上下文。
     3. 模型返回后调用 `append_assistant_turn()` 写入助手响应。
     4. 工具执行后调用 `append_tool_result()` 追加工具输出。
@@ -37,6 +37,7 @@ class AgentSessionState:
     @classmethod
     def create(cls, prompt: str) -> 'AgentSessionState':
         """按首条用户输入创建会话。
+
         Args:
             prompt (str): 用户发起本轮会话时输入的首条提示词。
         Returns:
@@ -46,8 +47,41 @@ class AgentSessionState:
         session_state.append_user(prompt)
         return session_state
 
+    @classmethod
+    def from_persisted(
+        cls,
+        messages: list[JSONDict],
+        transcript: list[JSONDict],
+        tool_call_count: int,
+    ) -> 'AgentSessionState':
+        """从已持久化的数据恢复运行态会话。
+
+        若历史 transcript 为空，则使用 `messages` 生成最小可审计条目作为回退，保证恢复后的会话仍具备连续的转录视图。
+
+        Args:
+            messages (list[JSONDict]): 恢复时使用的历史消息列表。
+            transcript (list[JSONDict]): 已持久化的历史转录条目。
+            tool_call_count (int): 已执行的工具调用累计次数。
+        Returns:
+            AgentSessionState: 从持久化数据恢复出的运行态会话对象。
+        """
+        if transcript:
+            effective_transcript: list[JSONDict] = [dict(item) for item in transcript]
+        else:
+            effective_transcript = [
+                {'role': item['role'], 'content': item.get('content', '')}
+                for item in messages
+                if isinstance(item, dict) and 'role' in item
+            ]
+        return cls(
+            messages=[dict(item) for item in messages],
+            transcript_entries=effective_transcript,
+            tool_call_count=tool_call_count,
+        )
+
     def append_user(self, prompt: str) -> None:
         """向会话中追加一条用户消息。
+
         Args:
             prompt (str): 用户输入的自然语言内容。
         Returns:
@@ -99,7 +133,14 @@ class AgentSessionState:
         )
 
     def append_runtime_message(self, content: str, *, metadata: JSONDict | None = None) -> None:
-        """向会话中追加一条运行时 system/reminder 消息。"""
+        """向会话中追加一条运行时 system/reminder 消息。
+
+        Args:
+            content (str): 运行时写入上下文的消息内容。
+            metadata (JSONDict | None): 附加到转录中的元数据字典。
+        Returns:
+            None: 该方法直接原地更新消息和转录。
+        """
         message = {
             'role': 'system',
             'content': content,
@@ -116,6 +157,7 @@ class AgentSessionState:
 
     def append_tool_result(self, tool_call: ToolCall, result: ToolExecutionResult) -> None:
         """向会话中追加一条工具执行结果。
+
         Args:
             tool_call (ToolCall): 触发本次工具执行的工具调用描述。
             result (ToolExecutionResult): 工具执行后的标准化结果。
@@ -146,6 +188,7 @@ class AgentSessionState:
 
     def to_messages(self) -> list[JSONDict]:
         """导出当前可继续发送给模型的消息副本。
+
         Args:
             None: 该方法不接收额外参数。
         Returns:
@@ -155,6 +198,7 @@ class AgentSessionState:
 
     def transcript(self) -> tuple[JSONDict, ...]:
         """导出稳定的转录只读视图。
+
         Args:
             None: 该方法不接收额外参数。
         Returns:
@@ -162,40 +206,10 @@ class AgentSessionState:
         """
         return tuple(dict(item) for item in self.transcript_entries)
 
-    @classmethod
-    def from_persisted(
-        cls,
-        messages: list[JSONDict],
-        transcript: list[JSONDict],
-        tool_call_count: int,
-    ) -> 'AgentSessionState':
-        """从已持久化的数据恢复运行态会话。
-
-        若历史 transcript 为空，则使用 `messages` 生成最小可审计条目作为回退，保证恢复后的会话仍具备连续的转录视图。
-        Args:
-            messages (list[JSONDict]): 恢复时使用的历史消息列表。
-            transcript (list[JSONDict]): 已持久化的历史转录条目。
-            tool_call_count (int): 已执行的工具调用累计次数。
-        Returns:
-            AgentSessionState: 从持久化数据恢复出的运行态会话对象。
-        """
-        if transcript:
-            effective_transcript: list[JSONDict] = [dict(item) for item in transcript]
-        else:
-            effective_transcript = [
-                {'role': item['role'], 'content': item.get('content', '')}
-                for item in messages
-                if isinstance(item, dict) and 'role' in item
-            ]
-        return cls(
-            messages=[dict(item) for item in messages],
-            transcript_entries=effective_transcript,
-            tool_call_count=tool_call_count,
-        )
-
     @staticmethod
     def _to_openai_tool_call_payload(tool_call: ToolCall) -> JSONDict:
         """把内部 ToolCall 转成 OpenAI 兼容的 `tool_calls` 消息结构。
+
         Args:
             tool_call (ToolCall): 内部标准化后的工具调用对象。
         Returns:

@@ -3,8 +3,9 @@
 本模块只承担最小的会话存取职责：
 1. 把 `AgentSessionSnapshot` 写入 UTF-8 JSON 文件。
 2. 按 `session_id` 从磁盘恢复已保存的会话快照。
+3. 对会话文件名做基础校验，避免路径逃逸与损坏数据污染。
 
-文件内部成员按公开入口首次用到的顺序排列，便于沿着调用链阅读。
+模块内部按公开入口到私有辅助函数的顺序组织，便于顺着存取链路阅读。
 """
 
 from __future__ import annotations
@@ -16,17 +17,28 @@ from pathlib import Path
 from .session_snapshot import AgentSessionSnapshot
 
 
-DEFAULT_AGENT_SESSION_DIR = (Path('.port_sessions') / 'agent').resolve()
-
-
 class AgentSessionStore:
-    """负责代理会话快照的文件持久化与恢复。"""
+    """负责代理会话快照的文件持久化与恢复。
+
+    该类被运行时用作最薄的一层文件存储适配器：外部只需传入快照对象或 `session_id`，即可完成保存与恢复。类内私有方法专门负责路径计算与 `session_id` 规范化，避免调用方重复处理文件系统细节。
+    """
+
+    DEFAULT_AGENT_SESSION_DIR = (Path('.port_sessions') / 'agent').resolve()  # Path：默认的会话快照目录绝对路径。
 
     def __init__(self, directory: Path | None = None) -> None:
-        self.directory = (directory or DEFAULT_AGENT_SESSION_DIR).resolve()
+        """初始化会话快照存储器。
+
+        Args:
+            directory (Path | None): 自定义的会话目录；为 None 时使用默认目录。
+        Returns:
+            None: 该方法初始化实例并解析最终目录路径。
+        """
+        self.directory = (directory or self.DEFAULT_AGENT_SESSION_DIR).resolve()
+        # Path：当前实例实际使用的会话快照根目录。
 
     def save(self, session_snapshot: AgentSessionSnapshot) -> Path:
         """把会话快照保存为 UTF-8 JSON 文件。
+
         Args:
             session_snapshot (AgentSessionSnapshot): 待写入磁盘的会话快照对象。
         Returns:
@@ -44,6 +56,7 @@ class AgentSessionStore:
 
     def load(self, session_id: str) -> AgentSessionSnapshot:
         """按 session_id 读取并恢复会话快照。
+
         Args:
             session_id (str): 需要加载的会话唯一标识。
         Returns:
@@ -70,10 +83,13 @@ class AgentSessionStore:
 
     def _session_file_path(self, session_id: str) -> Path:
         """根据 session_id 计算目标会话文件路径。
+
         Args:
             session_id (str): 会话唯一标识。
         Returns:
             Path: 目标会话文件路径。
+        Raises:
+            ValueError: 当 `session_id` 无法通过规范化校验时抛出。
         """
         normalized_id = self._normalize_session_id(session_id)
         return self.directory / f'{normalized_id}.json'
@@ -83,6 +99,7 @@ class AgentSessionStore:
         """规范化并校验 session_id。
 
         该函数禁止空值、路径分隔符以及可能导致路径逃逸的名字，以确保会话文件始终落在目标目录内部。
+
         Args:
             session_id (str): 原始会话标识。
         Returns:

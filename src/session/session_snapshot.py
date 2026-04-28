@@ -1,11 +1,11 @@
 """定义代理会话的持久化快照契约与恢复规则。
 
-本模块负责描述可落盘的会话快照结构，并保证以下行为稳定：
+本模块描述会话快照的稳定落盘结构，并保证以下行为：
 1. 与既有 JSON 字段命名保持兼容。
 2. 对可选字段缺失提供安全默认值。
 3. 对关键字段缺失或类型不合法时抛出明确异常。
 
-组织方式遵循“先入口、再顺着调用链往下读”的原则，便于沿着 `to_dict()` 与 `from_dict()` 两条主线理解整个落盘协议。
+文件内成员按“公开入口在前、私有兼容辅助在后”的顺序组织，便于沿着 `to_dict()` 与 `from_dict()` 两条主线理解整个落盘协议。
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ class AgentSessionSnapshot:
 
     def to_dict(self) -> JSONDict:
         """把会话快照转换成可落盘的 JSON 字典。
+
         Args:
             None
         Returns:
@@ -74,7 +75,9 @@ class AgentSessionSnapshot:
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'AgentSessionSnapshot':
         """从 JSON 字典恢复已落盘的会话快照。
+
         该方法兼容 snake_case 与 camelCase 字段名，并对非关键字段使用安全默认值。
+
         Args:
             payload (JSONDict | None): 从磁盘读取并解析得到的原始 JSON 载荷。
         Returns:
@@ -161,6 +164,7 @@ class AgentSessionSnapshot:
     @staticmethod
     def _as_dict(value: Any) -> JSONDict:
         """把输入值安全转换成字典。
+
         Args:
             value (Any): 待转换的原始值。
         Returns:
@@ -173,6 +177,7 @@ class AgentSessionSnapshot:
     @staticmethod
     def _first_present(data: JSONDict, *keys: str, default: Any = None) -> Any:
         """按顺序返回第一个存在且非 None 的字段值。
+
         Args:
             data (JSONDict): 待读取字段的字典对象。
             *keys (str): 依次尝试读取的字段名序列。
@@ -188,6 +193,7 @@ class AgentSessionSnapshot:
     @staticmethod
     def _as_str(value: Any, default: str = '') -> str:
         """把输入值安全转换成字符串。
+
         Args:
             value (Any): 待转换的原始值。
             default (str): 输入为 None 时使用的默认字符串。
@@ -203,6 +209,7 @@ class AgentSessionSnapshot:
     @staticmethod
     def _as_int(value: Any, default: int = 0) -> int:
         """把输入值安全转换成整数。
+
         Args:
             value (Any): 待转换的原始值。
             default (int): 转换失败、输入为 None 或 bool 时的默认值。
@@ -221,6 +228,7 @@ class AgentSessionSnapshot:
     @staticmethod
     def _as_float(value: Any, default: float = 0.0) -> float:
         """把输入值安全转换成浮点数。
+
         Args:
             value (Any): 待转换的原始值。
             default (float): 转换失败、输入为 None 或 bool 时的默认值。

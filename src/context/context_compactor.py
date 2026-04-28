@@ -1,8 +1,6 @@
-"""ISSUE-011 Compact 与 Reactive Compact：摘要压缩旧消息以释放上下文预算。
+"""执行主动 compact 与 reactive compact 所需的上下文摘要压缩。
 
-本模块负责把较早的消息压缩成两条 system reminder：一条记录“历史已被压缩”，
-另一条保存可继续执行任务所需的摘要。它既服务于主动 compact，也被 reactive
-compact 重试路径复用。
+本模块负责把较早的消息压缩成两条 system reminder：一条记录“历史已被压缩”，另一条保存继续任务所需的摘要。它既服务于主动 compact，也被 context-length 错误后的 reactive compact 重试路径复用。
 
 文件内定义按“公共对象优先，再顺着第一次调用链往下读”的顺序组织。当前主阅读链为：
 
@@ -45,15 +43,15 @@ _COMPACT_PROMPT = (
 class CompactionResult:
     """描述一次 compact 操作的结果。"""
 
-    compacted: bool  # 本次 compact 是否真的改写了消息列表。
-    summary_text: str = ''  # 模型生成并清洗后的摘要文本。
-    messages_replaced: int = 0  # 被 summary 替换掉的原始消息数量。
-    tokens_removed: int = 0  # 估算被释放出的 token 数。
-    pre_tokens: int = 0  # compact 前消息列表的估算 token 数。
-    post_tokens: int = 0  # compact 后消息列表的估算 token 数。
-    preserve_messages_used: int = 0  # 本次实际保留在尾部的消息数量。
-    usage: TokenUsage = field(default_factory=TokenUsage)  # 本次 compact 额外消耗的模型 usage。
-    error: str | None = None  # compact 未生效时的错误说明。
+    compacted: bool  # bool：本次 compact 是否真的改写了消息列表。
+    summary_text: str = ''  # str：模型生成并清洗后的摘要文本。
+    messages_replaced: int = 0  # int：被摘要替换掉的原始消息数量。
+    tokens_removed: int = 0  # int：估算被释放出的 token 数。
+    pre_tokens: int = 0  # int：compact 前消息列表的估算 token 数。
+    post_tokens: int = 0  # int：compact 后消息列表的估算 token 数。
+    preserve_messages_used: int = 0  # int：本次实际保留在尾部的消息数量。
+    usage: TokenUsage = field(default_factory=TokenUsage)  # TokenUsage：本次 compact 额外消耗的模型用量。
+    error: str | None = None  # str | None：compact 未生效时的错误说明。
 
 
 @dataclass
@@ -99,7 +97,11 @@ class ContextCompactor:
 
         summary = self._format_summary(response.content)
         if not summary:
-            return CompactionResult(compacted=False, usage=response.usage, error='Compact model returned empty summary')
+            return CompactionResult(
+                compacted=False,
+                usage=response.usage,
+                error='Compact model returned empty summary',
+            )
 
         result = self._apply_summary(
             messages,

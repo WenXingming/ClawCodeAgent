@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from context.context_budget_evaluator import ContextBudgetEvaluator
+from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from context.context_compactor import ContextCompactor
 from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
@@ -86,7 +86,7 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
         session_state.append_user('继续')
 
         orchestrator = BudgetContextOrchestrator(
-            budget_evaluator=ContextBudgetEvaluator(),
+            budget_evaluator=ContextTokenBudgetEvaluator(),
             context_snipper=ContextSnipper(),
             context_compactor=ContextCompactor(_FakeOpenAIClient([])),
         )
@@ -133,7 +133,7 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
 
         compact_usage = TokenUsage(input_tokens=2, output_tokens=1)
         orchestrator = BudgetContextOrchestrator(
-            budget_evaluator=ContextBudgetEvaluator(),
+            budget_evaluator=ContextTokenBudgetEvaluator(),
             context_snipper=ContextSnipper(),
             context_compactor=ContextCompactor(
                 _FakeOpenAIClient([

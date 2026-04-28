@@ -1,7 +1,6 @@
-"""ISSUE-010 Snip 上下文剪裁：把旧消息原地替换为 tombstone 摘要。
+"""执行轻量级上下文剪裁，把旧消息替换为 tombstone 提示。
 
-本模块负责在 `is_soft_over=True` 时做轻量级上下文瘦身。它不会压缩语义，只会把
-可恢复的旧消息内容替换成短摘要，以降低 prompt 压力并尽量保持消息链结构不变。
+本模块负责在 `is_soft_over=True` 时做轻量级上下文瘦身。它不会压缩语义，只会把可恢复的旧消息内容替换成短摘要，以降低 prompt 压力并尽量保持消息链结构不变。
 
 文件内定义按“公共对象优先，再顺着第一次调用链往下读”的顺序组织。当前主阅读链为：
 
@@ -20,12 +19,14 @@ from typing import Any
 
 from context.context_token_estimator import ContextTokenEstimator
 
+
 @dataclass(frozen=True)
 class SnipResult:
     """描述一次 snip 操作的统计结果。"""
 
     snipped_count: int  # int：本次被 tombstone 替换掉的消息数量。
     tokens_removed: int  # int：本次估算节省的 token 数。
+
 
 @dataclass
 class ContextSnipper:
