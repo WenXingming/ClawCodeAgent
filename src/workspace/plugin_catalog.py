@@ -227,7 +227,7 @@ class PluginLoadError:
 
 
 @dataclass
-class PluginRuntime:
+class PluginCatalog:
     """表示工作区插件清单加载与注册后的运行时快照。
 
     典型工作流如下：
@@ -247,7 +247,7 @@ class PluginRuntime:
         cls,
         workspace: Path,
         base_tool_registry: Mapping[str, LocalTool],
-    ) -> 'PluginRuntime':
+    ) -> 'PluginCatalog':
         """从工作区加载插件清单并构建插件运行时。
 
         Args:
@@ -255,7 +255,7 @@ class PluginRuntime:
             base_tool_registry (Mapping[str, LocalTool]): 基础工具注册表。
 
         Returns:
-            PluginRuntime: 含注册结果、冲突与错误信息的运行时对象。
+            PluginCatalog: 含注册结果、冲突与错误信息的工作区插件目录对象。
         """
         manifests: list[PluginManifest] = []
         load_errors: list[PluginLoadError] = []

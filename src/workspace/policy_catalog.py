@@ -106,7 +106,7 @@ class HookPolicyLoadError:
 
 
 @dataclass
-class HookPolicyRuntime:
+class PolicyCatalog:
     """表示工作区合并后的 hook policy 运行时快照。
 
     典型工作流如下：
@@ -126,14 +126,14 @@ class HookPolicyRuntime:
     budget_overrides: BudgetConfig = field(default_factory=BudgetConfig)  # BudgetConfig：合并后的预算覆盖配置。
 
     @classmethod
-    def from_workspace(cls, workspace: Path) -> 'HookPolicyRuntime':
+    def from_workspace(cls, workspace: Path) -> 'PolicyCatalog':
         """从工作区发现并加载 hook policy 清单。
 
         Args:
             workspace (Path): 工作区根目录。
 
         Returns:
-            HookPolicyRuntime: 合并策略与加载错误后的运行时快照。
+            PolicyCatalog: 合并策略与加载错误后的工作区策略目录对象。
         """
         manifests: list[HookPolicyManifest] = []
         skipped_manifests: list[HookPolicyManifest] = []

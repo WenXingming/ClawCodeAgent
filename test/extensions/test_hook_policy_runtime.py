@@ -7,12 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from extensions.hook_policy_runtime import HookPolicyRuntime
 from tools.registry import LocalTool
 from tools.tool_gateway import ToolGateway
+from workspace import PolicyCatalog
 
 
-class HookPolicyRuntimeTests(unittest.TestCase):
+class PolicyCatalogTests(unittest.TestCase):
     """验证 policy manifest 发现、合并与工具过滤。"""
 
     def setUp(self) -> None:
@@ -65,7 +65,7 @@ class HookPolicyRuntimeTests(unittest.TestCase):
                 },
             )
 
-            runtime = HookPolicyRuntime.from_workspace(workspace)
+            runtime = PolicyCatalog.from_workspace(workspace)
 
         self.assertEqual([item.name for item in runtime.manifests], ['base-policy', 'override-policy'])
         self.assertEqual(runtime.deny_tools, ('read_file', 'edit_file'))
@@ -87,7 +87,7 @@ class HookPolicyRuntimeTests(unittest.TestCase):
             handler=lambda arguments, context: 'ok',
         )
 
-        runtime = HookPolicyRuntime(
+        runtime = PolicyCatalog(
             deny_tools=('read_file',),
             deny_prefixes=('workspace_',),
         )
@@ -98,7 +98,7 @@ class HookPolicyRuntimeTests(unittest.TestCase):
         self.assertIn('list_dir', filtered)
 
     def test_runtime_exposes_hook_and_block_helpers(self) -> None:
-        runtime = HookPolicyRuntime(
+        runtime = PolicyCatalog(
             manifests=(),
             deny_tools=('read_file',),
             deny_prefixes=('workspace_',),
@@ -107,7 +107,7 @@ class HookPolicyRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.resolve_block('read_file')['source'], 'policy')
         self.assertEqual(runtime.resolve_block('workspace_banner')['reason'], 'deny_prefixes')
 
-        runtime = HookPolicyRuntime(
+        runtime = PolicyCatalog(
             manifests=(),
             before_hooks=({'kind': 'message', 'content': 'policy before'},),
             after_hooks=({'kind': 'message', 'content': 'policy after'},),

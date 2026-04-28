@@ -20,16 +20,16 @@ src/
 |  |- budget_context_orchestrator.py
 |  |- query_engine.py
 |  '- local_agent.py
+|- workspace/
+|  |- workspace_gateway.py
+|  |- plugin_catalog.py
+|  |- policy_catalog.py
+|  |- search_service.py
+|  '- worktree_service.py
 |- planning/
 |  |- task_runtime.py
 |  |- plan_runtime.py
 |  '- workflow_runtime.py
-|- extensions/
-|  |- plugin_runtime.py
-|  |- hook_policy_runtime.py
-|  |- search_runtime.py
-|  |- worktree_runtime.py
-|  '- mcp/
 |- budget/
 |  '- budget_guard.py
 |- context/
@@ -61,7 +61,7 @@ src/
 
 graph TB
     accTitle: ClawCodeAgent Module Architecture and Dependencies
-    accDescr: Clean layered architecture with package boundaries for control plane, orchestration, planning, extensions, budget and context.
+    accDescr: Clean layered architecture with package boundaries for control plane, orchestration, workspace, planning, budget and context.
 
     main(["🧭 main.py"])
 
@@ -81,13 +81,14 @@ graph TB
         style Orchestration fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
-    subgraph Extensions[extensions package / 工作区扩展能力]
+    subgraph Workspace[workspace package / 工作区能力与策略]
         direction TB
-        n_hook_policy(["🛡️ extensions/hook_policy_runtime.py"])
-        n_plugin(["🧩 extensions/plugin_runtime.py"])
-        n_search(["🔎 extensions/search_runtime.py"])
-        n_worktree(["🌿 extensions/worktree_runtime.py"])
-        style Extensions fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+        n_workspace_gateway(["🏠 workspace/workspace_gateway.py"])
+        n_hook_policy(["🛡️ workspace/policy_catalog.py"])
+        n_plugin(["🧩 workspace/plugin_catalog.py"])
+        n_search(["🔎 workspace/search_service.py"])
+        n_worktree(["🌿 workspace/worktree_service.py"])
+        style Workspace fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
     subgraph Planning[planning package / 任务与计划状态机]
@@ -153,9 +154,7 @@ graph TB
     n_query_engine --> n_session_store
 
     n_agent --> n_slash
-    n_agent --> n_hook_policy
-    n_agent --> n_plugin
-    n_agent --> n_worktree
+    n_agent --> n_workspace_gateway
     n_agent --> n_openai_client
     n_agent --> n_tools
     n_agent --> n_mcp_runtime
@@ -175,6 +174,10 @@ graph TB
 
     n_plan --> n_task
     n_workflow --> n_task
+    n_workspace_gateway --> n_hook_policy
+    n_workspace_gateway --> n_plugin
+    n_workspace_gateway --> n_search
+    n_workspace_gateway --> n_worktree
     n_hook_policy --> n_tools
     n_plugin --> n_tools
     n_mcp_adapter --> n_tools
@@ -194,6 +197,7 @@ graph TB
     n_agent_manager -.-> n_core_contracts
     n_query_engine -.-> n_core_contracts
     n_agent -.-> n_core_contracts
+    n_workspace_gateway -.-> n_core_contracts
     n_hook_policy -.-> n_core_contracts
     n_plugin -.-> n_core_contracts
     n_search -.-> n_core_contracts
@@ -215,6 +219,7 @@ graph TB
     style n_agent_manager fill:#0b7285,color:#fff,stroke:#095c69
     style n_query_engine fill:#495057,color:#fff,stroke:#343a40
     style n_agent fill:#007bff,color:#fff,stroke:#0056b3
+    style n_workspace_gateway fill:#5f3dc4,color:#fff,stroke:#4c2fb1
     style n_budget_context_orchestrator fill:#228be6,color:#fff,stroke:#1864ab
     style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
     style n_plugin fill:#0d6efd,color:#fff,stroke:#0a58ca
@@ -248,11 +253,12 @@ graph TB
 - `budget/` 只保留执行预算闸门 `BudgetGuard`，负责在主循环中统一裁决 turns / model_calls / token / cost / tool_calls 等运行时限制。
 - `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextTokenBudgetEvaluator`（含 `ContextTokenBudgetSnapshot`）提供预算投影，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
-- `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、worktree runtime、MCP server 都从工作区 `.claw/` manifest、git 状态或环境变量发现并对外提供独立 API。
+- `workspace/` 负责工作区领域能力：`WorkspaceGateway` 统一收口插件目录、策略目录、搜索服务和 worktree 服务，agent 只通过它获取 hook、block 决策、搜索能力和工作区安全环境。
+- `tools/mcp/` 保持 MCP transport、runtime 与 schema 适配；MCP 不再并入工作区目录，而是继续作为工具子系统的一部分。
 - `interaction/` 负责 CLI 和 slash 命令；`slash_commands_interaction.py` 依赖预算投影和工具注册表，但不会触发模型调用。
 - `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
 
-这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`；token 估算与预算投影（`ContextTokenEstimator`、`ContextTokenBudgetEvaluator`）归入 `context`，`budget` 只保留执行闸门 `BudgetGuard`，形成 `context` → `budget` → `orchestration` 的单向树状依赖。
+这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：工作区本地能力被收口为 `workspace` 领域门面，`LocalAgent` 不再直接认识 plugin/policy/search/worktree 细节；token 估算与预算投影（`ContextTokenEstimator`、`ContextTokenBudgetEvaluator`）归入 `context`，`budget` 只保留执行闸门 `BudgetGuard`，形成 `context` → `budget` → `orchestration` 的单向树状依赖。
 
 ## 测试镜像
 
@@ -275,7 +281,7 @@ test/
 
 - `test/orchestration/` 对应主循环集成测试。
 - `test/planning/` 对应 task/plan/workflow 状态机测试。
-- `test/extensions/` 对应 plugin/policy/search/mcp 测试，并承接相关 patch 目标。
+- `test/extensions/` 当前仍承接 plugin/policy/search/worktree/mcp 测试，这是测试目录名的历史遗留；生产代码对应实现已迁移到 `workspace/` 与 `tools/mcp/`。
 - `test/budget/` 对应预算快照、估算、评估与闸门测试。
 - `test/budget/` 现在只包含 `test_budget_guard.py`（五维闸门测试）。
 - `test/context/` 包含 `test_context_token_estimator.py`、`test_context_token_budget_evaluator.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
@@ -286,5 +292,5 @@ test/
 1. 先看 `core_contracts/`，建立共享契约层边界。
 2. 再看 `openai_client/openai_client.py` 与 `tools/local_tools.py`，理解模型侧和工具侧的外部交互面。
 3. 再看 `context/`（含 token 估算与预算投影）和 `budget/`（执行闸门），理解预算预检、上下文剪裁和摘要压缩的职责切分。
-4. 再看 `planning/` 与 `extensions/`，理解工作区本地状态和外部扩展能力各自如何发现、持久化和暴露 API。
+4. 再看 `planning/` 与 `workspace/`，理解工作区本地状态、策略和搜索/worktree 能力如何发现、持久化并通过门面暴露 API。
 5. 最后看 `orchestration/local_agent.py`、`interaction/command_line_interaction.py` 和 `main.py`，理解这些能力如何被装配成完整入口。

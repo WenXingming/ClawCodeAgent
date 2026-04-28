@@ -417,11 +417,11 @@ DuckDuckGo provider 示例（在公网 SearxNG 返回 403/429 时可作为降级
 ```python
 from pathlib import Path
 
-from extensions.search_runtime import SearchRuntime
+from workspace import SearchService
 
-runtime = SearchRuntime.from_workspace(Path('.'))
-runtime.activate_provider('workspace-search')
-response = runtime.search('ClawCodeAgent runtime design', max_retries=1)
+service = SearchService.from_workspace(Path('.'))
+service.activate_provider('workspace-search')
+response = service.search('ClawCodeAgent runtime design', max_retries=1)
 
 print(response.provider.provider_id)
 print(response.attempts)
@@ -430,7 +430,7 @@ print(response.results[0].title)
 
 说明：当前版本不做多 provider 融合排序；查询失败时会按 `max_retries` 重试，重试耗尽后抛出带 `provider_id`、`attempts` 和错误文本的 `SearchQueryError`，便于上层做可控处理。
 
-## 14. 工作区 Worktree Runtime（ISSUE-023）
+## 14. 工作区 Worktree Service（ISSUE-023）
 
 当前版本支持在本地 git 仓库上创建和管理“受管工作树”，用于把分支切到独立目录，并把逻辑 cwd 的切换、退出回退和历史记录稳定持久化下来。
 
@@ -442,7 +442,7 @@ print(response.results[0].title)
 当前能力：
 
 - `from_workspace`：探测仓库顶层目录与 git common dir，并恢复已保存的 worktree 状态。
-- `enter_worktree`：创建新分支、新增 git worktree，并把 runtime 的 `current_cwd` 切到目标目录。
+- `enter_worktree`：创建新分支、新增 git worktree，并把 service 的 `current_cwd` 切到目标目录。
 - `exit_worktree(remove=False)`：退出当前 worktree，保留目录并把 `current_cwd` 回退到 enter 前位置。
 - `exit_worktree(remove=True)`：删除当前 worktree 目录；删除前若检测到脏工作树会直接阻断。
 
@@ -457,18 +457,18 @@ print(response.results[0].title)
 ```python
 from pathlib import Path
 
-from extensions.worktree_runtime import WorktreeRuntime
+from workspace import WorktreeService
 
-runtime = WorktreeRuntime.from_workspace(Path('.'))
-record = runtime.enter_worktree('feature/demo-worktree')
+service = WorktreeService.from_workspace(Path('.'))
+record = service.enter_worktree('feature/demo-worktree')
 print(record.path)
-print(runtime.current_cwd)
+print(service.current_cwd)
 
-runtime.exit_worktree(remove=False)
-print(runtime.current_cwd)
+service.exit_worktree(remove=False)
+print(service.current_cwd)
 ```
 
-说明：当前版本先把 Worktree Runtime 保持为独立模块，不直接接入主循环和 CLI 控制面；后续 issue 可以在控制面层消费 `current_cwd`、active 记录和历史事件，把 cwd 切换行为暴露给最终用户。
+说明：当前版本通过 `workspace/worktree_service.py` 提供 worktree 服务，并由 `WorkspaceGateway` 统一向 agent 暴露工作区能力；控制面后续仍可继续消费 `current_cwd`、active 记录和历史事件。
 
 ## 15. delegate_agent 与 AgentManager（ISSUE-024）
 
