@@ -17,9 +17,11 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from interaction.exit_banner import SessionExitSummaryRenderer, SessionInteractionTracker
+from interaction.environment_summary import EnvironmentLoadSummary
+from interaction.exit_render import ExitRenderer
 from interaction.runtime_event_printer import RuntimeEventPrinter
-from interaction.startup_banner import StartupBannerRenderer
+from interaction.session_summary import SessionInteractionTracker
+from interaction.startup_render import StartupRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.run_result import AgentRunResult
@@ -56,8 +58,8 @@ class CLI:
         openai_client_cls: type[OpenAIClient] = OpenAIClient,
         agent_cls: type[LocalAgent] = LocalAgent,
         session_store_cls: type[AgentSessionStore] = AgentSessionStore,
-        banner_renderer: StartupBannerRenderer | None = None,
-        exit_summary_renderer: SessionExitSummaryRenderer | None = None,
+        startup_renderer: StartupRenderer | None = None,
+        exit_renderer: ExitRenderer | None = None,
         chat_exit_commands: frozenset[str] | None = None,
     ) -> None:
         """初始化 CLI 协调器，注入全部可替换的外部依赖。
@@ -69,10 +71,10 @@ class CLI:
                 用于创建新会话或恢复态代理。
             session_store_cls (type[AgentSessionStore]): 会话存储构造类型，
                 用于加载与定位持久化会话快照。
-            banner_renderer (StartupBannerRenderer | None): 启动横幅渲染器；
-                为 None 时使用默认 StartupBannerRenderer 实例。
-            exit_summary_renderer (SessionExitSummaryRenderer | None): 会话结束提示框渲染器；
-                为 None 时使用默认 SessionExitSummaryRenderer 实例。
+            startup_renderer (StartupRenderer | None): 启动渲染器；
+                为 None 时使用默认 StartupRenderer 实例。
+            exit_renderer (ExitRenderer | None): 结束渲染器；
+                为 None 时使用默认 ExitRenderer 实例。
             chat_exit_commands (frozenset[str] | None): 交互循环的本地退出命令集合；
                 为 None 时使用默认的 {'/exit', '/quit'}。
         Returns:
@@ -87,11 +89,11 @@ class CLI:
         self._session_store_cls = session_store_cls
         # type[AgentSessionStore]: 会话存储构造类型，负责读取持久化的会话快照文件。
 
-        self._banner_renderer = banner_renderer or StartupBannerRenderer()
-        # StartupBannerRenderer: 交互循环启动时输出欢迎横幅的渲染器实例。
+        self._startup_renderer = startup_renderer or StartupRenderer()
+        # StartupRenderer: 交互循环启动时输出欢迎横幅的渲染器实例。
 
-        self._exit_summary_renderer = exit_summary_renderer or SessionExitSummaryRenderer()
-        # SessionExitSummaryRenderer: 交互循环结束时输出总结提示框的渲染器实例。
+        self._exit_renderer = exit_renderer or ExitRenderer()
+        # ExitRenderer: 交互循环结束时输出总结提示框的渲染器实例。
 
         self._chat_exit_commands = chat_exit_commands or self._DEFAULT_CHAT_EXIT_COMMANDS
         # frozenset[str]: 交互式聊天循环的本地退出命令集合，如 '/exit'、'/quit'。
@@ -654,7 +656,8 @@ class CLI:
         Returns:
             int: 交互循环退出码；用户主动退出、EOF、KeyboardInterrupt 均返回 0。
         """
-        self._banner_renderer.render()
+        environment_summary = self._build_environment_load_summary(agent)
+        self._startup_renderer.render(environment_summary=environment_summary)
         progress_printer = RuntimeEventPrinter() if show_progress else None
         self._configure_agent_progress(agent, progress_printer)
         interaction_tracker = SessionInteractionTracker.start(current_session_id)
@@ -695,6 +698,55 @@ class CLI:
                 current_session_id=current_session_id,
             )
             print()  # turn separator, 每轮结束后输出一个空行分隔
+
+    def _build_environment_load_summary(self, agent: object) -> EnvironmentLoadSummary:
+        """从当前 agent 提炼启动横幅需要的环境摘要。
+
+        Args:
+            agent (object): 当前交互循环对应的代理对象；测试替身也可传入。
+        Returns:
+            EnvironmentLoadSummary: 由各 runtime 计数汇总后的环境摘要对象。
+        """
+        return EnvironmentLoadSummary(
+            mcp_servers=self._count_runtime_items(agent, 'mcp_runtime', 'servers'),
+            plugins=self._count_runtime_items(agent, 'plugin_runtime', 'manifests'),
+            hook_policies=self._count_runtime_items(agent, 'hook_policy_runtime', 'manifests'),
+            search_providers=self._count_runtime_items(agent, 'search_runtime', 'providers'),
+            load_errors=self._count_runtime_load_errors(agent),
+        )
+
+    @staticmethod
+    def _count_runtime_items(agent: object, runtime_name: str, collection_name: str) -> int:
+        """读取指定 runtime 上某个集合字段的长度。
+
+        Args:
+            agent (object): 当前交互循环对应的代理对象。
+            runtime_name (str): runtime 属性名，例如 mcp_runtime。
+            collection_name (str): 需要计数的集合字段名，例如 servers。
+        Returns:
+            int: 成功读取时返回集合长度；字段不存在或不可计数时返回 0。
+        """
+        runtime = getattr(agent, runtime_name, None)
+        if runtime is None:
+            return 0
+        value = getattr(runtime, collection_name, ())
+        try:
+            return len(value)
+        except TypeError:
+            return 0
+
+    def _count_runtime_load_errors(self, agent: object) -> int:
+        """汇总各运行时对象上的 load_errors 数量。
+
+        Args:
+            agent (object): 当前交互循环对应的代理对象。
+        Returns:
+            int: 各 runtime 的 load_errors 字段长度之和。
+        """
+        total = 0
+        for runtime_name in ('mcp_runtime', 'plugin_runtime', 'hook_policy_runtime', 'search_runtime'):
+            total += self._count_runtime_items(agent, runtime_name, 'load_errors')
+        return total
 
     @staticmethod
     def _configure_agent_progress(
@@ -740,7 +792,7 @@ class CLI:
         """
         if leading_blank_line:
             print()
-        self._exit_summary_renderer.render(tracker.to_summary())
+        self._exit_renderer.render(tracker.to_summary())
         return 0
 
     def _execute_chat_turn(

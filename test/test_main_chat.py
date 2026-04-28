@@ -8,6 +8,7 @@ import re
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
@@ -20,6 +21,10 @@ from session.session_snapshot import AgentSessionSnapshot
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
     testcase.assertIn('Tudou Code Agent - Empower Your Coding Journey with AI', output)
     testcase.assertIn('████████╗', output)
+    testcase.assertIn(
+        'Environment loaded: 1 MCP server, 2 plugins, 1 hook policy, 1 search provider',
+        output,
+    )
 
 
 def _assert_exit_summary_rendered(
@@ -73,6 +78,10 @@ class _ChatFakeAgent:
         _ChatFakeAgent.last_client = client
         _ChatFakeAgent.last_runtime = runtime_config
         _ChatFakeAgent.last_session_store = session_store
+        self.mcp_runtime = SimpleNamespace(servers=('mcp-server-1',), load_errors=())
+        self.plugin_runtime = SimpleNamespace(manifests=('plugin-a', 'plugin-b'), load_errors=())
+        self.hook_policy_runtime = SimpleNamespace(manifests=('policy-a',), load_errors=())
+        self.search_runtime = SimpleNamespace(providers=('provider-a',), load_errors=())
 
     def _emit_progress_events(self, result: AgentRunResult) -> None:
         reporter = getattr(self, 'progress_reporter', None)

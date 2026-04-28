@@ -1,4 +1,4 @@
-"""结束提示框渲染器测试。"""
+"""结束渲染器测试。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import os
 import unittest
 from unittest.mock import patch
 
-from interaction.exit_banner import SessionInteractionSummary, SessionExitSummaryRenderer
+from interaction.exit_render import ExitRenderer
+from interaction.session_summary import SessionSummary
 
 
 class _TtyStringIO(io.StringIO):
@@ -15,7 +16,7 @@ class _TtyStringIO(io.StringIO):
         return True
 
 
-class SessionExitSummaryRendererTests(unittest.TestCase):
+class ExitRendererTests(unittest.TestCase):
     def _extract_box_body(self, rendered_lines: list[str]) -> list[str]:
         self.assertGreaterEqual(len(rendered_lines), 2)
 
@@ -37,8 +38,8 @@ class SessionExitSummaryRendererTests(unittest.TestCase):
 
     def test_render_wraps_summary_in_single_rounded_box(self) -> None:
         stream = io.StringIO()
-        renderer = SessionExitSummaryRenderer(top_padding=0)
-        summary = SessionInteractionSummary(
+        renderer = ExitRenderer(top_padding=0)
+        summary = SessionSummary(
             session_id='session-001',
             tool_calls=3,
             tool_successes=2,
@@ -69,8 +70,8 @@ class SessionExitSummaryRendererTests(unittest.TestCase):
 
     def test_render_uses_soft_white_frame_on_ansi_stream(self) -> None:
         stream = _TtyStringIO()
-        renderer = SessionExitSummaryRenderer(top_padding=0)
-        summary = SessionInteractionSummary(session_id='session-001', wall_time_seconds=1)
+        renderer = ExitRenderer(top_padding=0)
+        summary = SessionSummary(session_id='session-001', wall_time_seconds=1)
 
         with patch.dict(os.environ, {'WT_SESSION': '1'}, clear=False):
             renderer.render(summary, stream=stream)
@@ -81,8 +82,8 @@ class SessionExitSummaryRendererTests(unittest.TestCase):
 
     def test_render_supports_gradient_frame_style(self) -> None:
         stream = _TtyStringIO()
-        renderer = SessionExitSummaryRenderer(top_padding=0, frame_style='gradient')
-        summary = SessionInteractionSummary(session_id='session-001', wall_time_seconds=1)
+        renderer = ExitRenderer(top_padding=0, frame_style='gradient')
+        summary = SessionSummary(session_id='session-001', wall_time_seconds=1)
 
         with patch.dict(os.environ, {'WT_SESSION': '1'}, clear=False):
             renderer.render(summary, stream=stream)

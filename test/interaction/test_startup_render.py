@@ -1,17 +1,18 @@
-"""启动 Banner 渲染器测试。"""
+"""启动渲染器测试。"""
 
 from __future__ import annotations
 
 import io
 import unittest
 
-from interaction.startup_banner import StartupBannerRenderer
+from interaction.environment_summary import EnvironmentLoadSummary
+from interaction.startup_render import StartupRenderer
 
 
-class StartupBannerRendererTests(unittest.TestCase):
+class StartupRendererTests(unittest.TestCase):
     def test_render_wraps_title_and_subtitle_in_single_rounded_box(self) -> None:
         stream = io.StringIO()
-        renderer = StartupBannerRenderer(
+        renderer = StartupRenderer(
             lines=('AB', 'CD'),
             subtitle='EF\nGH',
             top_padding=0,
@@ -39,6 +40,34 @@ class StartupBannerRendererTests(unittest.TestCase):
             content_lines.pop()
 
         self.assertEqual(content_lines, ['AB', 'CD', '', 'EF', 'GH'])
+
+    def test_render_appends_environment_summary_below_box(self) -> None:
+        stream = io.StringIO()
+        renderer = StartupRenderer(
+            lines=('AB',),
+            subtitle='EF',
+            top_padding=0,
+            gap_before_subtitle=0,
+            bottom_padding=0,
+        )
+
+        renderer.render(
+            stream=stream,
+            environment_summary=EnvironmentLoadSummary(
+                mcp_servers=1,
+                plugins=2,
+                hook_policies=1,
+                search_providers=1,
+            ),
+        )
+
+        rendered_lines = stream.getvalue().splitlines()
+
+        self.assertEqual(rendered_lines[-2], '')
+        self.assertEqual(
+            rendered_lines[-1],
+            'Environment loaded: 1 MCP server, 2 plugins, 1 hook policy, 1 search provider',
+        )
 
 
 if __name__ == '__main__':
