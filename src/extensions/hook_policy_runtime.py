@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from core_contracts.config import AgentRuntimeConfig, BudgetConfig
+from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict
 from tools.local_tools import LocalTool
 
@@ -213,18 +213,9 @@ class HookPolicyRuntime:
             if not self.is_tool_denied(name)
         }
 
-    def apply_runtime_config(self, runtime_config: AgentRuntimeConfig) -> AgentRuntimeConfig:
-        """把策略中的预算覆盖应用到运行时配置。
-
-        Args:
-            runtime_config (AgentRuntimeConfig): 当前待应用策略的运行时配置对象。
-        Returns:
-            AgentRuntimeConfig: 应用预算覆盖后的运行时配置；若无变更则返回原对象。
-        """
-        merged_budget = _merge_budget_configs(runtime_config.budget_config, self.budget_overrides)
-        if merged_budget == runtime_config.budget_config:
-            return runtime_config
-        return replace(runtime_config, budget_config=merged_budget)
+    def apply_budget_config(self, budget_config: BudgetConfig) -> BudgetConfig:
+        """把策略中的预算覆盖应用到基础预算配置。"""
+        return _merge_budget_configs(budget_config, self.budget_overrides)
 
     def resolve_block(self, tool_name: str) -> JSONDict | None:
         """解析某个工具被阻断时的来源与原因。

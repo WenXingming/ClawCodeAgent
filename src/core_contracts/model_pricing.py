@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._coerce import _as_dict, _as_float, _first_present
+from .coercion import _as_dict, _as_float, _first_present
 from .protocol import JSONDict
 from .token_usage import TokenUsage
 

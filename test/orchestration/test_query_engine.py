@@ -2,19 +2,33 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
+from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import OneTurnResponse, ToolCall
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient
 from orchestration.local_agent import LocalAgent
 from orchestration.query_engine import QueryEngine
 from session.session_store import AgentSessionStore
+
+
+@dataclass(frozen=True)
+class _RuntimeContracts:
+    workspace_scope: WorkspaceScope
+    execution_policy: ExecutionPolicy
+    context_policy: ContextPolicy
+    permissions: ToolPermissionPolicy
+    budget_config: BudgetConfig
+    session_paths: SessionPaths
 
 
 class _FakeOpenAIClient(OpenAIClient):
@@ -46,22 +60,33 @@ class QueryEngineTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, workspace, ignore_errors=True)
         return workspace
 
-    def _build_runtime_config(self, workspace: Path, *, budget: BudgetConfig | None = None) -> AgentRuntimeConfig:
-        return AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=6,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(
+    def _build_runtime_contracts(self, workspace: Path, *, budget: BudgetConfig | None = None) -> _RuntimeContracts:
+        return _RuntimeContracts(
+            workspace_scope=WorkspaceScope(cwd=workspace),
+            execution_policy=ExecutionPolicy(max_turns=6),
+            context_policy=ContextPolicy(),
+            permissions=ToolPermissionPolicy(
                 allow_file_write=True,
                 allow_shell_commands=False,
                 allow_destructive_shell_commands=False,
             ),
             budget_config=budget or BudgetConfig(),
+            session_paths=SessionPaths(session_directory=workspace / 'sessions'),
         )
 
     def _build_engine(self, workspace: Path, responses: list[OneTurnResponse | Exception], *, budget: BudgetConfig | None = None) -> tuple[QueryEngine, _FakeOpenAIClient]:
         fake_client = _FakeOpenAIClient(responses)
-        agent = LocalAgent(fake_client, self._build_runtime_config(workspace, budget=budget), AgentSessionStore(workspace / 'sessions'))
+        contracts = self._build_runtime_contracts(workspace, budget=budget)
+        agent = LocalAgent(
+            fake_client,
+            contracts.workspace_scope,
+            contracts.execution_policy,
+            contracts.context_policy,
+            contracts.permissions,
+            contracts.budget_config,
+            contracts.session_paths,
+            AgentSessionStore(contracts.session_paths.session_directory),
+        )
         return QueryEngine.from_runtime_agent(agent), fake_client
 
     def test_submit_uses_run_then_resume_and_can_return_persisted_session_path(self) -> None:

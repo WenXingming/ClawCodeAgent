@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
 from tools.local_tools import LocalToolService
 
 
@@ -28,17 +29,23 @@ class LocalToolsShellTests(unittest.TestCase):
         command_timeout_seconds: float = 3.0,
         safe_env: dict[str, str] | None = None,
     ):
-        config = AgentRuntimeConfig(
-            cwd=workspace,
+        workspace_scope = WorkspaceScope(cwd=workspace)
+        execution_policy = ExecutionPolicy(
             max_output_chars=max_output_chars,
             command_timeout_seconds=command_timeout_seconds,
-            permissions=AgentPermissions(
-                allow_shell_commands=allow_shell_commands,
-                allow_destructive_shell_commands=allow_destructive_shell_commands,
-            ),
+        )
+        permissions = ToolPermissionPolicy(
+            allow_shell_commands=allow_shell_commands,
+            allow_destructive_shell_commands=allow_destructive_shell_commands,
         )
         registry = self.tool_service.default_registry()
-        context = self.tool_service.build_context(config, tool_registry=registry, safe_env=safe_env)
+        context = self.tool_service.build_context(
+            workspace_scope,
+            execution_policy,
+            permissions,
+            tool_registry=registry,
+            safe_env=safe_env,
+        )
         return registry, context
 
     def test_registry_contains_bash_tool(self) -> None:

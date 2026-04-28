@@ -11,7 +11,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core_contracts.config import AgentRuntimeConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.run_result import AgentRunResult
 from core_contracts.token_usage import TokenUsage
 from main import main
@@ -86,9 +89,27 @@ class _ChatFakeAgent:
     def queue_results(cls, *results: AgentRunResult) -> None:
         cls.queued_results = list(results)
 
-    def __init__(self, client, runtime_config, session_store) -> None:
+    def __init__(
+        self,
+        client,
+        workspace_scope,
+        execution_policy,
+        context_policy,
+        permissions,
+        budget_config,
+        session_paths,
+        session_store,
+    ) -> None:
         _ChatFakeAgent.last_client = client
-        _ChatFakeAgent.last_runtime = runtime_config
+        _ChatFakeAgent.last_runtime = SimpleNamespace(
+            workspace_scope=workspace_scope,
+            execution_policy=execution_policy,
+            context_policy=context_policy,
+            permissions=permissions,
+            budget_config=budget_config,
+            session_paths=session_paths,
+            max_turns=execution_policy.max_turns,
+        )
         _ChatFakeAgent.last_session_store = session_store
         self.mcp_runtime = SimpleNamespace(servers=('mcp-server-1',), load_errors=())
         self.plugin_runtime = SimpleNamespace(manifests=('plugin-a', 'plugin-b'), load_errors=())
@@ -162,7 +183,12 @@ class MainChatEntryTests(unittest.TestCase):
                 base_url='http://127.0.0.1:9000/v1',
                 api_key='demo-key',
             ),
-            runtime_config=AgentRuntimeConfig(cwd=Path('.').resolve()),
+            workspace_scope=WorkspaceScope(cwd=Path('.').resolve()),
+            execution_policy=ExecutionPolicy(),
+            context_policy=ContextPolicy(),
+            permissions=ToolPermissionPolicy(),
+            budget_config=BudgetConfig(),
+            session_paths=SessionPaths(),
             messages=({'role': 'user', 'content': '历史问题'},),
         )
 

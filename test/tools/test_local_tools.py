@@ -12,7 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
 from tools.local_tools import LocalToolService
 
 
@@ -30,13 +31,16 @@ class LocalToolsTests(unittest.TestCase):
         max_output_chars: int = 12000,
     ):
         """构造工具上下文。"""
-        config = AgentRuntimeConfig(
-            cwd=workspace,
-            max_output_chars=max_output_chars,
-            permissions=AgentPermissions(allow_file_write=allow_file_write),
-        )
+        workspace_scope = WorkspaceScope(cwd=workspace)
+        execution_policy = ExecutionPolicy(max_output_chars=max_output_chars)
+        permissions = ToolPermissionPolicy(allow_file_write=allow_file_write)
         registry = self.tool_service.default_registry()
-        context = self.tool_service.build_context(config, tool_registry=registry)
+        context = self.tool_service.build_context(
+            workspace_scope,
+            execution_policy,
+            permissions,
+            tool_registry=registry,
+        )
         return registry, context
 
     def test_registry_contains_four_base_tools(self) -> None:

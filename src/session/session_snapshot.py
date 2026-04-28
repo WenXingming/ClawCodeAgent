@@ -13,8 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from core_contracts.config import AgentRuntimeConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
+from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 
 
@@ -32,7 +35,12 @@ class AgentSessionSnapshot:
 
     session_id: str  # 会话的稳定唯一标识，用于文件命名与恢复匹配。
     model_config: ModelConfig  # 本次会话使用的模型配置快照。
-    runtime_config: AgentRuntimeConfig  # 本次会话使用的运行配置快照。
+    workspace_scope: WorkspaceScope  # 本次会话使用的工作区范围快照。
+    execution_policy: ExecutionPolicy  # 本次会话使用的执行限制快照。
+    context_policy: ContextPolicy  # 本次会话使用的上下文治理策略快照。
+    permissions: ToolPermissionPolicy  # 本次会话使用的工具权限快照。
+    budget_config: BudgetConfig  # 本次会话使用的预算配置快照。
+    session_paths: SessionPaths  # 本次会话使用的会话路径快照。
     messages: tuple[JSONDict, ...]  # 恢复模型上下文所需的原始消息序列。
     transcript: tuple[JSONDict, ...] = ()  # 用于审计和追踪的转录条目。
     events: tuple[JSONDict, ...] = ()  # 运行过程中产生的事件记录。
@@ -60,7 +68,12 @@ class AgentSessionSnapshot:
             'schema_version': self.schema_version,
             'session_id': self.session_id,
             'model_config': self.model_config.to_dict(),
-            'runtime_config': self.runtime_config.to_dict(),
+            'workspace_scope': self.workspace_scope.to_dict(),
+            'execution_policy': self.execution_policy.to_dict(),
+            'context_policy': self.context_policy.to_dict(),
+            'permissions': self.permissions.to_dict(),
+            'budget_config': self.budget_config.to_dict(),
+            'session_paths': self.session_paths.to_dict(),
             'messages': [dict(item) for item in self.messages],
             'transcript': [dict(item) for item in self.transcript],
             'events': [dict(item) for item in self.events],
@@ -87,7 +100,7 @@ class AgentSessionSnapshot:
         Returns:
             AgentSessionSnapshot: 恢复后的不可变会话快照对象。
         Raises:
-            ValueError: 当 `session_id`、`model_config`、`runtime_config` 或 `messages` 等关键字段缺失或类型不符合要求时抛出。
+            ValueError: 当 `session_id`、`model_config` 或 `messages` 等关键字段缺失或类型不符合要求时抛出。
         """
         data = cls._as_dict(payload)
         session_id = cls._as_str(
@@ -100,10 +113,6 @@ class AgentSessionSnapshot:
         model_payload = cls._first_present(data, 'model_config', 'modelConfig')
         if not isinstance(model_payload, dict):
             raise ValueError('AgentSessionSnapshot.model_config must be a JSON object')
-
-        runtime_payload = cls._first_present(data, 'runtime_config', 'runtimeConfig')
-        if not isinstance(runtime_payload, dict):
-            raise ValueError('AgentSessionSnapshot.runtime_config must be a JSON object')
 
         messages_raw = data.get('messages')
         if not isinstance(messages_raw, list):
@@ -146,7 +155,24 @@ class AgentSessionSnapshot:
         return cls(
             session_id=session_id,
             model_config=ModelConfig.from_dict(model_payload),
-            runtime_config=AgentRuntimeConfig.from_dict(runtime_payload),
+            workspace_scope=WorkspaceScope.from_dict(
+                cls._first_present(data, 'workspace_scope', 'workspaceScope', default={})
+            ),
+            execution_policy=ExecutionPolicy.from_dict(
+                cls._first_present(data, 'execution_policy', 'executionPolicy', default={})
+            ),
+            context_policy=ContextPolicy.from_dict(
+                cls._first_present(data, 'context_policy', 'contextPolicy', default={})
+            ),
+            permissions=ToolPermissionPolicy.from_dict(
+                cls._first_present(data, 'permissions', default={})
+            ),
+            budget_config=BudgetConfig.from_dict(
+                cls._first_present(data, 'budget_config', 'budgetConfig', default={})
+            ),
+            session_paths=SessionPaths.from_dict(
+                cls._first_present(data, 'session_paths', 'sessionPaths', default={})
+            ),
             messages=tuple(item for item in messages_raw if isinstance(item, dict)),
             transcript=tuple(item for item in transcript_raw if isinstance(item, dict)),
             events=tuple(item for item in events_raw if isinstance(item, dict)),

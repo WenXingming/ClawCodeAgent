@@ -7,7 +7,7 @@ from typing import Any
 
 JSONDict = dict[str, Any]
 
-from ._coerce import (
+from .coercion import (
     _as_bool,
     _as_dict,
     _as_int,

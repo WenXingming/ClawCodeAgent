@@ -159,7 +159,7 @@ agent 当前直接知道：
 
 以下对象被明确判定为必须删除：
 
-1. `AgentRuntimeConfig`
+1. 旧静态聚合运行配置对象
 2. `src/core_contracts/config.py`
 3. `src/orchestration/local_agent.py`
 4. `src/interaction/command_line_interaction.py`
@@ -168,19 +168,19 @@ agent 当前直接知道：
 7. `src/core_contracts/_coerce.py` 这种下划线模块命名
 8. 任何兼容旧 import 的转发层
 
-### 4.1 关于 AgentRuntimeConfig 的最终结论
+### 4.1 关于旧静态聚合运行配置对象的最终结论
 
-`AgentRuntimeConfig` 必须删除，但不是由 `AgentRunState` 直接替代。
+旧静态聚合运行配置对象必须删除，但不是由 `AgentRunState` 直接替代。
 
 原因如下：
 
-1. `AgentRuntimeConfig` 是静态配置的混装对象。
+1. 旧静态聚合运行配置对象是静态配置的混装对象。
 2. `AgentRunState` 是运行中的动态状态对象。
 3. 两者职责不同，不能互相冒充。
 
 正确做法是：
 
-1. 删除 `AgentRuntimeConfig`
+1. 删除旧静态聚合运行配置对象
 2. 新建更小的静态契约对象
 3. 同时引入 `AgentRunState`
 
@@ -490,14 +490,14 @@ docs/
 
 ### Step 1：拆毁契约大杂烩
 
-目标：删除 `core_contracts/config.py` 和 `AgentRuntimeConfig`，建立新的静态契约分层。
+目标：删除 `src/core_contracts/config.py` 与旧静态聚合运行配置对象，建立新的静态契约分层。
 
 执行内容：
 
 1. 新建 `budget.py`、`model.py`、`permissions.py`、`runtime_policy.py`
 2. 保留 `protocol.py`、`run_result.py`、`token_usage.py`，但修正 import 边界
 3. 把 `_coerce.py` 重命名为 `coercion.py`
-4. 彻底删除 `AgentRuntimeConfig`
+4. 彻底删除旧静态聚合运行配置对象
 5. 全量替换所有相关 import
 6. 同步重写契约测试与序列化测试
 
@@ -508,8 +508,8 @@ docs/
 
 完成标准：
 
-1. 仓库中不再出现 `AgentRuntimeConfig`
-2. 仓库中不再出现 `core_contracts.config`
+1. 运行时代码与测试中不再出现旧静态聚合运行配置对象的符号引用
+2. 运行时代码与测试中不再出现旧 config 聚合模块的引用
 3. 契约测试全部通过
 
 ### Step 2：重建 session 与静态配置装配路径
@@ -725,7 +725,7 @@ docs/
 第一刀明确为：
 
 1. 删除 `src/core_contracts/config.py`
-2. 删除 `AgentRuntimeConfig`
+2. 删除旧静态聚合运行配置对象
 3. 拆分静态配置契约
 4. 重写相关测试与会话快照结构
 

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import unittest
 from pathlib import Path
 from unittest import mock
 from uuid import uuid4
 
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
+from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import OneTurnResponse, ToolCall
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 from extensions.search_runtime import SearchResult, SearchResponse, SearchProviderProfile
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
@@ -27,6 +31,20 @@ def _make_test_dir() -> Path:
     workspace = _TEST_TMP_ROOT / f'case-{uuid4().hex}'
     workspace.mkdir(parents=True, exist_ok=False)
     return workspace
+
+
+@dataclass(frozen=True)
+class _RuntimeContracts:
+    workspace_scope: WorkspaceScope
+    execution_policy: ExecutionPolicy
+    context_policy: ContextPolicy
+    permissions: ToolPermissionPolicy
+    budget_config: BudgetConfig
+    session_paths: SessionPaths
+
+    @property
+    def session_directory(self) -> Path:
+        return self.session_paths.session_directory
 
 
 class _FakeOpenAIClient(OpenAIClient):
@@ -60,23 +78,42 @@ class _FakeOpenAIClient(OpenAIClient):
 class LocalAgentTests(unittest.TestCase):
     """验证 ISSUE-006 主循环最小闭环。"""
 
-    def _build_runtime_config(self, workspace: Path, *, max_turns: int = 6) -> AgentRuntimeConfig:
-        return AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=max_turns,
-            session_directory=(workspace / 'sessions'),
-            permissions=AgentPermissions(
+    def _build_runtime_config(
+        self,
+        workspace: Path,
+        *,
+        max_turns: int = 6,
+        budget: BudgetConfig | None = None,
+        permissions: ToolPermissionPolicy | None = None,
+        context_policy: ContextPolicy | None = None,
+    ) -> _RuntimeContracts:
+        return _RuntimeContracts(
+            workspace_scope=WorkspaceScope(cwd=workspace),
+            execution_policy=ExecutionPolicy(max_turns=max_turns),
+            context_policy=context_policy or ContextPolicy(),
+            permissions=permissions or ToolPermissionPolicy(
                 allow_file_write=True,
                 allow_shell_commands=False,
                 allow_destructive_shell_commands=False,
             ),
+            budget_config=budget or BudgetConfig(),
+            session_paths=SessionPaths(session_directory=workspace / 'sessions'),
         )
 
     def _load_session_snapshot(self, workspace: Path, session_id: str) -> AgentSessionSnapshot:
         return AgentSessionStore(workspace / 'sessions').load(session_id)
 
-    def _build_agent(self, fake_client: OpenAIClient, config: AgentRuntimeConfig) -> LocalAgent:
-        return LocalAgent(fake_client, config, AgentSessionStore(config.session_directory))
+    def _build_agent(self, fake_client: OpenAIClient, config: _RuntimeContracts) -> LocalAgent:
+        return LocalAgent(
+            fake_client,
+            config.workspace_scope,
+            config.execution_policy,
+            config.context_policy,
+            config.permissions,
+            config.budget_config,
+            config.session_paths,
+            AgentSessionStore(config.session_directory),
+        )
 
     def test_run_without_tool_calls_returns_immediately(self) -> None:
         workspace = _make_test_dir()
@@ -392,7 +429,7 @@ class LocalAgentTests(unittest.TestCase):
 
         self.assertEqual(result.stop_reason, 'model_call_limit')
         self.assertEqual(len(fake_client.calls), 0)
-        self.assertEqual(agent.runtime_config.budget_config.max_model_calls, 0)
+        self.assertEqual(agent.budget_config.max_model_calls, 0)
 
     def test_run_policy_deny_filters_tool_registry(self) -> None:
         workspace = _make_test_dir()
@@ -882,14 +919,12 @@ class LocalAgentTests(unittest.TestCase):
     # ISSUE-009 预算闸门集成测试
     # ------------------------------------------------------------------
 
-    def _build_budget_config(self, workspace: Path, budget: BudgetConfig) -> AgentRuntimeConfig:
+    def _build_budget_config(self, workspace: Path, budget: BudgetConfig) -> _RuntimeContracts:
         """构造带自定义预算的运行配置。"""
-        return AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=6,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
-            budget_config=budget,
+        return self._build_runtime_config(
+            workspace,
+            budget=budget,
+            permissions=ToolPermissionPolicy(allow_file_write=True),
         )
 
     def test_run_stops_on_token_limit(self) -> None:
@@ -979,19 +1014,22 @@ class LocalAgentTests(unittest.TestCase):
         fake_client = _FakeOpenAIClient([
             OneTurnResponse(content='ok', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
         ])
-        config = AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=6,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
-            budget_config=BudgetConfig(max_session_turns=3),
+        config = self._build_runtime_config(
+            workspace,
+            budget=BudgetConfig(max_session_turns=3),
+            permissions=ToolPermissionPolicy(allow_file_write=True),
         )
         agent = self._build_agent(fake_client, config)
         # 伪造一个已经用了 3 轮的历史会话
         stored = AgentSessionSnapshot(
             session_id='test-session-999',
             model_config=fake_client.model_config,
-            runtime_config=config,
+            workspace_scope=config.workspace_scope,
+            execution_policy=config.execution_policy,
+            context_policy=config.context_policy,
+            permissions=config.permissions,
+            budget_config=config.budget_config,
+            session_paths=config.session_paths,
             messages=({'role': 'user', 'content': '历史消息'},),
             turns=3,
         )
@@ -1015,13 +1053,12 @@ class LocalAgentTests(unittest.TestCase):
         ])
         # max_input_tokens=5000：soft_limit=0（任意 projected>0 → soft_over=True）
         # 同时 hard_limit=904，几条消息的投影 token << 904，不触发 hard_over
-        config = AgentRuntimeConfig(
-            cwd=workspace,
+        config = self._build_runtime_config(
+            workspace,
             max_turns=5,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
-            budget_config=BudgetConfig(max_input_tokens=5000),
-            compact_preserve_messages=1,   # 确保消息不全在尾部，snip 有候选目标
+            budget=BudgetConfig(max_input_tokens=5000),
+            permissions=ToolPermissionPolicy(allow_file_write=True),
+            context_policy=ContextPolicy(compact_preserve_messages=1),
         )
         agent = self._build_agent(fake_client, config)
         result = agent.run('任务')
@@ -1037,11 +1074,10 @@ class LocalAgentTests(unittest.TestCase):
         fake_client = _FakeOpenAIClient([
             OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
         ])
-        config = AgentRuntimeConfig(
-            cwd=workspace,
+        config = self._build_runtime_config(
+            workspace,
             max_turns=5,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
+            permissions=ToolPermissionPolicy(allow_file_write=True),
             # 不设置 max_input_tokens → soft_over 永远 False
         )
         agent = self._build_agent(fake_client, config)
@@ -1065,19 +1101,25 @@ class LocalAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=3, output_tokens=4),
             ),
         ])
-        config = AgentRuntimeConfig(
-            cwd=workspace,
+        config = self._build_runtime_config(
+            workspace,
             max_turns=5,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
-            auto_compact_threshold_tokens=1,
-            compact_preserve_messages=1,
+            permissions=ToolPermissionPolicy(allow_file_write=True),
+            context_policy=ContextPolicy(
+                auto_compact_threshold_tokens=1,
+                compact_preserve_messages=1,
+            ),
         )
         agent = self._build_agent(fake_client, config)
         stored = AgentSessionSnapshot(
             session_id='compact-session-001',
             model_config=fake_client.model_config,
-            runtime_config=config,
+            workspace_scope=config.workspace_scope,
+            execution_policy=config.execution_policy,
+            context_policy=config.context_policy,
+            permissions=config.permissions,
+            budget_config=config.budget_config,
+            session_paths=config.session_paths,
             messages=(
                 {'role': 'user', 'content': '旧需求 ' * 80},
                 {'role': 'assistant', 'content': '旧回答 ' * 80},
@@ -1107,19 +1149,25 @@ class LocalAgentTests(unittest.TestCase):
         fake_client = _FakeOpenAIClient([
             OneTurnResponse(content='done', tool_calls=(), finish_reason='stop', usage=TokenUsage()),
         ])
-        config = AgentRuntimeConfig(
-            cwd=workspace,
+        config = self._build_runtime_config(
+            workspace,
             max_turns=5,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
-            auto_compact_threshold_tokens=10_000,
-            compact_preserve_messages=1,
+            permissions=ToolPermissionPolicy(allow_file_write=True),
+            context_policy=ContextPolicy(
+                auto_compact_threshold_tokens=10_000,
+                compact_preserve_messages=1,
+            ),
         )
         agent = self._build_agent(fake_client, config)
         stored = AgentSessionSnapshot(
             session_id='compact-session-002',
             model_config=fake_client.model_config,
-            runtime_config=config,
+            workspace_scope=config.workspace_scope,
+            execution_policy=config.execution_policy,
+            context_policy=config.context_policy,
+            permissions=config.permissions,
+            budget_config=config.budget_config,
+            session_paths=config.session_paths,
             messages=(
                 {'role': 'user', 'content': '旧需求'},
                 {'role': 'assistant', 'content': '旧回答'},
@@ -1156,18 +1204,22 @@ class LocalAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=3, output_tokens=2),
             ),
         ])
-        config = AgentRuntimeConfig(
-            cwd=workspace,
+        config = self._build_runtime_config(
+            workspace,
             max_turns=5,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
-            compact_preserve_messages=1,
+            permissions=ToolPermissionPolicy(allow_file_write=True),
+            context_policy=ContextPolicy(compact_preserve_messages=1),
         )
         agent = self._build_agent(fake_client, config)
         stored = AgentSessionSnapshot(
             session_id='compact-session-003',
             model_config=fake_client.model_config,
-            runtime_config=config,
+            workspace_scope=config.workspace_scope,
+            execution_policy=config.execution_policy,
+            context_policy=config.context_policy,
+            permissions=config.permissions,
+            budget_config=config.budget_config,
+            session_paths=config.session_paths,
             messages=(
                 {'role': 'user', 'content': '旧需求 ' * 80},
                 {'role': 'assistant', 'content': '旧回答 ' * 80},
@@ -1201,18 +1253,22 @@ class LocalAgentTests(unittest.TestCase):
                 usage=TokenUsage(input_tokens=2, output_tokens=1),
             ),
         ])
-        config = AgentRuntimeConfig(
-            cwd=workspace,
+        config = self._build_runtime_config(
+            workspace,
             max_turns=5,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(allow_file_write=True),
-            compact_preserve_messages=1,
+            permissions=ToolPermissionPolicy(allow_file_write=True),
+            context_policy=ContextPolicy(compact_preserve_messages=1),
         )
         agent = self._build_agent(fake_client, config)
         stored = AgentSessionSnapshot(
             session_id='compact-session-004',
             model_config=fake_client.model_config,
-            runtime_config=config,
+            workspace_scope=config.workspace_scope,
+            execution_policy=config.execution_policy,
+            context_policy=config.context_policy,
+            permissions=config.permissions,
+            budget_config=config.budget_config,
+            session_paths=config.session_paths,
             messages=(
                 {'role': 'user', 'content': '旧需求 ' * 80},
                 {'role': 'assistant', 'content': '旧回答 ' * 80},
@@ -1421,7 +1477,7 @@ class LocalAgentTests(unittest.TestCase):
             'tavily_search',
             arguments={'query': 'today tech news'},
             server_name='tavily',
-            max_chars=agent.runtime_config.max_output_chars,
+            max_chars=agent.execution_policy.max_output_chars,
         )
 
     def test_capability_search_materializes_temporary_mcp_tool_for_next_turn(self) -> None:
@@ -1543,10 +1599,9 @@ class LocalAgentTests(unittest.TestCase):
         """验证 mcp_call_tool 仍会拦截 filesystem 写工具。"""
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([])
-        config = AgentRuntimeConfig(
-            cwd=workspace,
-            session_directory=workspace / 'sessions',
-            permissions=AgentPermissions(
+        config = self._build_runtime_config(
+            workspace,
+            permissions=ToolPermissionPolicy(
                 allow_file_write=False,
                 allow_shell_commands=False,
                 allow_destructive_shell_commands=False,
@@ -1571,7 +1626,12 @@ class LocalAgentTests(unittest.TestCase):
         agent.mcp_runtime.call_tool = mock.Mock()
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
 
-        context = agent.tool_service.build_context(config, tool_registry=agent.tool_registry)
+        context = agent.tool_service.build_context(
+            config.workspace_scope,
+            config.execution_policy,
+            config.permissions,
+            tool_registry=agent.tool_registry,
+        )
         result = agent.tool_service.execute(
             agent.tool_registry,
             'mcp_call_tool',

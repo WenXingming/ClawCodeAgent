@@ -15,7 +15,7 @@
 
 1. 新增 `src/session/session_snapshot.py`：
    - 定义 `AgentSessionSnapshot`
-   - 复用现有 `ModelConfig` / `AgentRuntimeConfig` / `TokenUsage` 的 `to_dict()` / `from_dict()`
+   - 复用现有 `ModelConfig` / 当时的聚合运行配置对象 / `TokenUsage` 的 `to_dict()` / `from_dict()`
    - 支持 `schema_version` 与常见 camelCase 历史字段
 2. 新增 `src/session/session_store.py`：
    - `AgentSessionStore.save(...)`
@@ -60,7 +60,7 @@
 3. runtime 统一收尾：
    - 正常结束、`max_turns`、`backend_error` 都走同一个保存出口，避免分叉遗漏。
 4. 配置对象使用强类型恢复：
-   - `AgentSessionSnapshot` 内部直接持有 `ModelConfig` / `AgentRuntimeConfig` / `TokenUsage`，方便 ISSUE-008 直接接续。
+   - `AgentSessionSnapshot` 内部直接持有 `ModelConfig` / 当时的聚合运行配置对象 / `TokenUsage`，方便 ISSUE-008 直接接续。
 
 ## 5. 验收标准映射（DoD）
 

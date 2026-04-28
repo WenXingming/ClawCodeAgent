@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from context.context_token_budget_evaluator import ContextTokenBudgetSnapshot
-from core_contracts.config import BudgetConfig
+from core_contracts.budget import BudgetConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.token_usage import TokenUsage
 

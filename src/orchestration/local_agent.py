@@ -17,9 +17,11 @@ from context.context_compactor import ContextCompactor
 from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from orchestration.agent_manager import AgentManager, DelegatedTaskSpec
 from context.context_snipper import ContextSnipper
-from core_contracts.config import AgentRuntimeConfig
+from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.run_result import AgentRunResult
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 from extensions.search_runtime import SearchQueryError, SearchRuntime
 from openai_client.openai_client import OpenAIClient
@@ -48,7 +50,12 @@ class LocalAgent:
     """
 
     client: OpenAIClient  # 模型客户端。
-    runtime_config: AgentRuntimeConfig  # 运行配置。
+    workspace_scope: WorkspaceScope  # 工作区范围配置。
+    execution_policy: ExecutionPolicy  # 执行限制配置。
+    context_policy: ContextPolicy  # 上下文治理配置。
+    permissions: ToolPermissionPolicy  # 工具权限配置。
+    budget_config: BudgetConfig  # 预算配置。
+    session_paths: SessionPaths  # 会话路径配置。
     session_store: AgentSessionStore  # 会话持久化依赖。
     tool_service: LocalToolService = field(default_factory=LocalToolService)
     agent_manager: AgentManager = field(default_factory=AgentManager)  # AgentManager: 当前 run/resume 树共享的子代理编排器。
@@ -212,14 +219,14 @@ class LocalAgent:
             None: 该方法原地补全实例的运行时依赖。
         """
         self.tool_registry = self.tool_service.default_registry()
-        self.search_runtime = SearchRuntime.from_workspace(self.runtime_config.cwd)
-        self.mcp_runtime = MCPRuntime.from_workspace(self.runtime_config.cwd)
+        self.search_runtime = SearchRuntime.from_workspace(self.workspace_scope.cwd)
+        self.mcp_runtime = MCPRuntime.from_workspace(self.workspace_scope.cwd)
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
-        self.plugin_runtime = PluginRuntime.from_workspace(self.runtime_config.cwd, self.tool_registry)
+        self.plugin_runtime = PluginRuntime.from_workspace(self.workspace_scope.cwd, self.tool_registry)
         self.tool_registry = self.plugin_runtime.merge_tool_registry(self.tool_registry)
-        self.hook_policy_runtime = HookPolicyRuntime.from_workspace(self.runtime_config.cwd)
+        self.hook_policy_runtime = HookPolicyRuntime.from_workspace(self.workspace_scope.cwd)
         self.tool_registry = self.hook_policy_runtime.filter_tool_registry(self.tool_registry)
-        self.runtime_config = self.hook_policy_runtime.apply_runtime_config(self.runtime_config)
+        self.budget_config = self.hook_policy_runtime.apply_budget_config(self.budget_config)
         self.context_compactor = ContextCompactor(self.client)
         self.budget_context_orchestrator = BudgetContextOrchestrator(
             budget_evaluator=self.budget_evaluator,
@@ -789,7 +796,7 @@ class LocalAgent:
             group_label = self._optional_tool_string(arguments, 'label')
             task_specs = self._parse_delegate_task_specs(arguments)
             planned_child_count = self.agent_manager.child_agent_count() + len(task_specs)
-            max_delegated_tasks = self.runtime_config.budget_config.max_delegated_tasks
+            max_delegated_tasks = self.budget_config.max_delegated_tasks
             if max_delegated_tasks is not None and planned_child_count > max_delegated_tasks:
                 blocked_event = {
                     'type': 'delegate_group_blocked',
@@ -899,7 +906,12 @@ class LocalAgent:
 
                     child_agent = LocalAgent(
                         self.client,
-                        self.runtime_config,
+                        self.workspace_scope,
+                        self.execution_policy,
+                        self.context_policy,
+                        self.permissions,
+                        self.budget_config,
+                        self.session_paths,
                         self.session_store,
                         tool_service=self.tool_service,
                         agent_manager=self.agent_manager,
@@ -1249,7 +1261,10 @@ class LocalAgent:
                 session_state=session_state,
                 session_id=session_id,
                 turns_offset=turns_offset,
-                runtime_config=self.runtime_config,
+                workspace_scope=self.workspace_scope,
+                context_policy=self.context_policy,
+                permissions=self.permissions,
+                budget_config=self.budget_config,
                 model_config=self.client.model_config,
                 tool_registry=self.tool_registry,
                 plugin_summary=self.plugin_runtime.render_summary(),
@@ -1403,23 +1418,26 @@ class LocalAgent:
         model_call_count = 0
 
         guard = BudgetGuard(
-            budget=self.runtime_config.budget_config,
+            budget=self.budget_config,
             pricing=self.client.model_config.pricing,
             cost_baseline=cost_baseline,
         )
-        for turn_index in range(1, self.runtime_config.max_turns + 1):
+        for turn_index in range(1, self.execution_policy.max_turns + 1):
             turns_this_run = turn_index
 
             effective_tool_registry = self._build_effective_tool_registry(session_state)
             tool_context = self.tool_service.build_context(
-                self.runtime_config,
+                self.workspace_scope,
+                self.execution_policy,
+                self.permissions,
                 tool_registry=effective_tool_registry,
                 safe_env=self.hook_policy_runtime.safe_env,
             )
             openai_tools = self._build_openai_tools(effective_tool_registry)
             pre_model_outcome = self.budget_context_orchestrator.run_pre_model_cycle(
                 session_state=session_state,
-                runtime_config=self.runtime_config,
+                budget_config=self.budget_config,
+                context_policy=self.context_policy,
                 guard=guard,
                 openai_tools=openai_tools,
                 turn_index=turn_index,
@@ -1679,7 +1697,8 @@ class LocalAgent:
         reactive_outcome = self.budget_context_orchestrator.complete_with_reactive_compact(
             client=self.client,
             session_state=session_state,
-            runtime_config=self.runtime_config,
+            budget_config=self.budget_config,
+            context_policy=self.context_policy,
             openai_tools=openai_tools,
             turn_index=turn_index,
             guard=guard,
@@ -1879,7 +1898,12 @@ class LocalAgent:
         session_snapshot = AgentSessionSnapshot(
             session_id=session_id,
             model_config=self.client.model_config,
-            runtime_config=self.runtime_config,
+            workspace_scope=self.workspace_scope,
+            execution_policy=self.execution_policy,
+            context_policy=self.context_policy,
+            permissions=self.permissions,
+            budget_config=self.budget_config,
+            session_paths=self.session_paths,
             messages=tuple(session_state.to_messages()),
             transcript=transcript,
             events=events_snapshot,

@@ -12,8 +12,9 @@ from budget.budget_guard import BudgetGuard
 from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator, ContextTokenBudgetSnapshot
 from context.context_compactor import CompactionResult, ContextCompactor
 from context.context_snipper import ContextSnipper
-from core_contracts.config import AgentRuntimeConfig
+from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse
+from core_contracts.runtime_policy import ContextPolicy
 from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
 
@@ -70,7 +71,8 @@ class BudgetContextOrchestrator:
         self,
         *,
         session_state: _SessionStateLike,
-        runtime_config: AgentRuntimeConfig,
+        budget_config: BudgetConfig,
+        context_policy: ContextPolicy,
         guard: BudgetGuard,
         openai_tools: list[JSONDict],
         turn_index: int,
@@ -83,7 +85,8 @@ class BudgetContextOrchestrator:
 
         Args:
             session_state (_SessionStateLike): 当前会话状态对象，提供消息列表与消息副本视图。
-            runtime_config (AgentRuntimeConfig): 当前运行配置，提供预算与 compact 参数。
+            budget_config (BudgetConfig): 当前预算配置对象。
+            context_policy (ContextPolicy): 当前上下文治理策略对象。
             guard (BudgetGuard): 预算闸门对象，用于统一判断是否需要停止。
             openai_tools (list[JSONDict]): 当前可见工具定义列表。
             turn_index (int): 当前 turn 序号，用于写入事件。
@@ -101,15 +104,15 @@ class BudgetContextOrchestrator:
         snapshot = self.budget_evaluator.evaluate(
             messages=session_state.to_messages(),
             tools=openai_tools,
-            max_input_tokens=runtime_config.budget_config.max_input_tokens,
+            max_input_tokens=budget_config.max_input_tokens,
         )
 
         if snapshot.is_soft_over:
             snip_result = self.context_snipper.snip(
                 session_state.messages,
-                preserve_messages=runtime_config.compact_preserve_messages,
+                preserve_messages=context_policy.compact_preserve_messages,
                 tools=openai_tools,
-                max_input_tokens=runtime_config.budget_config.max_input_tokens,
+                max_input_tokens=budget_config.max_input_tokens,
             )
             if snip_result.snipped_count > 0:
                 events.append(
@@ -123,7 +126,7 @@ class BudgetContextOrchestrator:
                 snapshot = self.budget_evaluator.evaluate(
                     messages=session_state.to_messages(),
                     tools=openai_tools,
-                    max_input_tokens=runtime_config.budget_config.max_input_tokens,
+                    max_input_tokens=budget_config.max_input_tokens,
                 )
 
         pre_model_stop = guard.check_pre_model(
@@ -137,13 +140,13 @@ class BudgetContextOrchestrator:
         if (
             self.context_compactor.should_auto_compact(
                 snapshot.projected_input_tokens,
-                runtime_config.auto_compact_threshold_tokens,
+                context_policy.auto_compact_threshold_tokens,
             )
             and pre_model_stop is None
         ):
             compact_result = self.context_compactor.compact(
                 session_state.messages,
-                preserve_messages=runtime_config.compact_preserve_messages,
+                preserve_messages=context_policy.compact_preserve_messages,
             )
             if compact_result.compacted:
                 next_model_call_count += 1
@@ -152,7 +155,7 @@ class BudgetContextOrchestrator:
                 snapshot = self.budget_evaluator.evaluate(
                     messages=session_state.to_messages(),
                     tools=openai_tools,
-                    max_input_tokens=runtime_config.budget_config.max_input_tokens,
+                    max_input_tokens=budget_config.max_input_tokens,
                 )
                 pre_model_stop = guard.check_pre_model(
                     turns_offset=turns_offset,
@@ -168,7 +171,7 @@ class BudgetContextOrchestrator:
                         'turn': turn_index,
                         'trigger': 'auto',
                         'error': compact_result.error,
-                        'preserve_messages': runtime_config.compact_preserve_messages,
+                        'preserve_messages': context_policy.compact_preserve_messages,
                     }
                 )
 
@@ -195,7 +198,8 @@ class BudgetContextOrchestrator:
         *,
         client: OpenAIClient,
         session_state: _SessionStateLike,
-        runtime_config: AgentRuntimeConfig,
+        budget_config: BudgetConfig,
+        context_policy: ContextPolicy,
         openai_tools: list[JSONDict],
         turn_index: int,
         guard: BudgetGuard,
@@ -209,7 +213,8 @@ class BudgetContextOrchestrator:
         Args:
             client (OpenAIClient): 用于发起模型调用的客户端。
             session_state (_SessionStateLike): 当前会话状态对象，提供消息列表与消息副本视图。
-            runtime_config (AgentRuntimeConfig): 当前运行配置，提供输出 schema 与 compact 参数。
+            budget_config (BudgetConfig): 当前预算配置对象。
+            context_policy (ContextPolicy): 当前上下文治理策略对象。
             openai_tools (list[JSONDict]): 当前可见工具定义列表。
             turn_index (int): 当前 turn 序号，用于写入事件。
             guard (BudgetGuard): 预算闸门对象，用于在重试后重新检查预算停止条件。
@@ -231,7 +236,7 @@ class BudgetContextOrchestrator:
                 response = client.complete(
                     messages=session_state.to_messages(),
                     tools=openai_tools,
-                    output_schema=runtime_config.output_schema,
+                    output_schema=context_policy.output_schema,
                 )
                 current_model_call_count += 1
                 current_usage = current_usage + response.usage
@@ -250,7 +255,7 @@ class BudgetContextOrchestrator:
                 attempt += 1
                 preserve_messages = max(
                     1,
-                    runtime_config.compact_preserve_messages - (attempt - 1),
+                    context_policy.compact_preserve_messages - (attempt - 1),
                 )
                 compact_result = self.context_compactor.compact(
                     session_state.messages,
@@ -282,7 +287,7 @@ class BudgetContextOrchestrator:
                 snapshot = self.budget_evaluator.evaluate(
                     messages=session_state.to_messages(),
                     tools=openai_tools,
-                    max_input_tokens=runtime_config.budget_config.max_input_tokens,
+                    max_input_tokens=budget_config.max_input_tokens,
                 )
                 if stop := guard.check_pre_model(
                     turns_offset=turns_offset,

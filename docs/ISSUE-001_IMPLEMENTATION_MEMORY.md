@@ -36,7 +36,7 @@
 5. `ModelConfig`
 6. `ToolCall`
 7. `AgentPermissions`
-8. `AgentRuntimeConfig`
+8. 当时的聚合运行配置对象
 9. `ToolExecutionResult`
 10. `AgentRunResult`
 

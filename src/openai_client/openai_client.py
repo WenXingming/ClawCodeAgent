@@ -19,7 +19,7 @@ import json
 from typing import Any, Iterator
 from urllib import error, request
 
-from core_contracts.config import ModelConfig, OutputSchemaConfig
+from core_contracts.model import ModelConfig, StructuredOutputSpec
 from core_contracts.protocol import JSONDict, OneTurnResponse, StreamEvent, ToolCall
 from core_contracts.token_usage import TokenUsage
 
@@ -148,14 +148,14 @@ class OpenAIClient:
         messages: list[JSONDict],
         tools: list[JSONDict] | None = None,
         *,
-        output_schema: OutputSchemaConfig | None = None,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> OneTurnResponse:
         """执行一次非流式模型调用并返回标准化结果。
 
         Args:
             messages (list[JSONDict]): 模型对话消息列表。
             tools (list[JSONDict] | None): 可选工具定义列表。
-            output_schema (OutputSchemaConfig | None): 可选结构化输出约束。
+            output_schema (StructuredOutputSpec | None): 可选结构化输出约束。
 
         Returns:
             OneTurnResponse: 标准化后的单轮响应结果。
@@ -174,14 +174,14 @@ class OpenAIClient:
         messages: list[JSONDict],
         tools: list[JSONDict] | None = None,
         *,
-        output_schema: OutputSchemaConfig | None = None,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> Iterator[StreamEvent]:
         """执行一次流式模型调用并持续输出标准化事件。
 
         Args:
             messages (list[JSONDict]): 模型对话消息列表。
             tools (list[JSONDict] | None): 可选工具定义列表。
-            output_schema (OutputSchemaConfig | None): 可选结构化输出约束。
+            output_schema (StructuredOutputSpec | None): 可选结构化输出约束。
 
         Returns:
             Iterator[StreamEvent]: 逐条产出的流式事件序列。
@@ -212,14 +212,14 @@ class OpenAIClient:
         messages: list[JSONDict],
         tools: list[JSONDict] | None = None,
         *,
-        output_schema: OutputSchemaConfig | None = None,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> OneTurnResponse:
         """把流式事件聚合为最终 OneTurnResponse。
 
         Args:
             messages (list[JSONDict]): 模型对话消息列表。
             tools (list[JSONDict] | None): 可选工具定义列表。
-            output_schema (OutputSchemaConfig | None): 可选结构化输出约束。
+            output_schema (StructuredOutputSpec | None): 可选结构化输出约束。
         Returns:
             OneTurnResponse: 聚合后的单轮完整响应结果。
         """
@@ -294,7 +294,7 @@ class OpenAIClient:
         messages: list[JSONDict],
         tools: list[JSONDict] | None,
         stream: bool,
-        output_schema: OutputSchemaConfig | None,
+        output_schema: StructuredOutputSpec | None,
     ) -> JSONDict:
         """构造发送给 `/chat/completions` 的请求体。
 
@@ -302,7 +302,7 @@ class OpenAIClient:
             messages (list[JSONDict]): 模型对话消息列表。
             tools (list[JSONDict] | None): 可选工具定义列表。
             stream (bool): 是否开启流式响应模式。
-            output_schema (OutputSchemaConfig | None): 可选结构化输出约束。
+            output_schema (StructuredOutputSpec | None): 可选结构化输出约束。
         Returns:
             JSONDict: 发送给兼容后端的标准请求体。
         """
@@ -330,12 +330,12 @@ class OpenAIClient:
 
     @staticmethod
     def _build_response_format(
-        output_schema: OutputSchemaConfig | None,
+        output_schema: StructuredOutputSpec | None,
     ) -> JSONDict | None:
-        """把 OutputSchemaConfig 转换为 OpenAI-compatible response_format。
+        """把 StructuredOutputSpec 转换为 OpenAI-compatible response_format。
 
         Args:
-            output_schema (OutputSchemaConfig | None): 可选结构化输出约束对象。
+            output_schema (StructuredOutputSpec | None): 可选结构化输出约束对象。
         Returns:
             JSONDict | None: 可直接写入请求体的 response_format；未配置时返回 None。
         """

@@ -79,19 +79,26 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id>
 @'
 from pathlib import Path
 
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from openai_client.openai_client import OpenAIClient
 from orchestration.local_agent import LocalAgent
 from orchestration.query_engine import QueryEngine
 from session.session_store import AgentSessionStore
 
-runtime_config = AgentRuntimeConfig(
-    cwd=Path('.'),
-    max_turns=4,
-    session_directory=Path('.port_sessions') / 'agent',
-    permissions=AgentPermissions(allow_file_write=True),
+workspace = Path('.')
+session_paths = SessionPaths(session_directory=Path('.port_sessions') / 'agent')
+agent = LocalAgent(
+    OpenAIClient.from_env(),
+    WorkspaceScope(cwd=workspace),
+    ExecutionPolicy(max_turns=4),
+    ContextPolicy(),
+    ToolPermissionPolicy(allow_file_write=True),
+    BudgetConfig(),
+    session_paths,
+    AgentSessionStore(session_paths.session_directory),
 )
-agent = LocalAgent(OpenAIClient.from_env(), runtime_config, AgentSessionStore(runtime_config.session_directory))
 engine = QueryEngine.from_runtime_agent(agent)
 turn = engine.submit('读取 README 并总结 QueryEngine 的职责')
 print(turn.stop_reason)

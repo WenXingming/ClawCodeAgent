@@ -58,7 +58,7 @@
 
 ### 4.2 当前核心执行链
 
-1. 解析 CLI 参数并构造 `ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`。
+1. 解析 CLI 参数并构造 `ModelConfig`、静态运行策略契约组与 `BudgetConfig`。
 2. 构建 `OpenAIClient` 与 `LocalAgent`，并注入运行配置与工具注册表。
 3. 依据是否提供 `--session-id`，选择新会话 run 或 resume 路径。
 4. 进入 turn loop：`BudgetContextOrchestrator` 处理 pre-model preflight/snip/compact 与 reactive compact 重试 -> model call。
@@ -92,7 +92,7 @@
 ### 5.2 关键契约对象
 
 1. `ModelConfig`
-2. `AgentRuntimeConfig`
+2. 静态运行策略契约组（`WorkspaceScope` / `ExecutionPolicy` / `ContextPolicy` / `ToolPermissionPolicy` / `SessionPaths`）
 3. `BudgetConfig`
 4. `TokenUsage`
 5. `ToolCall`
@@ -309,7 +309,7 @@
 
 背景：保证后续模块实现围绕稳定数据契约推进，避免反复改 schema。
 
-目标：冻结 `ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`、`TokenUsage`、`ToolExecutionResult`、`AgentRunResult`。
+目标：冻结 `ModelConfig`、静态运行策略契约组、`BudgetConfig`、`TokenUsage`、`ToolExecutionResult`、`AgentRunResult`。
 
 范围：
 
@@ -678,7 +678,7 @@
 **实施决策（已落地）**
 
 - 新建 `src/context/context_compactor.py`，导出 `CompactionResult / ContextCompactor`；`compact()`、`is_context_length_error()` 与 `should_auto_compact()` 统一收敛到 compactor 对象上，作为 context 子包的第二层治理能力。
-- auto compact 触发条件采用 `AgentRuntimeConfig.auto_compact_threshold_tokens`，**不复用** `is_soft_over`；`is_soft_over` 继续仅作为 ISSUE-010 snip 的信号。
+- auto compact 触发条件采用 `ContextPolicy.auto_compact_threshold_tokens`，**不复用** `is_soft_over`；`is_soft_over` 继续仅作为 ISSUE-010 snip 的信号。
 - compact 的消息布局复用 snip 的保留规则：前缀连续 `system` 消息不参与压缩，尾部 `compact_preserve_messages` 条最近消息保留，仅中间段被替换为 `compact boundary + compact summary` 两条 system reminder。
 - compact 摘要调用显式禁用工具（`tools=[]`），只要求模型输出纯文本摘要；compact 写回消息只保留标准 OpenAI message 字段，不向模型发送自定义 metadata。
 - reactive compact 仅在 `OpenAIResponseError` 呈现 prompt-too-long / context-length 类语义时触发；首版每轮最多重试 2 次，每次将 `preserve_messages` 逐步收紧到 1。
@@ -1081,7 +1081,7 @@
 
 - 新增 `src/orchestration/agent_manager.py`，把 child agent record、group、dependency batch 与 stop_reason 汇总收敛到**独立编排对象**，不把这类运行期 lineage 状态混入 TaskRuntime。
 - `delegate_agent` 作为 **LocalAgent 内置工具** 暴露给模型，但实际执行走 LocalAgent 主循环里的专用分支，而不是完全复用 `LocalToolService.execute()`；这样可以保留 child/group runtime events，并对 `max_delegated_tasks` 给出专门的 stop_reason。
-- child agent 仍使用同一个 `OpenAIClient`、`AgentRuntimeConfig` 与 `AgentSessionStore`，但每个 child 都创建新的 `LocalAgent` 实例并共享同一个 `AgentManager`；本期以**串行执行 + 依赖拓扑分 batch** 作为“依赖批处理”的落地选择，不实现并发子代理。
+- child agent 仍使用同一个 `OpenAIClient`、同一组静态运行策略契约与 `AgentSessionStore`，但每个 child 都创建新的 `LocalAgent` 实例并共享同一个 `AgentManager`；本期以**串行执行 + 依赖拓扑分 batch** 作为“依赖批处理”的落地选择，不实现并发子代理。
 - `max_delegated_tasks` 不并入 ISSUE-009 的通用五维 `BudgetGuard`，而是在 `delegate_agent` 执行前做专门检查；一旦超限，会保留 tool result，并把父代理 stop_reason 收敛为 `delegated_task_limit`。
 - 当上游 child 失败时，下游依赖任务不会继续执行，而是被标记为 `dependency_skipped`；该状态会同时写入 AgentManager group summary、tool metadata 和 runtime events，供 ISSUE-025 统计层复用。
 

@@ -25,9 +25,12 @@ from interaction.slash_autocomplete import SlashAutocompleteEntry, SlashAutocomp
 from interaction.slash_commands import SlashCommandDispatcher
 from interaction.slash_render import SlashCommandRenderer
 from interaction.startup_render import StartupRenderer
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
 from core_contracts.model_pricing import ModelPricing
+from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.run_result import AgentRunResult
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
@@ -331,10 +334,10 @@ class CLI:
             ValueError: 当运行时配置约束非法时抛出。
             OpenAIClientError: 当模型客户端初始化失败时透传。
         """
-        agent, runtime_config = self._build_agent_from_args(args)
+        agent, session_paths = self._build_agent_from_args(args)
         current_session_directory = (
             self._normalize_optional_path(args.session_directory)
-            or runtime_config.session_directory.resolve()
+            or session_paths.session_directory.resolve()
         )
         return self._run_interactive_loop(
             agent,
@@ -344,23 +347,40 @@ class CLI:
             show_progress=self._resolve_show_progress(args),
         )
 
-    def _build_agent_from_args(self, args: argparse.Namespace) -> tuple[LocalAgent, AgentRuntimeConfig]:
+    def _build_agent_from_args(self, args: argparse.Namespace) -> tuple[LocalAgent, SessionPaths]:
         """根据命令行参数构造新会话代理实例。
 
         Args:
             args (argparse.Namespace): 已解析的命令行参数。
         Returns:
-            tuple[LocalAgent, AgentRuntimeConfig]: 新建的代理实例与其运行时配置。
+            tuple[LocalAgent, SessionPaths]: 新建的代理实例与其会话路径配置。
         Raises:
             ValueError: 当必填配置字段缺失或运行时配置约束非法时抛出。
             OpenAIClientError: 当模型客户端初始化失败时透传。
         """
         model_config = self._build_new_model_config(args)
-        runtime_config = self._build_new_runtime_config(args)
-        self._validate_runtime_config(runtime_config)
+        workspace_scope = self._build_new_workspace_scope(args)
+        execution_policy = self._build_new_execution_policy(args)
+        context_policy = self._build_new_context_policy(args)
+        permissions = self._build_new_permissions(args)
+        budget_config = self._build_new_budget_config(args)
+        session_paths = self._build_new_session_paths(args)
+        self._validate_static_contracts(permissions)
         client = self._openai_client_cls(model_config)
-        session_store = self._session_store_cls(runtime_config.session_directory)
-        return self._agent_cls(client, runtime_config, session_store), runtime_config
+        session_store = self._session_store_cls(session_paths.session_directory)
+        return (
+            self._agent_cls(
+                client,
+                workspace_scope,
+                execution_policy,
+                context_policy,
+                permissions,
+                budget_config,
+                session_paths,
+                session_store,
+            ),
+            session_paths,
+        )
 
     def _build_new_model_config(self, args: argparse.Namespace) -> ModelConfig:
         """构建新会话使用的模型配置。
@@ -475,18 +495,32 @@ class CLI:
             return base_pricing
         return replace(base_pricing, **updates)
 
-    def _build_new_runtime_config(self, args: argparse.Namespace) -> AgentRuntimeConfig:
-        """构建新会话使用的运行时配置。
-
-        Args:
-            args (argparse.Namespace): 已解析的命令行参数。
-        Returns:
-            AgentRuntimeConfig: 合并命令行参数后的运行时配置实例。
-        """
-        runtime_config = AgentRuntimeConfig(
-            cwd=self._normalize_optional_path(args.cwd) or Path('.').resolve()
+    def _build_new_workspace_scope(self, args: argparse.Namespace) -> WorkspaceScope:
+        """构建新会话使用的工作区范围配置。"""
+        return self._apply_workspace_scope_overrides(
+            WorkspaceScope(cwd=self._normalize_optional_path(args.cwd) or Path('.').resolve()),
+            args,
         )
-        return self._apply_runtime_overrides(runtime_config, args)
+
+    def _build_new_execution_policy(self, args: argparse.Namespace) -> ExecutionPolicy:
+        """构建新会话使用的执行限制配置。"""
+        return self._apply_execution_overrides(ExecutionPolicy(), args)
+
+    def _build_new_context_policy(self, args: argparse.Namespace) -> ContextPolicy:
+        """构建新会话使用的上下文治理策略。"""
+        return self._apply_context_policy_overrides(ContextPolicy(), args)
+
+    def _build_new_permissions(self, args: argparse.Namespace) -> ToolPermissionPolicy:
+        """构建新会话使用的权限策略。"""
+        return self._apply_permission_overrides(ToolPermissionPolicy(), args)
+
+    def _build_new_budget_config(self, args: argparse.Namespace) -> BudgetConfig:
+        """构建新会话使用的预算配置。"""
+        return self._apply_budget_overrides(BudgetConfig(), args)
+
+    def _build_new_session_paths(self, args: argparse.Namespace) -> SessionPaths:
+        """构建新会话使用的会话路径配置。"""
+        return self._apply_session_path_overrides(SessionPaths(), args)
 
     def _normalize_optional_path(self, value: str | None) -> Path | None:
         """清洗可选路径文本并解析为绝对路径。
@@ -501,30 +535,24 @@ class CLI:
             return None
         return Path(normalized).resolve()
 
-    def _apply_runtime_overrides(self, base_runtime: AgentRuntimeConfig, args: argparse.Namespace) -> AgentRuntimeConfig:
-        """把命令行中的运行时覆盖项合并到基线运行时配置。
-
-        Args:
-            base_runtime (AgentRuntimeConfig): 基线运行时配置。
-            args (argparse.Namespace): 已解析的命令行参数。
-        Returns:
-            AgentRuntimeConfig: 合并后的运行时配置实例。
-        """
-        permissions = self._apply_permission_overrides(base_runtime.permissions, args)
-        budget_config = self._apply_budget_overrides(base_runtime.budget_config, args)
-
-        updates: dict[str, object] = {
-            'permissions': permissions,
-            'budget_config': budget_config,
-        }
-
+    def _apply_workspace_scope_overrides(self, base_scope: WorkspaceScope, args: argparse.Namespace) -> WorkspaceScope:
+        """把命令行中的工作区覆盖项合并到基线工作区范围配置。"""
+        updates: dict[str, object] = {}
         cwd = self._normalize_optional_path(args.cwd)
-        session_directory = self._normalize_optional_path(args.session_directory)
-        scratchpad_root = self._normalize_optional_path(args.scratchpad_root)
         additional_dirs = self._normalize_optional_paths(getattr(args, 'additional_working_directories', None))
-
         if cwd is not None:
             updates['cwd'] = cwd
+        if additional_dirs is not None:
+            updates['additional_working_directories'] = additional_dirs
+        if args.disable_claude_md_discovery is not None:
+            updates['disable_claude_md_discovery'] = args.disable_claude_md_discovery
+        if not updates:
+            return base_scope
+        return replace(base_scope, **updates)
+
+    def _apply_execution_overrides(self, base_policy: ExecutionPolicy, args: argparse.Namespace) -> ExecutionPolicy:
+        """把命令行中的执行覆盖项合并到基线执行限制配置。"""
+        updates: dict[str, object] = {}
         if args.max_turns is not None:
             updates['max_turns'] = args.max_turns
         if args.command_timeout_seconds is not None:
@@ -533,31 +561,44 @@ class CLI:
             updates['max_output_chars'] = args.max_output_chars
         if args.stream_model_responses is not None:
             updates['stream_model_responses'] = args.stream_model_responses
+        if not updates:
+            return base_policy
+        return replace(base_policy, **updates)
+
+    def _apply_context_policy_overrides(self, base_policy: ContextPolicy, args: argparse.Namespace) -> ContextPolicy:
+        """把命令行中的上下文覆盖项合并到基线上下文治理策略。"""
+        updates: dict[str, object] = {}
         if args.auto_snip_threshold_tokens is not None:
             updates['auto_snip_threshold_tokens'] = args.auto_snip_threshold_tokens
         if args.auto_compact_threshold_tokens is not None:
             updates['auto_compact_threshold_tokens'] = args.auto_compact_threshold_tokens
         if args.compact_preserve_messages is not None:
             updates['compact_preserve_messages'] = args.compact_preserve_messages
-        if additional_dirs is not None:
-            updates['additional_working_directories'] = additional_dirs
-        if args.disable_claude_md_discovery is not None:
-            updates['disable_claude_md_discovery'] = args.disable_claude_md_discovery
+        if not updates:
+            return base_policy
+        return replace(base_policy, **updates)
+
+    def _apply_session_path_overrides(self, base_paths: SessionPaths, args: argparse.Namespace) -> SessionPaths:
+        """把命令行中的会话路径覆盖项合并到基线会话路径配置。"""
+        updates: dict[str, object] = {}
+        session_directory = self._normalize_optional_path(args.session_directory)
+        scratchpad_root = self._normalize_optional_path(args.scratchpad_root)
         if session_directory is not None:
             updates['session_directory'] = session_directory
         if scratchpad_root is not None:
             updates['scratchpad_root'] = scratchpad_root
+        if not updates:
+            return base_paths
+        return replace(base_paths, **updates)
 
-        return replace(base_runtime, **updates)
-
-    def _apply_permission_overrides(self, base_permissions: AgentPermissions, args: argparse.Namespace) -> AgentPermissions:
+    def _apply_permission_overrides(self, base_permissions: ToolPermissionPolicy, args: argparse.Namespace) -> ToolPermissionPolicy:
         """把权限开关参数覆盖到基线权限配置。
 
         Args:
-            base_permissions (AgentPermissions): 基线权限配置。
+            base_permissions (ToolPermissionPolicy): 基线权限配置。
             args (argparse.Namespace): 已解析的命令行参数。
         Returns:
-            AgentPermissions: 合并后的权限配置；若无覆盖项则返回原对象。
+            ToolPermissionPolicy: 合并后的权限配置；若无覆盖项则返回原对象。
         """
         updates: dict[str, bool] = {}
         if args.allow_file_write is not None:
@@ -611,17 +652,8 @@ class CLI:
         normalized = [Path(item).resolve() for item in values if isinstance(item, str) and item.strip()]
         return tuple(normalized)
 
-    def _validate_runtime_config(self, runtime_config: AgentRuntimeConfig) -> None:
-        """校验运行时配置的跨字段约束。
-
-        Args:
-            runtime_config (AgentRuntimeConfig): 待校验的运行时配置。
-        Returns:
-            None: 校验通过时不返回值。
-        Raises:
-            ValueError: 当 destructive shell 已开启但 shell 总开关未开启时抛出。
-        """
-        permissions = runtime_config.permissions
+    def _validate_static_contracts(self, permissions: ToolPermissionPolicy) -> None:
+        """校验静态契约的跨字段约束。"""
         if permissions.allow_destructive_shell_commands and not permissions.allow_shell_commands:
             raise ValueError('allow_destructive_shell requires --allow-shell')
 
@@ -1044,14 +1076,28 @@ class CLI:
             directory=loader_directory,
         )
         model_config = self._apply_model_overrides(session_snapshot.model_config, args)
-        runtime_config = self._apply_runtime_overrides(session_snapshot.runtime_config, args)
-        self._validate_runtime_config(runtime_config)
+        workspace_scope = self._apply_workspace_scope_overrides(session_snapshot.workspace_scope, args)
+        execution_policy = self._apply_execution_overrides(session_snapshot.execution_policy, args)
+        context_policy = self._apply_context_policy_overrides(session_snapshot.context_policy, args)
+        permissions = self._apply_permission_overrides(session_snapshot.permissions, args)
+        budget_config = self._apply_budget_overrides(session_snapshot.budget_config, args)
+        session_paths = self._apply_session_path_overrides(session_snapshot.session_paths, args)
+        self._validate_static_contracts(permissions)
         client = self._openai_client_cls(model_config)
-        session_store = self._session_store_cls(runtime_config.session_directory)
+        session_store = self._session_store_cls(session_paths.session_directory)
         return (
-            self._agent_cls(client, runtime_config, session_store),
+            self._agent_cls(
+                client,
+                workspace_scope,
+                execution_policy,
+                context_policy,
+                permissions,
+                budget_config,
+                session_paths,
+                session_store,
+            ),
             session_snapshot,
-            loader_directory or runtime_config.session_directory.resolve(),
+            loader_directory or session_paths.session_directory.resolve(),
         )
 
     # ------------------------------------------------------------------
@@ -1080,8 +1126,8 @@ class CLI:
                 session_id=current_session_id,
             )
         else:
-            agent, runtime_config = self._build_agent_from_args(args)
-            current_session_directory = current_session_directory or runtime_config.session_directory.resolve()
+            agent, session_paths = self._build_agent_from_args(args)
+            current_session_directory = current_session_directory or session_paths.session_directory.resolve()
 
         return self._run_interactive_loop(
             agent,

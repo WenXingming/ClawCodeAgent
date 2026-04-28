@@ -14,7 +14,7 @@ from io import BytesIO
 from unittest.mock import patch
 from urllib import error
 
-from core_contracts.config import ModelConfig, OutputSchemaConfig
+from core_contracts.model import ModelConfig, StructuredOutputSpec
 from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import (
     OpenAIClient,
@@ -178,7 +178,7 @@ class OpenAIClientStreamingTests(unittest.TestCase):
             ],
         )
 
-        schema = OutputSchemaConfig(
+        schema = StructuredOutputSpec(
             name='result_schema',
             schema={'type': 'object', 'properties': {'answer': {'type': 'string'}}},
             strict=True,

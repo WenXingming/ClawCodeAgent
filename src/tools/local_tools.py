@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from .bash_security import ShellSecurityPolicy
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
 from core_contracts.protocol import JSONDict, ToolExecutionResult
 
 
@@ -39,7 +40,7 @@ class ToolExecutionContext:
     root: Path  # Path: 当前工具调用可见的工作区根目录。
     command_timeout_seconds: float  # float: shell 命令允许执行的最长时间。
     max_output_chars: int  # int: 单次工具调用允许返回的最大文本长度。
-    permissions: AgentPermissions  # AgentPermissions: 当前会话的权限开关集合。
+    permissions: ToolPermissionPolicy  # ToolPermissionPolicy: 当前会话的权限开关集合。
     safe_env: dict[str, str] = field(default_factory=dict)  # dict[str, str]: 允许注入 shell 的安全环境变量。
     tool_registry: dict[str, 'LocalTool'] | None = None  # dict[str, LocalTool] | None: 当前可见工具映射。
 
@@ -159,7 +160,9 @@ class LocalToolService:
 
     def build_context(
         self,
-        config: AgentRuntimeConfig,
+        workspace_scope: WorkspaceScope,
+        execution_policy: ExecutionPolicy,
+        permissions: ToolPermissionPolicy,
         *,
         tool_registry: dict[str, LocalTool] | None = None,
         safe_env: dict[str, str] | None = None,
@@ -167,17 +170,19 @@ class LocalToolService:
         """根据运行时配置构造工具执行上下文。
 
         Args:
-            config (AgentRuntimeConfig): 当前运行时配置对象。
+            workspace_scope (WorkspaceScope): 当前工作区范围对象。
+            execution_policy (ExecutionPolicy): 当前执行限制对象。
+            permissions (ToolPermissionPolicy): 当前工具权限策略对象。
             tool_registry (dict[str, LocalTool] | None): 当前可见工具注册表。
             safe_env (dict[str, str] | None): 允许注入 shell 的额外安全环境变量映射。
         Returns:
             ToolExecutionContext: 归一化后的工具执行上下文对象。
         """
         return ToolExecutionContext(
-            root=config.cwd.resolve(),
-            command_timeout_seconds=config.command_timeout_seconds,
-            max_output_chars=config.max_output_chars,
-            permissions=config.permissions,
+            root=workspace_scope.cwd.resolve(),
+            command_timeout_seconds=execution_policy.command_timeout_seconds,
+            max_output_chars=execution_policy.max_output_chars,
+            permissions=permissions,
             safe_env=dict(safe_env or {}),
             tool_registry=tool_registry,
         )

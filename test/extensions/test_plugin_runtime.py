@@ -7,7 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
 from extensions.plugin_runtime import PluginRuntime
 from tools.local_tools import LocalToolService
 
@@ -27,15 +28,16 @@ class PluginRuntimeTests(unittest.TestCase):
         )
 
     def _build_context(self, workspace: Path, registry: dict[str, object]):
-        config = AgentRuntimeConfig(
-            cwd=workspace,
-            permissions=AgentPermissions(
+        return self.tool_service.build_context(
+            WorkspaceScope(cwd=workspace),
+            ExecutionPolicy(),
+            ToolPermissionPolicy(
                 allow_file_write=False,
                 allow_shell_commands=False,
                 allow_destructive_shell_commands=False,
             ),
+            tool_registry=registry,
         )
-        return self.tool_service.build_context(config, tool_registry=registry)
 
     def test_from_workspace_registers_alias_and_virtual_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

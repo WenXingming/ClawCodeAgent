@@ -622,20 +622,34 @@ print(engine.render_summary())
 代码示例：
 
 ```python
-from core_contracts.config import AgentRuntimeConfig, BudgetConfig
-from orchestration.agent_runtime import LocalCodingAgent
+from pathlib import Path
 
-config = AgentRuntimeConfig(
-    cwd='.',
-    budget_config=BudgetConfig(
-        max_input_tokens=32_000,   # 限制 prompt 不超过约 32K token
-        max_total_cost_usd=0.10,   # 整个会话最多花 0.1 USD
-        max_tool_calls=20,         # 最多调用工具 20 次
-        max_model_calls=10,        # 最多调用模型 10 次
-        max_session_turns=50,      # 含 resume 累计轮数不超过 50
-    ),
+from core_contracts.budget import BudgetConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from orchestration.local_agent import LocalAgent
+from session.session_store import AgentSessionStore
+
+workspace = Path('.')
+budget = BudgetConfig(
+  max_input_tokens=32_000,   # 限制 prompt 不超过约 32K token
+  max_total_cost_usd=0.10,   # 整个会话最多花 0.1 USD
+  max_tool_calls=20,         # 最多调用工具 20 次
+  max_model_calls=10,        # 最多调用模型 10 次
+  max_session_turns=50,      # 含 resume 累计轮数不超过 50
 )
-agent = LocalCodingAgent(client, config)
+permissions = ToolPermissionPolicy(allow_file_write=True)
+session_paths = SessionPaths(session_directory=workspace / '.port_sessions' / 'agent')
+agent = LocalAgent(
+  client,
+  WorkspaceScope(cwd=workspace),
+  ExecutionPolicy(max_turns=10),
+  ContextPolicy(),
+  permissions,
+  budget,
+  session_paths,
+  AgentSessionStore(session_paths.session_directory),
+)
 result = agent.run('...')
 print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 ```

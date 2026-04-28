@@ -1,10 +1,4 @@
-"""ISSUE-001 契约模型的单元测试。
-
-这个测试文件同时承担两类目的：
-1) 展示每个契约对象应该如何工作。
-2) 验证 from_dict 对异常/不完整输入的安全容错。
-3) 保护常见历史字段名的兼容性。
-"""
+"""ISSUE-001 契约模型的单元测试。"""
 
 from __future__ import annotations
 
@@ -12,10 +6,13 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
-from core_contracts.protocol import OneTurnResponse, StreamEvent, ToolCall, ToolExecutionResult
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig, StructuredOutputSpec
 from core_contracts.model_pricing import ModelPricing
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.protocol import OneTurnResponse, StreamEvent, ToolCall, ToolExecutionResult
 from core_contracts.run_result import AgentRunResult
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 
 
@@ -29,14 +26,7 @@ def _make_test_dir() -> Path:
     return workspace
 
 
-# ---------------------------------------------------------------------------
-# 使用统计与 token 计数
-# ---------------------------------------------------------------------------
-
-
 class TokenUsageTests(unittest.TestCase):
-    """验证 token 统计行为。"""
-
     def test_total_tokens_and_add(self) -> None:
         left = TokenUsage(input_tokens=10, output_tokens=5, reasoning_tokens=2)
         right = TokenUsage(input_tokens=3, output_tokens=4)
@@ -61,8 +51,6 @@ class TokenUsageTests(unittest.TestCase):
 
 
 class ModelConfigTests(unittest.TestCase):
-    """验证模型配置解析与默认值行为。"""
-
     def test_model_config_round_trip(self) -> None:
         config = ModelConfig(
             model='demo-model',
@@ -83,9 +71,18 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(restored.timeout_seconds, 120.0)
 
 
-class ModelPricingTests(unittest.TestCase):
-    """验证成本估算公式是否符合预期。"""
+class StructuredOutputSpecTests(unittest.TestCase):
+    def test_structured_output_round_trip(self) -> None:
+        spec = StructuredOutputSpec(
+            name='answer',
+            schema={'type': 'object', 'properties': {'value': {'type': 'string'}}},
+            strict=True,
+        )
+        restored = StructuredOutputSpec.from_dict(spec.to_dict())
+        self.assertEqual(restored, spec)
 
+
+class ModelPricingTests(unittest.TestCase):
     def test_estimate_cost_usd(self) -> None:
         pricing = ModelPricing(
             input_cost_per_million_tokens_usd=1.0,
@@ -100,13 +97,10 @@ class ModelPricingTests(unittest.TestCase):
             cache_read_input_tokens=100_000,
         )
 
-        # 1.0 + 1.0 + 0.1 + 0.025
         self.assertAlmostEqual(pricing.estimate_cost_usd(usage), 2.125)
 
 
 class BudgetConfigTests(unittest.TestCase):
-    """验证预算字段及兼容字段名解析。"""
-
     def test_budget_config_supports_camel_case_keys(self) -> None:
         budget = BudgetConfig.from_dict(
             {
@@ -124,42 +118,49 @@ class BudgetConfigTests(unittest.TestCase):
         self.assertIsNone(budget.max_total_tokens)
 
 
-class RuntimeConfigTests(unittest.TestCase):
-    """验证运行配置的默认行为与序列化往返。"""
-
-    def test_runtime_config_defaults_when_fields_missing(self) -> None:
-        workspace = _make_test_dir()
-        runtime = AgentRuntimeConfig.from_dict({'cwd': str(workspace)})
-
-        self.assertEqual(runtime.max_turns, 12)
-        self.assertEqual(runtime.permissions, AgentPermissions())
-        self.assertEqual(runtime.budget_config, BudgetConfig())
-        self.assertEqual(runtime.cwd, workspace.resolve())
-        self.assertTrue(str(runtime.session_directory).endswith('.port_sessions\\agent'))
-
-    def test_runtime_config_round_trip(self) -> None:
-        workspace = _make_test_dir()
-        runtime = AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=5,
-            permissions=AgentPermissions(allow_file_write=True, allow_shell_commands=True),
-            additional_working_directories=(workspace / 'sub',),
-            budget_config=BudgetConfig(max_model_calls=3),
+class ToolPermissionPolicyTests(unittest.TestCase):
+    def test_permission_policy_round_trip(self) -> None:
+        permissions = ToolPermissionPolicy(
+            allow_file_write=True,
+            allow_shell_commands=True,
         )
+        restored = ToolPermissionPolicy.from_dict(permissions.to_dict())
+        self.assertEqual(restored, permissions)
 
-        restored = AgentRuntimeConfig.from_dict(runtime.to_dict())
 
-        self.assertEqual(restored.cwd, runtime.cwd.resolve())
-        self.assertEqual(restored.max_turns, 5)
-        self.assertEqual(restored.permissions.allow_file_write, True)
-        self.assertEqual(restored.permissions.allow_shell_commands, True)
-        self.assertEqual(restored.budget_config.max_model_calls, 3)
-        self.assertEqual(len(restored.additional_working_directories), 1)
+class RuntimePolicyTests(unittest.TestCase):
+    def test_workspace_scope_defaults_when_fields_missing(self) -> None:
+        workspace = _make_test_dir()
+        scope = WorkspaceScope.from_dict({'cwd': str(workspace)})
+        self.assertEqual(scope.cwd, workspace.resolve())
+        self.assertEqual(scope.additional_working_directories, ())
+        self.assertFalse(scope.disable_claude_md_discovery)
+
+    def test_execution_policy_round_trip(self) -> None:
+        policy = ExecutionPolicy(max_turns=5, command_timeout_seconds=12.0, max_output_chars=2048)
+        restored = ExecutionPolicy.from_dict(policy.to_dict())
+        self.assertEqual(restored, policy)
+
+    def test_context_policy_round_trip(self) -> None:
+        policy = ContextPolicy(
+            auto_compact_threshold_tokens=1024,
+            compact_preserve_messages=2,
+            output_schema=StructuredOutputSpec(
+                name='result',
+                schema={'type': 'object'},
+                strict=True,
+            ),
+        )
+        restored = ContextPolicy.from_dict(policy.to_dict())
+        self.assertEqual(restored, policy)
+
+    def test_session_paths_defaults_are_resolved(self) -> None:
+        session_paths = SessionPaths.from_dict({})
+        self.assertTrue(str(session_paths.session_directory).endswith('.port_sessions\\agent'))
+        self.assertTrue(str(session_paths.scratchpad_root).endswith('.port_sessions\\scratchpad'))
 
 
 class ToolContractsTests(unittest.TestCase):
-    """验证工具调用/结果契约的安全行为。"""
-
     def test_tool_call_invalid_arguments_fall_back_to_empty_dict(self) -> None:
         call = ToolCall.from_dict({'id': '1', 'name': 'read_file', 'arguments': ['bad']})
         self.assertEqual(call.arguments, {})
@@ -176,8 +177,6 @@ class ToolContractsTests(unittest.TestCase):
 
 
 class OneTurnResponseTests(unittest.TestCase):
-    """验证模型单轮响应契约。"""
-
     def test_one_turn_response_round_trip(self) -> None:
         turn = OneTurnResponse(
             content='done',
@@ -211,8 +210,6 @@ class OneTurnResponseTests(unittest.TestCase):
 
 
 class StreamEventTests(unittest.TestCase):
-    """验证流式事件契约。"""
-
     def test_stream_event_round_trip(self) -> None:
         event = StreamEvent(
             type='tool_call_delta',

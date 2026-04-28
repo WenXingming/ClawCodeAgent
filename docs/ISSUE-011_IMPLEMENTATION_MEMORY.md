@@ -18,7 +18,7 @@
 
 ### 1. auto compact 使用显式阈值，不复用 `is_soft_over`
 `ContextCompactor.should_auto_compact(projected_input_tokens, auto_compact_threshold_tokens)`
-只读取 `AgentRuntimeConfig.auto_compact_threshold_tokens`。这样 compact 的开启条件
+只读取当时聚合运行配置中的 `auto_compact_threshold_tokens`。这样 compact 的开启条件
 与 snip 分离，保留了“轻量剪裁”和“摘要压缩”两个治理层级的独立开关。
 
 ### 2. compact 复用 snip 的保留区间规则

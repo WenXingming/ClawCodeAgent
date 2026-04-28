@@ -6,11 +6,14 @@ from dataclasses import replace
 import unittest
 from pathlib import Path
 
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
 from interaction.slash_commands import (
     SlashCommandContext,
     SlashCommandDispatcher,
 )
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig, ModelConfig
 from session.session_state import AgentSessionState
 from tools.local_tools import LocalToolService
 
@@ -31,14 +34,14 @@ class SlashCommandModuleTests(unittest.TestCase):
             session_state=session_state,
             session_id='session-001',
             turns_offset=2,
-            runtime_config=AgentRuntimeConfig(
-                cwd=Path('.').resolve(),
-                permissions=AgentPermissions(
-                    allow_file_write=True,
-                    allow_shell_commands=False,
-                    allow_destructive_shell_commands=False,
-                ),
+            workspace_scope=WorkspaceScope(cwd=Path('.').resolve()),
+            context_policy=ContextPolicy(),
+            permissions=ToolPermissionPolicy(
+                allow_file_write=True,
+                allow_shell_commands=False,
+                allow_destructive_shell_commands=False,
             ),
+            budget_config=BudgetConfig(),
             model_config=ModelConfig(model='demo-model'),
             tool_registry=self.tool_service.default_registry(),
         )

@@ -7,7 +7,10 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.config import AgentRuntimeConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
+from core_contracts.permissions import ToolPermissionPolicy
+from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
@@ -30,7 +33,12 @@ class SessionStoreTests(unittest.TestCase):
         return AgentSessionSnapshot(
             session_id=session_id,
             model_config=ModelConfig(model='demo-model'),
-            runtime_config=AgentRuntimeConfig(cwd=workspace),
+            workspace_scope=WorkspaceScope(cwd=workspace),
+            execution_policy=ExecutionPolicy(),
+            context_policy=ContextPolicy(),
+            permissions=ToolPermissionPolicy(),
+            budget_config=BudgetConfig(),
+            session_paths=SessionPaths(),
             messages=(
                 {'role': 'user', 'content': '你好，世界'},
                 {'role': 'assistant', 'content': '收到'},
@@ -58,7 +66,7 @@ class SessionStoreTests(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertEqual(restored.session_id, session_snapshot.session_id)
         self.assertEqual(restored.model_config, session_snapshot.model_config)
-        self.assertEqual(restored.runtime_config.cwd, session_snapshot.runtime_config.cwd.resolve())
+        self.assertEqual(restored.workspace_scope.cwd, session_snapshot.workspace_scope.cwd.resolve())
         self.assertEqual(restored.messages, session_snapshot.messages)
         self.assertEqual(restored.transcript, session_snapshot.transcript)
         self.assertEqual(restored.events, session_snapshot.events)
@@ -89,14 +97,14 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_load_defaults_missing_optional_fields(self) -> None:
         workspace = _make_test_dir()
-        path = (workspace / 'sessions')
+        path = workspace / 'sessions'
         path.mkdir(parents=True, exist_ok=True)
         (path / 'minimal.json').write_text(
             json.dumps(
                 {
                     'session_id': 'minimal',
                     'model_config': {'model': 'demo-model'},
-                    'runtime_config': {'cwd': str(workspace)},
+                    'workspace_scope': {'cwd': str(workspace)},
                     'messages': [{'role': 'user', 'content': 'hi'}],
                 },
                 ensure_ascii=False,
@@ -129,8 +137,8 @@ class SessionStoreTests(unittest.TestCase):
         restored = store.load('restore-001')
 
         self.assertIsInstance(restored.model_config, ModelConfig)
-        self.assertIsInstance(restored.runtime_config, AgentRuntimeConfig)
-        self.assertEqual(restored.runtime_config.cwd, workspace.resolve())
+        self.assertIsInstance(restored.workspace_scope, WorkspaceScope)
+        self.assertEqual(restored.workspace_scope.cwd, workspace.resolve())
 
     def test_save_and_load_preserve_utf8_content(self) -> None:
         workspace = _make_test_dir()
@@ -138,7 +146,12 @@ class SessionStoreTests(unittest.TestCase):
         session_snapshot = AgentSessionSnapshot(
             session_id=session_snapshot.session_id,
             model_config=session_snapshot.model_config,
-            runtime_config=session_snapshot.runtime_config,
+            workspace_scope=session_snapshot.workspace_scope,
+            execution_policy=session_snapshot.execution_policy,
+            context_policy=session_snapshot.context_policy,
+            permissions=session_snapshot.permissions,
+            budget_config=session_snapshot.budget_config,
+            session_paths=session_snapshot.session_paths,
             messages=({'role': 'user', 'content': '中文内容：你好，世界'},),
             final_output='已保存中文',
         )

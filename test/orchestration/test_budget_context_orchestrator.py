@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import unittest
 from pathlib import Path
 from uuid import uuid4
@@ -11,11 +12,19 @@ from budget.budget_guard import BudgetGuard
 from context.context_compactor import ContextCompactor
 from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from context.context_snipper import ContextSnipper
-from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
 from core_contracts.protocol import OneTurnResponse, ToolCall
+from core_contracts.runtime_policy import ContextPolicy
 from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient
 from session.session_state import AgentSessionState
+
+
+@dataclass(frozen=True)
+class _RuntimePolicies:
+    budget_config: BudgetConfig
+    context_policy: ContextPolicy
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -53,24 +62,16 @@ class _FakeOpenAIClient(OpenAIClient):
 
 class BudgetContextOrchestratorTests(unittest.TestCase):
 
-    def _build_runtime_config(self, workspace: Path) -> AgentRuntimeConfig:
-        return AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=5,
-            session_directory=(workspace / 'sessions'),
-            permissions=AgentPermissions(allow_file_write=True),
-            compact_preserve_messages=1,
+    def _build_runtime_policies(self, *, budget: BudgetConfig | None = None, context_policy: ContextPolicy | None = None) -> _RuntimePolicies:
+        return _RuntimePolicies(
+            budget_config=budget or BudgetConfig(),
+            context_policy=context_policy or ContextPolicy(compact_preserve_messages=1),
         )
 
     def test_run_pre_model_cycle_snips_when_soft_over(self) -> None:
-        workspace = _make_test_dir()
-        runtime_config = AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=5,
-            session_directory=(workspace / 'sessions'),
-            permissions=AgentPermissions(allow_file_write=True),
-            budget_config=BudgetConfig(max_input_tokens=5000),
-            compact_preserve_messages=1,
+        _make_test_dir()
+        runtime_policies = self._build_runtime_policies(
+            budget=BudgetConfig(max_input_tokens=5000),
         )
 
         session_state = AgentSessionState()
@@ -91,14 +92,15 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
             context_compactor=ContextCompactor(_FakeOpenAIClient([])),
         )
         guard = BudgetGuard(
-            budget=runtime_config.budget_config,
+            budget=runtime_policies.budget_config,
             pricing=ModelConfig(model='fake').pricing,
             cost_baseline=0.0,
         )
 
         outcome = orchestrator.run_pre_model_cycle(
             session_state=session_state,
-            runtime_config=runtime_config,
+            budget_config=runtime_policies.budget_config,
+            context_policy=runtime_policies.context_policy,
             guard=guard,
             openai_tools=[],
             turn_index=1,
@@ -114,14 +116,9 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
         self.assertIsNone(outcome.pre_model_stop)
 
     def test_run_pre_model_cycle_auto_compact_updates_usage_and_count(self) -> None:
-        workspace = _make_test_dir()
-        runtime_config = AgentRuntimeConfig(
-            cwd=workspace,
-            max_turns=5,
-            session_directory=(workspace / 'sessions'),
-            permissions=AgentPermissions(allow_file_write=True),
-            compact_preserve_messages=1,
-            auto_compact_threshold_tokens=1,
+        _make_test_dir()
+        runtime_policies = self._build_runtime_policies(
+            context_policy=ContextPolicy(compact_preserve_messages=1, auto_compact_threshold_tokens=1),
         )
 
         session_state = AgentSessionState()
@@ -147,14 +144,15 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
             ),
         )
         guard = BudgetGuard(
-            budget=runtime_config.budget_config,
+            budget=runtime_policies.budget_config,
             pricing=ModelConfig(model='fake').pricing,
             cost_baseline=0.0,
         )
 
         outcome = orchestrator.run_pre_model_cycle(
             session_state=session_state,
-            runtime_config=runtime_config,
+            budget_config=runtime_policies.budget_config,
+            context_policy=runtime_policies.context_policy,
             guard=guard,
             openai_tools=[],
             turn_index=1,

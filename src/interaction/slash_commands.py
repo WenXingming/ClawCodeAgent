@@ -12,8 +12,11 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Literal, Mapping
 
 from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
-from core_contracts.config import AgentRuntimeConfig, ModelConfig
+from core_contracts.budget import BudgetConfig
+from core_contracts.model import ModelConfig
+from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
+from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
 from session.session_state import AgentSessionState
 from tools.local_tools import LocalTool
 
@@ -42,7 +45,10 @@ class SlashCommandContext:
     session_state: AgentSessionState  # AgentSessionState: 当前会话内存状态，供命令读取消息与转录历史。
     session_id: str  # str: 当前会话标识，用于状态展示与结果关联。
     turns_offset: int  # int: 历史已完成轮次，供 /status 与 /clear 判断是否已有历史。
-    runtime_config: AgentRuntimeConfig  # AgentRuntimeConfig: 当前工作目录、权限与预算等运行配置。
+    workspace_scope: WorkspaceScope  # WorkspaceScope: 当前工作目录与工作区范围配置。
+    context_policy: ContextPolicy  # ContextPolicy: 当前上下文治理与结构化输出策略。
+    permissions: ToolPermissionPolicy  # ToolPermissionPolicy: 当前工具权限策略。
+    budget_config: BudgetConfig  # BudgetConfig: 当前预算配置。
     model_config: ModelConfig  # ModelConfig: 当前模型元数据，供 /status 展示模型名。
     tool_registry: Mapping[str, LocalTool]  # Mapping[str, LocalTool]: 当前已注册工具集合。
     plugin_summary: str = ''  # str: 插件运行时生成的摘要文本，供 /tools 追加展示。
@@ -338,7 +344,7 @@ class SlashCommandDispatcher:
         snapshot = self._budget_evaluator.evaluate(
             messages=context.session_state.to_messages(),
             tools=openai_tools,
-            max_input_tokens=context.runtime_config.budget_config.max_input_tokens,
+            max_input_tokens=context.budget_config.max_input_tokens,
         )
         lines = [
             'Context Status',
@@ -351,7 +357,7 @@ class SlashCommandDispatcher:
             f'Soft input limit: {self._render_optional_int(snapshot.soft_input_limit)}',
             f'Is soft over: {self._render_bool(snapshot.is_soft_over)}',
             f'Is hard over: {self._render_bool(snapshot.is_hard_over)}',
-            f'Compact preserve messages: {context.runtime_config.compact_preserve_messages}',
+            f'Compact preserve messages: {context.context_policy.compact_preserve_messages}',
         ]
         return SlashCommandResult(
             handled=True,
@@ -411,7 +417,7 @@ class SlashCommandDispatcher:
             '==============',
             f'Session id: {context.session_id}',
             f'Model: {context.model_config.model}',
-            f'Working directory: {context.runtime_config.cwd}',
+            f'Working directory: {context.workspace_scope.cwd}',
             f'Completed turns: {context.turns_offset}',
             f'Tool calls: {context.session_state.tool_call_count}',
         ]
@@ -436,7 +442,7 @@ class SlashCommandDispatcher:
             SlashCommandResult: 包含权限摘要的本地处理结果。
         """
         del parsed
-        permissions = context.runtime_config.permissions
+        permissions = context.permissions
         lines = [
             'Permissions',
             '===========',
@@ -465,7 +471,7 @@ class SlashCommandDispatcher:
             SlashCommandResult: 包含工具列表与插件摘要的本地处理结果。
         """
         del parsed
-        permissions = context.runtime_config.permissions
+        permissions = context.permissions
         lines = [
             'Registered Tools',
             '================',

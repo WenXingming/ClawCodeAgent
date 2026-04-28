@@ -25,7 +25,7 @@ ISSUE-013 后，CLI 不再只是一个最小脚本，而是带子命令、覆盖
 本期按既定决策做成显式 breaking change：只有 `agent`、`agent-chat`、`agent-resume` 三个命令保留为正式入口。这样 parser、README、测试与未来扩展都更清晰，不需要继续维护两套命令面。
 
 ### 3. resume/chat 配置覆盖使用 dataclass `replace()`
-`ModelConfig`、`AgentRuntimeConfig`、`BudgetConfig`、`AgentPermissions`、`ModelPricing` 都是 dataclass，CLI 显式参数覆盖时统一使用 `replace()` 生成新配置，避免手写 dict merge 破坏类型与默认值边界。
+`ModelConfig`、当时的聚合运行配置对象、`BudgetConfig`、`AgentPermissions`、`ModelPricing` 都是 dataclass，CLI 显式参数覆盖时统一使用 `replace()` 生成新配置，避免手写 dict merge 破坏类型与默认值边界。
 
 ### 4. 三态参数是 resume/chat 覆盖语义的关键
 权限和部分 runtime 开关若继续使用简单 `store_true`，CLI 无法区分“用户未传”与“用户显式关闭”。最终实现使用 `BooleanOptionalAction` 配合 `None` 默认值，让 `agent-resume` 和 `agent-chat --session-id` 能正确继承或覆盖存档设置。
