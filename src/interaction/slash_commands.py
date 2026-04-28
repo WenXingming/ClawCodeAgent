@@ -45,6 +45,7 @@ class SlashCommandContext:
     session_state: AgentSessionState  # AgentSessionState: 当前会话内存状态，供命令读取消息与转录历史。
     session_id: str  # str: 当前会话标识，用于状态展示与结果关联。
     turns_offset: int  # int: 历史已完成轮次，供 /status 与 /clear 判断是否已有历史。
+    tool_call_count: int  # int: 当前 run/resume 已累计的工具调用次数。
     workspace_scope: WorkspaceScope  # WorkspaceScope: 当前工作目录与工作区范围配置。
     context_policy: ContextPolicy  # ContextPolicy: 当前上下文治理与结构化输出策略。
     permissions: ToolPermissionPolicy  # ToolPermissionPolicy: 当前工具权限策略。
@@ -351,7 +352,7 @@ class SlashCommandDispatcher:
             '==============',
             f'Messages: {len(context.session_state.messages)}',
             f'Transcript entries: {len(context.session_state.transcript_entries)}',
-            f'Tool calls: {context.session_state.tool_call_count}',
+            f'Tool calls: {context.tool_call_count}',
             f'Projected input tokens: {snapshot.projected_input_tokens}',
             f'Hard input limit: {self._render_optional_int(snapshot.hard_input_limit)}',
             f'Soft input limit: {self._render_optional_int(snapshot.soft_input_limit)}',
@@ -419,7 +420,7 @@ class SlashCommandDispatcher:
             f'Model: {context.model_config.model}',
             f'Working directory: {context.workspace_scope.cwd}',
             f'Completed turns: {context.turns_offset}',
-            f'Tool calls: {context.session_state.tool_call_count}',
+            f'Tool calls: {context.tool_call_count}',
         ]
         return SlashCommandResult(
             handled=True,
@@ -507,7 +508,7 @@ class SlashCommandDispatcher:
         had_history = bool(
             context.session_state.messages
             or context.session_state.transcript_entries
-            or context.session_state.tool_call_count
+            or context.tool_call_count
             or context.turns_offset
         )
         return SlashCommandResult(

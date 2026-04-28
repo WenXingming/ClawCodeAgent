@@ -34,6 +34,7 @@ class SlashCommandModuleTests(unittest.TestCase):
             session_state=session_state,
             session_id='session-001',
             turns_offset=2,
+            tool_call_count=3,
             workspace_scope=WorkspaceScope(cwd=Path('.').resolve()),
             context_policy=ContextPolicy(),
             permissions=ToolPermissionPolicy(

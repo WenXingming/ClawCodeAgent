@@ -10,6 +10,7 @@ from functools import partial
 from typing import Any, Callable, Iterable
 from uuid import uuid4
 
+from agent.run_state import AgentRunState
 from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from interaction.slash_commands import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
@@ -81,15 +82,13 @@ class LocalAgent:
         Returns:
             AgentRunResult: 本轮运行结果（含输出、事件、用量与会话信息）。
         """
-        session_state = AgentSessionState()
-        session_id = uuid4().hex
+        run_state = AgentRunState.for_new_session(
+            session_state=AgentSessionState(),
+            session_id=uuid4().hex,
+        )
         return self._run_managed_invocation(
             prompt=prompt,
-            session_state=session_state,
-            session_id=session_id,
-            turns_offset=0,
-            usage_baseline=TokenUsage(),
-            cost_baseline=0.0,
+            run_state=run_state,
             resumed_from_session_id=None,
         )
 
@@ -111,17 +110,20 @@ class LocalAgent:
         session_state = AgentSessionState.from_persisted(
             messages=list(session_snapshot.messages),
             transcript=list(session_snapshot.transcript),
+        )
+        run_state = AgentRunState.for_resumed_session(
+            session_state=session_state,
+            session_id=session_snapshot.session_id,
+            turns_offset=session_snapshot.turns,
+            usage_baseline=session_snapshot.usage,
+            cost_baseline=session_snapshot.total_cost_usd,
             tool_call_count=session_snapshot.tool_calls,
             mcp_capability_shortlist=list(session_snapshot.mcp_capability_shortlist),
             materialized_mcp_capability_handles=list(session_snapshot.materialized_mcp_capability_handles),
         )
         return self._run_managed_invocation(
             prompt=prompt,
-            session_state=session_state,
-            session_id=session_snapshot.session_id,
-            turns_offset=session_snapshot.turns,
-            usage_baseline=session_snapshot.usage,
-            cost_baseline=session_snapshot.total_cost_usd,
+            run_state=run_state,
             resumed_from_session_id=session_snapshot.session_id,
         )
 
@@ -129,11 +131,7 @@ class LocalAgent:
         self,
         *,
         prompt: str,
-        session_state: AgentSessionState,
-        session_id: str,
-        turns_offset: int,
-        usage_baseline: TokenUsage,
-        cost_baseline: float,
+        run_state: AgentRunState,
         resumed_from_session_id: str | None,
     ) -> AgentRunResult:
         """在受管代理上下文中执行一次 run 或 resume。
@@ -143,11 +141,7 @@ class LocalAgent:
 
         Args:
             prompt (str): 当前调用的用户输入。
-            session_state (AgentSessionState): 已初始化的会话状态。
-            session_id (str): 当前调用使用的会话标识。
-            turns_offset (int): 历史累计 turn 数。
-            usage_baseline (TokenUsage): 历史 token 使用基线。
-            cost_baseline (float): 历史成本基线。
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
             resumed_from_session_id (str | None): 若为 resume，则记录来源 session_id。
         Returns:
             AgentRunResult: 当前 run/resume 的最终结果。
@@ -167,21 +161,13 @@ class LocalAgent:
         try:
             local_result = self._prepare_prompt(
                 prompt=prompt,
-                session_state=session_state,
-                session_id=session_id,
-                turns_offset=turns_offset,
-                usage_baseline=usage_baseline,
-                cost_baseline=cost_baseline,
+                run_state=run_state,
             )
             if local_result is not None:
                 result = local_result
             else:
                 result = self._execute_loop(
-                    session_state=session_state,
-                    session_id=session_id,
-                    turns_offset=turns_offset,
-                    usage_baseline=usage_baseline,
-                    cost_baseline=cost_baseline,
+                    run_state=run_state,
                 )
         except Exception:
             if managed_agent_id is not None:
@@ -189,8 +175,8 @@ class LocalAgent:
                     managed_agent_id,
                     session_id=None,
                     session_path=None,
-                    turns=turns_offset,
-                    tool_calls=session_state.tool_call_count,
+                    turns=run_state.turns_total,
+                    tool_calls=run_state.tool_call_count,
                     stop_reason='exception',
                 )
             if is_root_invocation:
@@ -241,20 +227,20 @@ class LocalAgent:
             return
         self.progress_reporter(dict(event))
 
-    def _record_event(self, events: list[JSONDict], event: JSONDict) -> None:
+    def _record_event(self, run_state: AgentRunState, event: JSONDict) -> None:
         """把事件写入持久化列表，并同步推送到实时 reporter。"""
         stored_event = dict(event)
-        events.append(stored_event)
+        run_state.events.append(stored_event)
         self._emit_progress_event(stored_event)
 
     def _extend_recorded_events(
         self,
-        events: list[JSONDict],
+        run_state: AgentRunState,
         new_events: Iterable[JSONDict],
     ) -> None:
         """批量写入并推送事件。"""
         for event in new_events:
-            self._record_event(events, event)
+            self._record_event(run_state, event)
 
     def _register_workspace_runtime_tools(
         self,
@@ -665,20 +651,21 @@ class LocalAgent:
 
     def _build_effective_tool_registry(
         self,
-        session_state: AgentSessionState,
+        run_state: AgentRunState,
     ) -> dict[str, LocalTool]:
         """构建当前轮次对模型和执行器可见的完整工具表。"""
         effective_registry = dict(self.tool_registry)
-        effective_registry.update(self._build_materialized_mcp_tool_registry(session_state))
+        effective_registry.update(self._build_materialized_mcp_tool_registry(run_state))
+        run_state.set_effective_tool_registry(effective_registry)
         return effective_registry
 
     def _build_materialized_mcp_tool_registry(
         self,
-        session_state: AgentSessionState,
+        run_state: AgentRunState,
     ) -> dict[str, LocalTool]:
         """根据当前会话的 capability window 构建临时物化工具表。"""
         materialized_tools: dict[str, LocalTool] = {}
-        for capability_handle in session_state.materialized_mcp_capabilities():
+        for capability_handle in run_state.materialized_mcp_capabilities():
             tool = self._build_materialized_mcp_tool(capability_handle)
             if tool is None:
                 continue
@@ -712,7 +699,7 @@ class LocalAgent:
 
     def _update_mcp_capability_window(
         self,
-        session_state: AgentSessionState,
+        run_state: AgentRunState,
         tool_call: ToolCall,
         tool_result: ToolExecutionResult,
     ) -> None:
@@ -736,7 +723,7 @@ class LocalAgent:
             for item in raw_materialized_handles
             if isinstance(item, str) and item.strip()
         ]
-        session_state.update_mcp_capability_window(
+        run_state.update_mcp_capability_window(
             shortlist=shortlist,
             materialized_handles=materialized_handles,
         )
@@ -1237,30 +1224,23 @@ class LocalAgent:
         self,
         *,
         prompt: str,
-        session_state: AgentSessionState,
-        session_id: str,
-        turns_offset: int,
-        usage_baseline: TokenUsage,
-        cost_baseline: float,
+        run_state: AgentRunState,
     ) -> AgentRunResult | None:
         """在 prompt 写入 session_state 前执行 slash 分流。
 
         Args:
             prompt (str): 用户输入。
-            session_state (AgentSessionState): 当前会话状态。
-            session_id (str): 当前会话 ID。
-            turns_offset (int): 历史已完成轮次。
-            usage_baseline (TokenUsage): 历史 token 基线。
-            cost_baseline (float): 历史成本基线。
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
 
         Returns:
             AgentRunResult | None: slash 本地处理有结果时返回 AgentRunResult，否则返回 None。
         """
         slash_result = self.slash_dispatcher.dispatch_slash_command(
             SlashCommandContext(
-                session_state=session_state,
-                session_id=session_id,
-                turns_offset=turns_offset,
+                session_state=run_state.session_state,
+                session_id=run_state.session_id,
+                turns_offset=run_state.turns_offset,
+                tool_call_count=run_state.tool_call_count,
                 workspace_scope=self.workspace_scope,
                 context_policy=self.context_policy,
                 permissions=self.permissions,
@@ -1273,71 +1253,62 @@ class LocalAgent:
         )
 
         if not slash_result.handled:
-            session_state.append_user(slash_result.prompt or prompt)
+            run_state.session_state.append_user(slash_result.prompt or prompt)
             return None
 
         if slash_result.continue_query:
-            session_state.append_user(slash_result.prompt or prompt)
+            run_state.session_state.append_user(slash_result.prompt or prompt)
             return None
 
         return self._build_slash_result(
             slash_result,
-            session_state=session_state,
-            session_id=session_id,
-            turns_offset=turns_offset,
-            usage_baseline=usage_baseline,
-            cost_baseline=cost_baseline,
+            run_state=run_state,
         )
 
     def _build_slash_result(
         self,
         slash_result: SlashCommandResult,
         *,
-        session_state: AgentSessionState,
-        session_id: str,
-        turns_offset: int,
-        usage_baseline: TokenUsage,
-        cost_baseline: float,
+        run_state: AgentRunState,
     ) -> AgentRunResult:
         """构造本地 slash 命令结果并落盘。
 
         Returns:
             AgentRunResult: slash 命令对应的标准运行结果对象。
         """
-        effective_session_state = slash_result.replacement_session_state or session_state
-        effective_session_id = uuid4().hex if slash_result.fork_session else session_id
+        effective_session_state = slash_result.replacement_session_state or run_state.session_state
+        effective_session_id = uuid4().hex if slash_result.fork_session else run_state.session_id
 
         if slash_result.fork_session:
-            effective_turns = 0
-            effective_usage_total = TokenUsage()
-            effective_usage_delta = TokenUsage()
-            effective_cost_baseline = 0.0
+            effective_run_state = AgentRunState.for_new_session(
+                session_state=effective_session_state,
+                session_id=effective_session_id,
+            )
         else:
-            effective_turns = turns_offset
-            effective_usage_total = usage_baseline
-            effective_usage_delta = TokenUsage()
-            effective_cost_baseline = cost_baseline
+            effective_run_state = AgentRunState.for_resumed_session(
+                session_state=effective_session_state,
+                session_id=effective_session_id,
+                turns_offset=run_state.turns_offset,
+                usage_baseline=run_state.usage_baseline,
+                cost_baseline=run_state.cost_baseline,
+                tool_call_count=run_state.tool_call_count,
+                mcp_capability_shortlist=run_state.mcp_capability_candidates(),
+                materialized_mcp_capability_handles=run_state.materialized_mcp_capabilities(),
+            )
 
         event = self._make_slash_event(
             slash_result,
-            session_id_before=session_id,
+            session_id_before=run_state.session_id,
             session_id_after=effective_session_id,
         )
-        return self._build_run_result(
-            session_id=effective_session_id,
-            session_state=effective_session_state,
-            final_output=self._format_slash_output(
-                slash_result,
-                session_id_before=session_id,
-                session_id_after=effective_session_id,
-            ),
-            turns_total=effective_turns,
-            usage_delta=effective_usage_delta,
-            usage_total=effective_usage_total,
-            cost_baseline=effective_cost_baseline,
-            stop_reason='slash_command',
-            events=[event],
+        effective_run_state.final_output = self._format_slash_output(
+            slash_result,
+            session_id_before=run_state.session_id,
+            session_id_after=effective_session_id,
         )
+        effective_run_state.stop_reason = 'slash_command'
+        effective_run_state.events.append(event)
+        return self._build_run_result(run_state=effective_run_state)
 
     @staticmethod
     def _make_slash_event(
@@ -1395,11 +1366,7 @@ class LocalAgent:
     def _execute_loop(
         self,
         *,
-        session_state: AgentSessionState,
-        session_id: str,
-        turns_offset: int,
-        usage_baseline: TokenUsage,
-        cost_baseline: float,
+        run_state: AgentRunState,
     ) -> AgentRunResult:
         """run / resume 共用的 turn loop。
 
@@ -1410,22 +1377,15 @@ class LocalAgent:
         Returns:
             AgentRunResult: 达到停止条件后的最终运行结果。
         """
-        events: list[JSONDict] = []
-        usage_delta = TokenUsage()
-        final_output = ''
-        turns_this_run = 0
-        stop_reason = 'max_turns'
-        model_call_count = 0
-
         guard = BudgetGuard(
             budget=self.budget_config,
             pricing=self.client.model_config.pricing,
-            cost_baseline=cost_baseline,
+            cost_baseline=run_state.cost_baseline,
         )
         for turn_index in range(1, self.execution_policy.max_turns + 1):
-            turns_this_run = turn_index
+            run_state.begin_turn(turn_index)
 
-            effective_tool_registry = self._build_effective_tool_registry(session_state)
+            effective_tool_registry = self._build_effective_tool_registry(run_state)
             tool_context = self.tool_service.build_context(
                 self.workspace_scope,
                 self.execution_policy,
@@ -1435,73 +1395,37 @@ class LocalAgent:
             )
             openai_tools = self._build_openai_tools(effective_tool_registry)
             pre_model_outcome = self.budget_context_orchestrator.run_pre_model_cycle(
-                session_state=session_state,
+                run_state=run_state,
                 budget_config=self.budget_config,
                 context_policy=self.context_policy,
                 guard=guard,
                 openai_tools=openai_tools,
-                turn_index=turn_index,
-                turns_offset=turns_offset,
-                turns_this_run=turns_this_run,
-                usage_delta=usage_delta,
-                model_call_count=model_call_count,
             )
-            usage_delta = pre_model_outcome.usage_delta
-            model_call_count = pre_model_outcome.model_call_count
             pre_model_stop = pre_model_outcome.pre_model_stop
-            self._extend_recorded_events(events, pre_model_outcome.events)
+            self._extend_recorded_events(run_state, pre_model_outcome.events)
 
             # 模型调用前四维预算检查（session_turns / model_calls / token / cost）
             if pre_model_stop is not None:
-                return self._early_stop(
-                    pre_model_stop,
-                    session_id=session_id, session_state=session_state, final_output=final_output,
-                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
-                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                    turn_index=turn_index, events=events,
-                )
+                return self._early_stop(run_state=run_state, stop_reason=pre_model_stop)
 
             self._emit_progress_event({'type': 'model_start', 'turn': turn_index})
-            response = self._complete_with_reactive_compact(
-                session_state=session_state,
+            response, reactive_stop = self._complete_with_reactive_compact(
+                run_state=run_state,
                 openai_tools=openai_tools,
-                turn_index=turn_index,
-                events=events,
                 guard=guard,
-                turns_offset=turns_offset,
-                turns_this_run=turns_this_run,
-                usage_delta=usage_delta,
-                model_call_count=model_call_count,
             )
-            response, usage_delta, model_call_count, reactive_stop = response
             if reactive_stop is not None:
-                return self._early_stop(
-                    reactive_stop,
-                    session_id=session_id, session_state=session_state, final_output=final_output,
-                    turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
-                    usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                    turn_index=turn_index, events=events,
-                )
+                return self._early_stop(run_state=run_state, stop_reason=reactive_stop)
             if response is None:
-                stop_reason = 'backend_error'
-                return self._build_run_result(
-                    session_id=session_id,
-                    session_state=session_state,
-                    final_output=final_output,
-                    turns_total=turns_offset + turns_this_run,
-                    usage_delta=usage_delta,
-                    usage_total=usage_baseline + usage_delta,
-                    cost_baseline=cost_baseline,
-                    stop_reason=stop_reason,
-                    events=events,
-                )
+                run_state.stop_reason = 'backend_error'
+                return self._build_run_result(run_state=run_state)
 
-            session_state.append_assistant_turn(response)
+            run_state.session_state.append_assistant_turn(response)
             if response.content:
-                final_output = response.content
+                run_state.final_output = response.content
 
             self._record_event(
-                events,
+                run_state,
                 {
                     'type': 'model_turn',
                     'turn': turn_index,
@@ -1512,18 +1436,8 @@ class LocalAgent:
 
             # 没有工具调用时，说明当前任务已收敛
             if not response.tool_calls:
-                stop_reason = response.finish_reason or 'completed'
-                return self._build_run_result(
-                    session_id=session_id,
-                    session_state=session_state,
-                    final_output=final_output,
-                    turns_total=turns_offset + turns_this_run,
-                    usage_delta=usage_delta,
-                    usage_total=usage_baseline + usage_delta,
-                    cost_baseline=cost_baseline,
-                    stop_reason=stop_reason,
-                    events=events,
-                )
+                run_state.stop_reason = response.finish_reason or 'completed'
+                return self._build_run_result(run_state=run_state)
 
             # 执行工具调用并回填结果
             for tool_call in response.tool_calls:
@@ -1532,11 +1446,9 @@ class LocalAgent:
 
                 for hook in before_hooks:
                     self._append_tool_hook_message(
-                        session_state,
+                        run_state,
                         hook=hook,
                         tool_call=tool_call,
-                        turn_index=turn_index,
-                        events=events,
                     )
 
                 metadata_updates: JSONDict = {
@@ -1564,7 +1476,7 @@ class LocalAgent:
                         metadata_updates,
                     )
                     self._record_event(
-                        events,
+                        run_state,
                         {
                             'type': 'tool_blocked',
                             'turn': turn_index,
@@ -1581,30 +1493,27 @@ class LocalAgent:
                             tool_call.arguments,
                             tool_context,
                         )
-                        self._extend_recorded_events(events, delegate_events)
+                        self._extend_recorded_events(run_state, delegate_events)
                     else:
                         tool_result = self._execute_tool_call(
+                            run_state=run_state,
                             tool_call=tool_call,
-                            turn_index=turn_index,
-                            tool_registry=effective_tool_registry,
                             tool_context=tool_context,
                         )
                     tool_result = self._merge_tool_result_metadata(tool_result, metadata_updates)
 
-                self._update_mcp_capability_window(session_state, tool_call, tool_result)
-                session_state.append_tool_result(tool_call, tool_result)
+                self._update_mcp_capability_window(run_state, tool_call, tool_result)
+                run_state.record_tool_result(tool_call, tool_result)
 
                 for hook in after_hooks:
                     self._append_tool_hook_message(
-                        session_state,
+                        run_state,
                         hook=hook,
                         tool_call=tool_call,
-                        turn_index=turn_index,
-                        events=events,
                     )
 
                 self._record_event(
-                    events,
+                    run_state,
                     {
                         'type': 'tool_result',
                         'turn': turn_index,
@@ -1617,116 +1526,61 @@ class LocalAgent:
                 )
 
                 if tool_result.metadata.get('error_kind') == 'delegated_task_limit':
-                    return self._early_stop(
-                        'delegated_task_limit',
-                        session_id=session_id, session_state=session_state, final_output=final_output,
-                        turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
-                        usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                        turn_index=turn_index, events=events,
-                    )
+                    return self._early_stop(run_state=run_state, stop_reason='delegated_task_limit')
 
                 # 工具执行后预算检查
-                if stop := guard.check_post_tool(session_state.tool_call_count):
-                    return self._early_stop(
-                        stop,
-                        session_id=session_id, session_state=session_state, final_output=final_output,
-                        turns_total=turns_offset + turns_this_run, usage_delta=usage_delta,
-                        usage_total=usage_baseline + usage_delta, cost_baseline=cost_baseline,
-                        turn_index=turn_index, events=events,
-                    )
+                if stop := guard.check_post_tool(run_state.tool_call_count):
+                    return self._early_stop(run_state=run_state, stop_reason=stop)
 
         # 达到最大轮数限制，返回结果
-        return self._build_run_result(
-            session_id=session_id,
-            session_state=session_state,
-            final_output=final_output,
-            turns_total=turns_offset + turns_this_run,
-            usage_delta=usage_delta,
-            usage_total=usage_baseline + usage_delta,
-            cost_baseline=cost_baseline,
-            stop_reason=stop_reason,
-            events=events,
-        )
+        run_state.stop_reason = 'max_turns'
+        return self._build_run_result(run_state=run_state)
 
     def _early_stop(
         self,
-        stop_reason: str,
         *,
-        session_id: str,
-        session_state: AgentSessionState,
-        final_output: str,
-        turns_total: int,
-        usage_delta: TokenUsage,
-        usage_total: TokenUsage,
-        cost_baseline: float,
-        turn_index: int,
-        events: list[JSONDict],
+        run_state: AgentRunState,
+        stop_reason: str,
     ) -> AgentRunResult:
         """预算闸门触发时的统一提前退出路径。
 
         统一追加 budget_stop 事件并调用 _build_run_result，
         消除六处重复的事件追加 + 结果构建模式。
         """
-        self._record_event(events, {'type': 'budget_stop', 'reason': stop_reason, 'turn': turn_index})
-        return self._build_run_result(
-            session_id=session_id,
-            session_state=session_state,
-            final_output=final_output,
-            turns_total=turns_total,
-            usage_delta=usage_delta,
-            usage_total=usage_total,
-            cost_baseline=cost_baseline,
-            stop_reason=stop_reason,
-            events=events,
-        )
+        run_state.stop_reason = stop_reason
+        self._record_event(run_state, {'type': 'budget_stop', 'reason': stop_reason, 'turn': run_state.turn_index})
+        return self._build_run_result(run_state=run_state)
 
     def _complete_with_reactive_compact(
         self,
         *,
-        session_state: AgentSessionState,
+        run_state: AgentRunState,
         openai_tools: list[JSONDict],
-        turn_index: int,
-        events: list[JSONDict],
         guard: BudgetGuard,
-        turns_offset: int,
-        turns_this_run: int,
-        usage_delta: TokenUsage,
-        model_call_count: int,
-    ) -> tuple[OneTurnResponse | None, TokenUsage, int, str | None]:
+    ) -> tuple[OneTurnResponse | None, str | None]:
         """执行一次模型调用；必要时在 context-length 错误后进行 reactive compact 重试。"""
         reactive_outcome = self.budget_context_orchestrator.complete_with_reactive_compact(
             client=self.client,
-            session_state=session_state,
+            run_state=run_state,
             budget_config=self.budget_config,
             context_policy=self.context_policy,
             openai_tools=openai_tools,
-            turn_index=turn_index,
             guard=guard,
-            turns_offset=turns_offset,
-            turns_this_run=turns_this_run,
-            usage_delta=usage_delta,
-            model_call_count=model_call_count,
         )
-        self._extend_recorded_events(events, reactive_outcome.events)
-        return (
-            reactive_outcome.response,
-            reactive_outcome.usage_delta,
-            reactive_outcome.model_call_count,
-            reactive_outcome.stop_reason,
-        )
+        self._extend_recorded_events(run_state, reactive_outcome.events)
+        return reactive_outcome.response, reactive_outcome.stop_reason
 
     def _execute_tool_call(
         self,
         *,
+        run_state: AgentRunState,
         tool_call: ToolCall,
-        turn_index: int,
-        tool_registry: dict[str, LocalTool],
         tool_context,
     ) -> ToolExecutionResult:
         """执行单个工具调用，必要时发射实时 stdout 或 stderr 事件。"""
         if tool_call.name != 'bash' or self.progress_reporter is None:
             return self.tool_service.execute(
-                tool_registry,
+                run_state.effective_tool_registry,
                 tool_call.name,
                 tool_call.arguments,
                 tool_context,
@@ -1734,7 +1588,7 @@ class LocalAgent:
 
         final_result: ToolExecutionResult | None = None
         for update in self.tool_service.execute_streaming(
-            tool_registry,
+            run_state.effective_tool_registry,
             tool_call.name,
             tool_call.arguments,
             tool_context,
@@ -1747,7 +1601,7 @@ class LocalAgent:
             self._emit_progress_event(
                 {
                     'type': 'tool_stream',
-                    'turn': turn_index,
+                    'turn': run_state.turn_index,
                     'tool_call_id': tool_call.id,
                     'tool_name': tool_call.name,
                     'stream': update.kind,
@@ -1832,21 +1686,17 @@ class LocalAgent:
 
     def _append_tool_hook_message(
         self,
-        session_state: AgentSessionState,
+        run_state: AgentRunState,
         *,
         hook: JSONDict,
         tool_call: ToolCall,
-        turn_index: int,
-        events: list[JSONDict],
     ) -> None:
         """把工具 hook 消息写入会话并同步记录对应事件。
 
         Args:
-            session_state (AgentSessionState): 当前会话状态对象。
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
             hook (JSONDict): 当前要写入的 hook 定义。
             tool_call (ToolCall): 触发当前 hook 的工具调用对象。
-            turn_index (int): 当前 turn 序号。
-            events (list[JSONDict]): 当前运行事件列表。
         Returns:
             None: 该方法原地更新会话状态并追加事件。
         """
@@ -1859,12 +1709,12 @@ class LocalAgent:
             'source': hook.get('source', 'unknown'),
             'source_name': hook.get('source_name', 'unknown'),
         }
-        session_state.append_runtime_message(str(hook.get('content', '')), metadata=metadata)
+        run_state.session_state.append_runtime_message(str(hook.get('content', '')), metadata=metadata)
         self._record_event(
-            events,
+            run_state,
             {
                 'type': event_type,
-                'turn': turn_index,
+                'turn': run_state.turn_index,
                 'tool_call_id': tool_call.id,
                 'tool_name': tool_call.name,
                 'source': hook.get('source', 'unknown'),
@@ -1876,27 +1726,19 @@ class LocalAgent:
     def _build_run_result(
         self,
         *,
-        session_id: str,
-        session_state: AgentSessionState,
-        final_output: str,
-        turns_total: int,
-        usage_delta: TokenUsage,
-        usage_total: TokenUsage,
-        cost_baseline: float,
-        stop_reason: str,
-        events: list[JSONDict],
+        run_state: AgentRunState,
     ) -> AgentRunResult:
         """统一构造最终运行结果并落盘会话快照。
 
         total_cost_usd = cost_baseline + estimate_cost_usd(usage_delta)，
         避免因历史计费策略变化导致重算偏差。
         """
-        transcript = session_state.transcript()
-        events_snapshot = tuple(dict(item) for item in events)
-        delta_cost = self.client.model_config.pricing.estimate_cost_usd(usage_delta)
-        total_cost_usd = cost_baseline + delta_cost
+        transcript = run_state.session_state.transcript()
+        events_snapshot = tuple(dict(item) for item in run_state.events)
+        delta_cost = self.client.model_config.pricing.estimate_cost_usd(run_state.usage_delta)
+        total_cost_usd = run_state.cost_baseline + delta_cost
         session_snapshot = AgentSessionSnapshot(
-            session_id=session_id,
+            session_id=run_state.session_id,
             model_config=self.client.model_config,
             workspace_scope=self.workspace_scope,
             execution_policy=self.execution_policy,
@@ -1904,30 +1746,30 @@ class LocalAgent:
             permissions=self.permissions,
             budget_config=self.budget_config,
             session_paths=self.session_paths,
-            messages=tuple(session_state.to_messages()),
+            messages=tuple(run_state.session_state.to_messages()),
             transcript=transcript,
             events=events_snapshot,
-            final_output=final_output,
-            turns=turns_total,
-            tool_calls=session_state.tool_call_count,
-            usage=usage_total,
+            final_output=run_state.final_output,
+            turns=run_state.turns_total,
+            tool_calls=run_state.tool_call_count,
+            usage=run_state.usage_total,
             total_cost_usd=total_cost_usd,
-            stop_reason=stop_reason,
-            mcp_capability_shortlist=session_state.mcp_capability_candidates(),
-            materialized_mcp_capability_handles=session_state.materialized_mcp_capabilities(),
+            stop_reason=run_state.stop_reason,
+            mcp_capability_shortlist=run_state.mcp_capability_candidates(),
+            materialized_mcp_capability_handles=run_state.materialized_mcp_capabilities(),
         )
         session_path = self.session_store.save(session_snapshot)
         return AgentRunResult(
-            final_output=final_output,
-            turns=turns_total,
-            tool_calls=session_state.tool_call_count,
+            final_output=run_state.final_output,
+            turns=run_state.turns_total,
+            tool_calls=run_state.tool_call_count,
             transcript=transcript,
             events=events_snapshot,
-            usage=usage_total,
+            usage=run_state.usage_total,
             total_cost_usd=total_cost_usd,
-            stop_reason=stop_reason,
+            stop_reason=run_state.stop_reason,
             file_history=session_snapshot.file_history,
-            session_id=session_id,
+            session_id=run_state.session_id,
             session_path=str(session_path),
             scratchpad_directory=session_snapshot.scratchpad_directory,
         )

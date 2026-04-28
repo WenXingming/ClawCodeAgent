@@ -10,8 +10,8 @@ from session.session_state import AgentSessionState
 class SessionStateFromPersistedTests(unittest.TestCase):
     """验证从持久化数据恢复会话运行态的行为。"""
 
-    def test_from_persisted_restores_messages_and_count(self) -> None:
-        """基础消息列表与工具调用计数应被完整恢复。"""
+    def test_from_persisted_restores_messages_and_transcript(self) -> None:
+        """基础消息列表与 transcript 应被完整恢复。"""
         messages = [
             {'role': 'user', 'content': '第一次提问'},
             {'role': 'assistant', 'content': '第一次回答'},
@@ -23,11 +23,9 @@ class SessionStateFromPersistedTests(unittest.TestCase):
         session_state = AgentSessionState.from_persisted(
             messages=messages,
             transcript=transcript,
-            tool_call_count=3,
         )
 
         self.assertEqual(session_state.to_messages(), messages)
-        self.assertEqual(session_state.tool_call_count, 3)
         self.assertEqual(len(session_state.transcript()), 2)
 
     def test_from_persisted_empty_transcript_falls_back_to_messages(self) -> None:
@@ -39,7 +37,6 @@ class SessionStateFromPersistedTests(unittest.TestCase):
         session_state = AgentSessionState.from_persisted(
             messages=messages,
             transcript=[],
-            tool_call_count=0,
         )
 
         t = session_state.transcript()
@@ -57,7 +54,6 @@ class SessionStateFromPersistedTests(unittest.TestCase):
         session_state = AgentSessionState.from_persisted(
             messages=messages,
             transcript=transcript,
-            tool_call_count=0,
         )
 
         t = session_state.transcript()
@@ -70,57 +66,11 @@ class SessionStateFromPersistedTests(unittest.TestCase):
         session_state = AgentSessionState.from_persisted(
             messages=messages,
             transcript=[{'role': 'user', 'content': '旧提问'}],
-            tool_call_count=1,
         )
         session_state.append_user('新提问')
 
         self.assertEqual(len(session_state.to_messages()), 2)
         self.assertEqual(session_state.to_messages()[-1]['content'], '新提问')
-        self.assertEqual(session_state.tool_call_count, 1)  # 追加 user 不增加工具计数
-
-    def test_from_persisted_restores_mcp_materialization_state(self) -> None:
-        """恢复会话时应保留 capability shortlist 与已物化句柄。"""
-        session_state = AgentSessionState.from_persisted(
-            messages=[{'role': 'user', 'content': '旧提问'}],
-            transcript=[{'role': 'user', 'content': '旧提问'}],
-            tool_call_count=1,
-            mcp_capability_shortlist=[
-                {
-                    'handle': 'mcp:tavily:tavily_search',
-                    'tool_name': 'tavily_search',
-                    'server_name': 'tavily',
-                }
-            ],
-            materialized_mcp_capability_handles=['mcp:tavily:tavily_search'],
-        )
-
-        self.assertEqual(
-            session_state.mcp_capability_candidates(),
-            ({'handle': 'mcp:tavily:tavily_search', 'tool_name': 'tavily_search', 'server_name': 'tavily'},),
-        )
-        self.assertEqual(
-            session_state.materialized_mcp_capabilities(),
-            ('mcp:tavily:tavily_search',),
-        )
-
-    def test_update_mcp_capability_window_replaces_previous_window(self) -> None:
-        """更新 capability window 时应整体替换旧 shortlist 与句柄列表。"""
-        session_state = AgentSessionState.create('初始化')
-        session_state.update_mcp_capability_window(
-            shortlist=[{'handle': 'old'}],
-            materialized_handles=['old'],
-        )
-
-        session_state.update_mcp_capability_window(
-            shortlist=[{'handle': 'new', 'tool_name': 'search'}],
-            materialized_handles=['new'],
-        )
-
-        self.assertEqual(
-            session_state.mcp_capability_candidates(),
-            ({'handle': 'new', 'tool_name': 'search'},),
-        )
-        self.assertEqual(session_state.materialized_mcp_capabilities(), ('new',))
 
 
 if __name__ == '__main__':
