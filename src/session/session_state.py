@@ -1,9 +1,10 @@
 """维护代理单次运行期间的最小会话状态。
 
-本模块聚焦在运行态会话的三类核心数据：
+本模块聚焦在运行态会话的四类核心数据：
 1. 发给模型的消息上下文 `messages`。
 2. 便于审计与恢复的转录条目 `transcript_entries`。
 3. 用于预算统计的工具调用计数 `tool_call_count`。
+4. 用于 MCP 临时工具物化窗口的 capability shortlist 与已物化句柄。
 
 模块本身不负责模型调用、工具执行或磁盘持久化，只负责稳定维护内存态会话，并向上层提供可序列化视图。
 """
@@ -27,12 +28,16 @@ class AgentSessionState:
     4. 工具执行后调用 `append_tool_result()` 追加工具输出。
     5. 需要审计或持久化时调用 `transcript()` 导出稳定转录视图。
 
-    该类只维护运行态数据，不承担磁盘持久化职责。
+    该类只维护运行态数据，不承担磁盘持久化职责。除基础消息历史外，
+    还会暂存一小段 MCP capability shortlist，供下一轮模型调用按需物化
+    少量远端工具 schema。
     """
 
     messages: list[JSONDict] = field(default_factory=list)  # list[JSONDict]：发送给模型的完整消息上下文。
     transcript_entries: list[JSONDict] = field(default_factory=list)  # list[JSONDict]：按时间顺序记录的可审计转录条目。
     tool_call_count: int = 0  # int：当前会话中已经执行的工具调用次数。
+    mcp_capability_shortlist: list[JSONDict] = field(default_factory=list)  # list[JSONDict]：最近一次 MCP capability search 返回的候选能力目录。
+    materialized_mcp_capability_handles: list[str] = field(default_factory=list)  # list[str]：下一轮需要物化为真实工具 schema 的 MCP capability handle 列表。
 
     @classmethod
     def create(cls, prompt: str) -> 'AgentSessionState':
@@ -53,6 +58,9 @@ class AgentSessionState:
         messages: list[JSONDict],
         transcript: list[JSONDict],
         tool_call_count: int,
+        *,
+        mcp_capability_shortlist: list[JSONDict] | tuple[JSONDict, ...] | None = None,
+        materialized_mcp_capability_handles: list[str] | tuple[str, ...] | None = None,
     ) -> 'AgentSessionState':
         """从已持久化的数据恢复运行态会话。
 
@@ -62,6 +70,8 @@ class AgentSessionState:
             messages (list[JSONDict]): 恢复时使用的历史消息列表。
             transcript (list[JSONDict]): 已持久化的历史转录条目。
             tool_call_count (int): 已执行的工具调用累计次数。
+            mcp_capability_shortlist (list[JSONDict] | tuple[JSONDict, ...] | None): 最近一次能力搜索的候选目录。
+            materialized_mcp_capability_handles (list[str] | tuple[str, ...] | None): 当前需要继续物化的 capability handle 列表。
         Returns:
             AgentSessionState: 从持久化数据恢复出的运行态会话对象。
         """
@@ -77,6 +87,16 @@ class AgentSessionState:
             messages=[dict(item) for item in messages],
             transcript_entries=effective_transcript,
             tool_call_count=tool_call_count,
+            mcp_capability_shortlist=[
+                dict(item)
+                for item in (mcp_capability_shortlist or ())
+                if isinstance(item, dict)
+            ],
+            materialized_mcp_capability_handles=[
+                item.strip()
+                for item in (materialized_mcp_capability_handles or ())
+                if isinstance(item, str) and item.strip()
+            ],
         )
 
     def append_user(self, prompt: str) -> None:
@@ -185,6 +205,51 @@ class AgentSessionState:
             }
         )
         self.tool_call_count += 1
+
+    def update_mcp_capability_window(
+        self,
+        *,
+        shortlist: list[JSONDict] | tuple[JSONDict, ...],
+        materialized_handles: list[str] | tuple[str, ...],
+    ) -> None:
+        """更新当前会话的 MCP capability shortlist 与物化窗口。
+
+        Args:
+            shortlist (list[JSONDict] | tuple[JSONDict, ...]): 最近一次能力搜索返回的候选目录。
+            materialized_handles (list[str] | tuple[str, ...]): 下一轮需要物化的 capability handle 列表。
+        Returns:
+            None: 该方法直接原地更新会话状态。
+        """
+        self.mcp_capability_shortlist = [
+            dict(item)
+            for item in shortlist
+            if isinstance(item, dict)
+        ]
+        self.materialized_mcp_capability_handles = [
+            item.strip()
+            for item in materialized_handles
+            if isinstance(item, str) and item.strip()
+        ]
+
+    def materialized_mcp_capabilities(self) -> tuple[str, ...]:
+        """返回当前会话仍需物化的 capability handle 只读视图。
+
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            tuple[str, ...]: 当前物化窗口中的 capability handle 元组。
+        """
+        return tuple(self.materialized_mcp_capability_handles)
+
+    def mcp_capability_candidates(self) -> tuple[JSONDict, ...]:
+        """返回当前会话缓存的 capability shortlist 只读视图。
+
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            tuple[JSONDict, ...]: 最近一次能力搜索返回的候选目录项元组。
+        """
+        return tuple(dict(item) for item in self.mcp_capability_shortlist)
 
     def to_messages(self) -> list[JSONDict]:
         """导出当前可继续发送给模型的消息副本。

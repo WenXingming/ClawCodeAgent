@@ -44,6 +44,8 @@ class AgentSessionSnapshot:
     stop_reason: str | None = None  # 本次会话停止的原因标识。
     file_history: tuple[JSONDict, ...] = ()  # 文件操作历史记录。
     scratchpad_directory: str | None = None  # 会话使用的 scratchpad 目录路径。
+    mcp_capability_shortlist: tuple[JSONDict, ...] = ()  # 最近一次 MCP capability search 返回的候选目录项。
+    materialized_mcp_capability_handles: tuple[str, ...] = ()  # 下一轮需要继续物化的 capability handle 列表。
     schema_version: int = 1  # 落盘协议版本号，用于未来兼容升级。
 
     def to_dict(self) -> JSONDict:
@@ -70,6 +72,8 @@ class AgentSessionSnapshot:
             'stop_reason': self.stop_reason,
             'file_history': [dict(item) for item in self.file_history],
             'scratchpad_directory': self.scratchpad_directory,
+            'mcp_capability_shortlist': [dict(item) for item in self.mcp_capability_shortlist],
+            'materialized_mcp_capability_handles': list(self.materialized_mcp_capability_handles),
         }
 
     @classmethod
@@ -108,6 +112,18 @@ class AgentSessionSnapshot:
         transcript_raw = cls._first_present(data, 'transcript', default=[])
         events_raw = cls._first_present(data, 'events', default=[])
         file_history_raw = cls._first_present(data, 'file_history', 'fileHistory', default=[])
+        mcp_capability_shortlist_raw = cls._first_present(
+            data,
+            'mcp_capability_shortlist',
+            'mcpCapabilityShortlist',
+            default=[],
+        )
+        materialized_handles_raw = cls._first_present(
+            data,
+            'materialized_mcp_capability_handles',
+            'materializedMcpCapabilityHandles',
+            default=[],
+        )
 
         if not isinstance(transcript_raw, list):
             transcript_raw = []
@@ -115,6 +131,10 @@ class AgentSessionSnapshot:
             events_raw = []
         if not isinstance(file_history_raw, list):
             file_history_raw = []
+        if not isinstance(mcp_capability_shortlist_raw, list):
+            mcp_capability_shortlist_raw = []
+        if not isinstance(materialized_handles_raw, list):
+            materialized_handles_raw = []
 
         stop_reason_raw = cls._first_present(data, 'stop_reason', 'stopReason')
         scratchpad_directory_raw = cls._first_present(
@@ -154,6 +174,14 @@ class AgentSessionSnapshot:
                 cls._as_str(scratchpad_directory_raw)
                 if scratchpad_directory_raw is not None
                 else None
+            ),
+            mcp_capability_shortlist=tuple(
+                item for item in mcp_capability_shortlist_raw if isinstance(item, dict)
+            ),
+            materialized_mcp_capability_handles=tuple(
+                cls._as_str(item).strip()
+                for item in materialized_handles_raw
+                if cls._as_str(item).strip()
             ),
             schema_version=cls._as_int(
                 cls._first_present(data, 'schema_version', 'schemaVersion', default=1),

@@ -7,8 +7,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from tools.mcp_models import MCPTransportError
+from tools.mcp_models import MCPServerProfile, MCPTool, MCPTransportError
 from tools.mcp_runtime import MCPRuntime
 
 
@@ -172,6 +173,167 @@ class MCPRuntimeTests(unittest.TestCase):
         self.assertEqual(raised.exception.server_name, 'broken')
         self.assertEqual(raised.exception.method, 'tools/list')
         self.assertIn('broken', str(raised.exception))
+
+    def test_runtime_caches_remote_tool_list_per_server(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            runtime = MCPRuntime(
+                workspace=workspace,
+                servers=(MCPServerProfile(name='remote', transport='stdio', command='fake-mcp-server'),),
+            )
+            runtime._transport_client = mock.Mock()
+            runtime._transport_client.request = mock.Mock(return_value={
+                'tools': [
+                    {
+                        'name': 'echo',
+                        'description': 'Echo text',
+                        'inputSchema': {
+                            'type': 'object',
+                            'properties': {'text': {'type': 'string'}},
+                            'required': ['text'],
+                        },
+                    }
+                ]
+            })
+
+            first = runtime.list_tools()
+            second = runtime.list_tools()
+
+        self.assertEqual([tool.name for tool in first], ['echo'])
+        self.assertEqual([tool.name for tool in second], ['echo'])
+        runtime._transport_client.request.assert_called_once_with(runtime.servers[0], 'tools/list', {})
+
+    def test_call_tool_discovers_remote_tool_on_cache_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            runtime = MCPRuntime(
+                workspace=workspace,
+                servers=(MCPServerProfile(name='remote', transport='stdio', command='fake-mcp-server'),),
+            )
+
+            def _request(server, method, params):
+                if method == 'tools/list':
+                    return {
+                        'tools': [
+                            {
+                                'name': 'echo',
+                                'description': 'Echo text',
+                                'inputSchema': {
+                                    'type': 'object',
+                                    'properties': {'text': {'type': 'string'}},
+                                    'required': ['text'],
+                                },
+                            }
+                        ]
+                    }
+                if method == 'tools/call':
+                    return {
+                        'content': [{'type': 'text', 'text': 'echo:' + params.get('arguments', {}).get('text', '')}],
+                        'isError': False,
+                    }
+                raise AssertionError(f'unexpected MCP method: {method}')
+
+            runtime._transport_client = mock.Mock()
+            runtime._transport_client.request = mock.Mock(side_effect=_request)
+
+            result = runtime.call_tool('echo', arguments={'text': 'hello'})
+
+        methods = [call.args[1] for call in runtime._transport_client.request.call_args_list]
+        self.assertEqual(methods, ['tools/list', 'tools/call'])
+        self.assertEqual(result.tool_name, 'echo')
+        self.assertEqual(result.server_name, 'remote')
+        self.assertIn('echo:hello', result.content)
+
+    def test_render_tool_index_includes_schema_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            runtime = MCPRuntime(
+                workspace=workspace,
+                servers=(MCPServerProfile(name='remote', transport='stdio', command='fake-mcp-server'),),
+            )
+            runtime._tool_cache_by_server['remote'] = (
+                MCPTool(
+                    name='echo',
+                    server_name='remote',
+                    description='Echo text',
+                    input_schema={
+                        'type': 'object',
+                        'properties': {'text': {'type': 'string'}},
+                        'required': ['text'],
+                    },
+                ),
+            )
+
+            rendered = runtime.render_tool_index(server_name='remote')
+
+        self.assertIn('- echo; server=remote', rendered)
+        self.assertIn('description: Echo text', rendered)
+        self.assertIn('type: object', rendered)
+        self.assertIn('required: text', rendered)
+        self.assertIn('properties: text:string', rendered)
+
+    def test_search_capabilities_returns_ranked_handles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            runtime = MCPRuntime(
+                workspace=workspace,
+                servers=(MCPServerProfile(name='remote', transport='stdio', command='fake-mcp-server'),),
+            )
+            runtime._tool_cache_by_server['remote'] = (
+                MCPTool(
+                    name='echo',
+                    server_name='remote',
+                    description='Echo text back to the user.',
+                    input_schema={'type': 'object', 'properties': {'text': {'type': 'string'}}},
+                ),
+                MCPTool(
+                    name='tavily_search',
+                    server_name='remote',
+                    description='Search the web for current information and news.',
+                    input_schema={
+                        'type': 'object',
+                        'properties': {'query': {'type': 'string'}},
+                        'required': ['query'],
+                    },
+                ),
+            )
+
+            capabilities = runtime.search_capabilities(query='current news', server_name='remote')
+
+        self.assertEqual(len(capabilities), 1)
+        self.assertEqual(capabilities[0].handle, 'mcp:remote:tavily_search')
+        self.assertEqual(capabilities[0].required_parameters, ('query',))
+        self.assertEqual(capabilities[0].risk_level, 'read')
+
+    def test_render_capability_index_includes_handle_and_parameter_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            runtime = MCPRuntime(
+                workspace=workspace,
+                servers=(MCPServerProfile(name='remote', transport='stdio', command='fake-mcp-server'),),
+            )
+            runtime._tool_cache_by_server['remote'] = (
+                MCPTool(
+                    name='tavily_search',
+                    server_name='remote',
+                    description='Search the web for current information and news.',
+                    input_schema={
+                        'type': 'object',
+                        'properties': {'query': {'type': 'string'}},
+                        'required': ['query'],
+                    },
+                ),
+            )
+
+            rendered = runtime.render_capability_index(server_name='remote')
+
+        self.assertIn('- mcp:remote:tavily_search', rendered)
+        self.assertIn('tool_name: tavily_search', rendered)
+        self.assertIn('server: remote', rendered)
+        self.assertIn('risk: read', rendered)
+        self.assertIn('required: query', rendered)
+        self.assertIn('parameters: query:string', rendered)
+
 
 
 if __name__ == '__main__':

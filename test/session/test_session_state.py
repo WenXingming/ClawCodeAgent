@@ -78,6 +78,50 @@ class SessionStateFromPersistedTests(unittest.TestCase):
         self.assertEqual(session_state.to_messages()[-1]['content'], '新提问')
         self.assertEqual(session_state.tool_call_count, 1)  # 追加 user 不增加工具计数
 
+    def test_from_persisted_restores_mcp_materialization_state(self) -> None:
+        """恢复会话时应保留 capability shortlist 与已物化句柄。"""
+        session_state = AgentSessionState.from_persisted(
+            messages=[{'role': 'user', 'content': '旧提问'}],
+            transcript=[{'role': 'user', 'content': '旧提问'}],
+            tool_call_count=1,
+            mcp_capability_shortlist=[
+                {
+                    'handle': 'mcp:tavily:tavily_search',
+                    'tool_name': 'tavily_search',
+                    'server_name': 'tavily',
+                }
+            ],
+            materialized_mcp_capability_handles=['mcp:tavily:tavily_search'],
+        )
+
+        self.assertEqual(
+            session_state.mcp_capability_candidates(),
+            ({'handle': 'mcp:tavily:tavily_search', 'tool_name': 'tavily_search', 'server_name': 'tavily'},),
+        )
+        self.assertEqual(
+            session_state.materialized_mcp_capabilities(),
+            ('mcp:tavily:tavily_search',),
+        )
+
+    def test_update_mcp_capability_window_replaces_previous_window(self) -> None:
+        """更新 capability window 时应整体替换旧 shortlist 与句柄列表。"""
+        session_state = AgentSessionState.create('初始化')
+        session_state.update_mcp_capability_window(
+            shortlist=[{'handle': 'old'}],
+            materialized_handles=['old'],
+        )
+
+        session_state.update_mcp_capability_window(
+            shortlist=[{'handle': 'new', 'tool_name': 'search'}],
+            materialized_handles=['new'],
+        )
+
+        self.assertEqual(
+            session_state.mcp_capability_candidates(),
+            ({'handle': 'new', 'tool_name': 'search'},),
+        )
+        self.assertEqual(session_state.materialized_mcp_capabilities(), ('new',))
+
 
 if __name__ == '__main__':
     unittest.main()

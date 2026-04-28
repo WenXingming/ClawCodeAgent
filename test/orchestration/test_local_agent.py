@@ -16,7 +16,7 @@ from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, Ope
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
-from tools.mcp_models import MCPTool, MCPToolCallResult
+from tools.mcp_models import MCPCapability, MCPTool, MCPToolCallResult
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -43,9 +43,11 @@ class _FakeOpenAIClient(OpenAIClient):
         )
         self._responses = list(responses)
         self.calls: list[list[dict]] = []  # 记录每轮入参消息，便于断言循环行为。
+        self.tools_seen: list[list[dict]] = []  # 记录每轮发送给模型的工具定义。
 
     def complete(self, messages, tools=None, *, output_schema=None):  # type: ignore[override]
         self.calls.append([dict(item) for item in messages])
+        self.tools_seen.append([dict(item) for item in (tools or []) if isinstance(item, dict)])
         if not self._responses:
             raise AssertionError('No prepared response left for test')
 
@@ -1291,8 +1293,8 @@ class LocalAgentTests(unittest.TestCase):
         self.assertEqual(result.final_output, '搜索完成')
         agent.search_runtime.search.assert_called_once()
 
-    def test_run_calls_expanded_mcp_tools_from_main_loop(self) -> None:
-        """验证展开后的 MCP 顶层工具在主循环被正确调用。"""
+    def test_run_calls_mcp_search_capabilities_from_main_loop(self) -> None:
+        """验证主循环通过 mcp_search_capabilities 搜索远端能力。"""
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([
             OneTurnResponse(
@@ -1300,8 +1302,11 @@ class LocalAgentTests(unittest.TestCase):
                 tool_calls=(
                     ToolCall(
                         id='call-1',
-                        name='tavily_search',
-                        arguments={'query': 'today tech news'},
+                        name='mcp_search_capabilities',
+                        arguments={
+                            'server_name': 'tavily',
+                            'query': 'today tech news',
+                        },
                     ),
                 ),
                 finish_reason='tool_calls',
@@ -1317,17 +1322,83 @@ class LocalAgentTests(unittest.TestCase):
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
         agent.mcp_runtime.servers = [mock.Mock(name='tavily')]
-        agent.mcp_runtime.list_tools = mock.Mock(return_value=(
-            MCPTool(
-                name='tavily_search',
-                server_name='tavily',
-                description='Search the web for current information.',
-                input_schema={
-                    'type': 'object',
-                    'properties': {'query': {'type': 'string'}},
-                    'required': ['query'],
-                },
+        agent.mcp_runtime.search_capabilities = mock.Mock(return_value=(MCPCapability(
+            handle='mcp:tavily:tavily_search',
+            tool_name='tavily_search',
+            server_name='tavily',
+            description='Search the web for current information.',
+            required_parameters=('query',),
+            parameter_summary=('query:string',),
+            risk_level='read',
+        ),))
+        agent.mcp_runtime.render_capability_index = mock.Mock(return_value='- mcp:tavily:tavily_search')
+
+        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+
+        result = agent.run('查询适合当前任务的 MCP 能力')
+
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.stop_reason, 'stop')
+        self.assertEqual(result.final_output, 'MCP 查询完成')
+        agent.mcp_runtime.search_capabilities.assert_called_once_with(
+            query='today tech news',
+            server_name='tavily',
+            limit=20,
+        )
+        agent.mcp_runtime.render_capability_index.assert_called_once_with(
+            query='today tech news',
+            server_name='tavily',
+            limit=20,
+        )
+
+    def test_run_calls_mcp_call_tool_from_main_loop(self) -> None:
+        """验证主循环通过 capability_handle 调用远端 MCP 工具。"""
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='',
+                tool_calls=(
+                    ToolCall(
+                        id='call-1',
+                        name='mcp_call_tool',
+                        arguments={
+                            'capability_handle': 'mcp:tavily:tavily_search',
+                            'arguments': {'query': 'today tech news'},
+                        },
+                    ),
+                ),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=2, output_tokens=3),
             ),
+            OneTurnResponse(
+                content='MCP 查询完成',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=5, output_tokens=2),
+            ),
+        ])
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+
+        agent.mcp_runtime.servers = [mock.Mock(name='tavily')]
+        agent.mcp_runtime.resolve_capability = mock.Mock(return_value=MCPCapability(
+            handle='mcp:tavily:tavily_search',
+            tool_name='tavily_search',
+            server_name='tavily',
+            description='Search the web for current information.',
+            required_parameters=('query',),
+            parameter_summary=('query:string',),
+            risk_level='read',
+        ))
+        agent.mcp_runtime.resolve_tool = mock.Mock(return_value=MCPTool(
+            name='tavily_search',
+            server_name='tavily',
+            description='Search the web for current information.',
+            input_schema={
+                'type': 'object',
+                'properties': {'query': {'type': 'string'}},
+                'required': ['query'],
+            },
         ))
         agent.mcp_runtime.call_tool = mock.Mock(return_value=MCPToolCallResult(
             server_name='tavily',
@@ -1344,6 +1415,8 @@ class LocalAgentTests(unittest.TestCase):
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.stop_reason, 'stop')
         self.assertEqual(result.final_output, 'MCP 查询完成')
+        agent.mcp_runtime.resolve_capability.assert_called_once_with('mcp:tavily:tavily_search')
+        agent.mcp_runtime.resolve_tool.assert_called_once_with('tavily_search', server_name='tavily')
         agent.mcp_runtime.call_tool.assert_called_once_with(
             'tavily_search',
             arguments={'query': 'today tech news'},
@@ -1351,8 +1424,94 @@ class LocalAgentTests(unittest.TestCase):
             max_chars=agent.runtime_config.max_output_chars,
         )
 
+    def test_capability_search_materializes_temporary_mcp_tool_for_next_turn(self) -> None:
+        """验证 capability search 会把少量候选物化为下一轮可见的临时工具。"""
+        workspace = _make_test_dir()
+        capability_handle = 'mcp:tavily:tavily_search'
+        materialized_tool_name = 'mcp_cap_mcp_tavily_tavily_search'
+        fake_client = _FakeOpenAIClient([
+            OneTurnResponse(
+                content='',
+                tool_calls=(
+                    ToolCall(
+                        id='call-1',
+                        name='mcp_search_capabilities',
+                        arguments={'query': 'today tech news', 'server_name': 'tavily'},
+                    ),
+                ),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=2, output_tokens=1),
+            ),
+            OneTurnResponse(
+                content='',
+                tool_calls=(
+                    ToolCall(
+                        id='call-2',
+                        name=materialized_tool_name,
+                        arguments={'query': 'today tech news'},
+                    ),
+                ),
+                finish_reason='tool_calls',
+                usage=TokenUsage(input_tokens=3, output_tokens=1),
+            ),
+            OneTurnResponse(
+                content='临时工具调用完成',
+                tool_calls=(),
+                finish_reason='stop',
+                usage=TokenUsage(input_tokens=2, output_tokens=2),
+            ),
+        ])
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+
+        capability = MCPCapability(
+            handle=capability_handle,
+            tool_name='tavily_search',
+            server_name='tavily',
+            description='Search the web for current information.',
+            required_parameters=('query',),
+            parameter_summary=('query:string',),
+            risk_level='read',
+        )
+        remote_tool = MCPTool(
+            name='tavily_search',
+            server_name='tavily',
+            description='Search the web for current information.',
+            input_schema={
+                'type': 'object',
+                'properties': {'query': {'type': 'string'}},
+                'required': ['query'],
+            },
+        )
+
+        agent.mcp_runtime.servers = [mock.Mock(name='tavily')]
+        agent.mcp_runtime.search_capabilities = mock.Mock(return_value=(capability,))
+        agent.mcp_runtime.render_capability_index = mock.Mock(return_value='- mcp:tavily:tavily_search')
+        agent.mcp_runtime.resolve_capability = mock.Mock(return_value=capability)
+        agent.mcp_runtime.resolve_tool = mock.Mock(return_value=remote_tool)
+        agent.mcp_runtime.call_tool = mock.Mock(return_value=MCPToolCallResult(
+            server_name='tavily',
+            tool_name='tavily_search',
+            content='headline-1',
+            is_error=False,
+        ))
+        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+
+        result = agent.run('查询今天的科技新闻并继续执行')
+
+        self.assertEqual(result.final_output, '临时工具调用完成')
+        self.assertEqual(len(fake_client.tools_seen), 3)
+        second_turn_tools = [
+            item.get('function', {}).get('name')
+            for item in fake_client.tools_seen[1]
+            if isinstance(item, dict)
+        ]
+        self.assertIn(materialized_tool_name, second_turn_tools)
+        stored = self._load_session_snapshot(workspace, result.session_id or '')
+        self.assertEqual(stored.materialized_mcp_capability_handles, (capability_handle,))
+        self.assertEqual(len(stored.mcp_capability_shortlist), 1)
+
     def test_workspace_search_and_mcp_tools_registered_when_configured(self) -> None:
-        """验证当配置了 search providers 和 MCP 资源时，对应工具会被注册。"""
+        """验证 MCP server 存在时启动只注册统一 façade 工具。"""
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([])
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
@@ -1365,20 +1524,7 @@ class LocalAgentTests(unittest.TestCase):
         mock_mcp_resource = mock.Mock()
         agent.mcp_runtime.resources = [mock_mcp_resource]
         agent.mcp_runtime.servers = [mock.Mock(name='tavily'), mock.Mock(name='filesystem')]
-        agent.mcp_runtime.list_tools = mock.Mock(return_value=(
-            MCPTool(
-                name='tavily_search',
-                server_name='tavily',
-                description='Search the web for current information.',
-                input_schema={'type': 'object', 'properties': {'query': {'type': 'string'}}},
-            ),
-            MCPTool(
-                name='read_file',
-                server_name='filesystem',
-                description='Read file text.',
-                input_schema={'type': 'object', 'properties': {'path': {'type': 'string'}}},
-            ),
-        ))
+        agent.mcp_runtime.list_tools = mock.Mock(side_effect=AssertionError('startup should not enumerate MCP tools'))
         
         # 重新注册工具
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
@@ -1387,13 +1533,14 @@ class LocalAgentTests(unittest.TestCase):
         self.assertIn('workspace_search', agent.tool_registry)
         self.assertIn('mcp_list_resources', agent.tool_registry)
         self.assertIn('mcp_read_resource', agent.tool_registry)
-        self.assertIn('tavily_search', agent.tool_registry)
-        self.assertIn('mcp_filesystem_read_file', agent.tool_registry)
+        self.assertIn('mcp_search_capabilities', agent.tool_registry)
+        self.assertIn('mcp_call_tool', agent.tool_registry)
         self.assertNotIn('mcp_list_tools', agent.tool_registry)
-        self.assertNotIn('mcp_call_tool', agent.tool_registry)
+        self.assertNotIn('tavily_search', agent.tool_registry)
+        self.assertNotIn('mcp_filesystem_read_file', agent.tool_registry)
 
-    def test_expanded_filesystem_write_tool_requires_file_write_permission(self) -> None:
-        """验证展开后的 filesystem 写工具仍然受本地写权限控制。"""
+    def test_mcp_call_tool_blocks_filesystem_writes_without_permission(self) -> None:
+        """验证 mcp_call_tool 仍会拦截 filesystem 写工具。"""
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([])
         config = AgentRuntimeConfig(
@@ -1408,20 +1555,18 @@ class LocalAgentTests(unittest.TestCase):
         agent = self._build_agent(fake_client, config)
 
         agent.mcp_runtime.servers = [mock.Mock(name='filesystem')]
-        agent.mcp_runtime.list_tools = mock.Mock(return_value=(
-            MCPTool(
-                name='write_file',
-                server_name='filesystem',
-                description='Create a new file or overwrite an existing file.',
-                input_schema={
-                    'type': 'object',
-                    'properties': {
-                        'path': {'type': 'string'},
-                        'content': {'type': 'string'},
-                    },
-                    'required': ['path', 'content'],
+        agent.mcp_runtime.resolve_tool = mock.Mock(return_value=MCPTool(
+            name='write_file',
+            server_name='filesystem',
+            description='Create a new file or overwrite an existing file.',
+            input_schema={
+                'type': 'object',
+                'properties': {
+                    'path': {'type': 'string'},
+                    'content': {'type': 'string'},
                 },
-            ),
+                'required': ['path', 'content'],
+            },
         ))
         agent.mcp_runtime.call_tool = mock.Mock()
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
@@ -1429,14 +1574,20 @@ class LocalAgentTests(unittest.TestCase):
         context = agent.tool_service.build_context(config, tool_registry=agent.tool_registry)
         result = agent.tool_service.execute(
             agent.tool_registry,
-            'mcp_filesystem_write_file',
-            {'path': 'demo.txt', 'content': 'hello'},
+            'mcp_call_tool',
+            {
+                'tool_name': 'write_file',
+                'server_name': 'filesystem',
+                'arguments': {'path': 'demo.txt', 'content': 'hello'},
+            },
             context,
         )
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'permission_denied')
+        agent.mcp_runtime.resolve_tool.assert_called_once_with('write_file', server_name='filesystem')
         agent.mcp_runtime.call_tool.assert_not_called()
+
 
 
 if __name__ == '__main__':

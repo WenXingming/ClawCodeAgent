@@ -41,6 +41,14 @@ class AgentSessionSnapshotTests(unittest.TestCase):
             stop_reason='stop',
             file_history=({'action': 'write_file', 'path': 'demo.txt'},),
             scratchpad_directory=str(workspace / 'scratchpad'),
+            mcp_capability_shortlist=(
+                {
+                    'handle': 'mcp:tavily:tavily_search',
+                    'tool_name': 'tavily_search',
+                    'server_name': 'tavily',
+                },
+            ),
+            materialized_mcp_capability_handles=('mcp:tavily:tavily_search',),
         )
 
         restored = AgentSessionSnapshot.from_dict(session_snapshot.to_dict())
@@ -53,6 +61,11 @@ class AgentSessionSnapshotTests(unittest.TestCase):
         self.assertEqual(restored.events, session_snapshot.events)
         self.assertEqual(restored.usage, session_snapshot.usage)
         self.assertEqual(restored.total_cost_usd, session_snapshot.total_cost_usd)
+        self.assertEqual(restored.mcp_capability_shortlist, session_snapshot.mcp_capability_shortlist)
+        self.assertEqual(
+            restored.materialized_mcp_capability_handles,
+            session_snapshot.materialized_mcp_capability_handles,
+        )
         self.assertEqual(restored.schema_version, 1)
 
     def test_agent_session_snapshot_defaults_optional_fields(self) -> None:
@@ -72,6 +85,8 @@ class AgentSessionSnapshotTests(unittest.TestCase):
         self.assertEqual(restored.final_output, '')
         self.assertEqual(restored.usage, TokenUsage())
         self.assertEqual(restored.file_history, ())
+        self.assertEqual(restored.mcp_capability_shortlist, ())
+        self.assertEqual(restored.materialized_mcp_capability_handles, ())
         self.assertIsNone(restored.stop_reason)
 
     def test_agent_session_snapshot_supports_camel_case_fields(self) -> None:
@@ -89,6 +104,8 @@ class AgentSessionSnapshotTests(unittest.TestCase):
                 'stopReason': 'completed',
                 'fileHistory': [{'action': 'edit_file'}],
                 'scratchpadDirectory': str(workspace / 'scratchpad'),
+                'mcpCapabilityShortlist': [{'handle': 'mcp:tavily:tavily_search'}],
+                'materializedMcpCapabilityHandles': ['mcp:tavily:tavily_search'],
             }
         )
 
@@ -99,6 +116,8 @@ class AgentSessionSnapshotTests(unittest.TestCase):
         self.assertEqual(restored.total_cost_usd, 1.25)
         self.assertEqual(restored.stop_reason, 'completed')
         self.assertEqual(restored.file_history, ({'action': 'edit_file'},))
+        self.assertEqual(restored.mcp_capability_shortlist, ({'handle': 'mcp:tavily:tavily_search'},))
+        self.assertEqual(restored.materialized_mcp_capability_handles, ('mcp:tavily:tavily_search',))
 
     def test_agent_session_snapshot_requires_core_fields(self) -> None:
         with self.assertRaises(ValueError):

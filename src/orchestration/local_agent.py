@@ -5,8 +5,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable
 from dataclasses import dataclass, field
+from functools import partial
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
@@ -27,10 +28,13 @@ from extensions.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
-from tools.local_tools import LocalTool, LocalToolService, ToolExecutionError
-from tools.mcp_models import MCPTransportError
+from tools.local_tools import LocalTool, LocalToolService, ToolExecutionError, ToolPermissionError
+from tools.mcp_models import MCPTool, MCPTransportError
 from tools.mcp_runtime import MCPRuntime
-from tools.mcp_tool_adapter import MCPToolAdapter
+
+
+_FILESYSTEM_WRITE_TOOL_NAMES = frozenset({'write_file', 'edit_file', 'create_directory', 'move_file'})
+_MCP_MATERIALIZED_TOOL_LIMIT = 3
 
 
 @dataclass
@@ -57,7 +61,6 @@ class LocalAgent:
     budget_context_orchestrator: BudgetContextOrchestrator = field(init=False)
     search_runtime: SearchRuntime = field(init=False)
     mcp_runtime: MCPRuntime = field(init=False)
-    mcp_tool_adapter: MCPToolAdapter = field(init=False)
     plugin_runtime: PluginRuntime = field(init=False)
     hook_policy_runtime: HookPolicyRuntime = field(init=False)
     slash_dispatcher: SlashCommandDispatcher = field(init=False)
@@ -102,6 +105,8 @@ class LocalAgent:
             messages=list(session_snapshot.messages),
             transcript=list(session_snapshot.transcript),
             tool_call_count=session_snapshot.tool_calls,
+            mcp_capability_shortlist=list(session_snapshot.mcp_capability_shortlist),
+            materialized_mcp_capability_handles=list(session_snapshot.materialized_mcp_capability_handles),
         )
         return self._run_managed_invocation(
             prompt=prompt,
@@ -209,7 +214,6 @@ class LocalAgent:
         self.tool_registry = self.tool_service.default_registry()
         self.search_runtime = SearchRuntime.from_workspace(self.runtime_config.cwd)
         self.mcp_runtime = MCPRuntime.from_workspace(self.runtime_config.cwd)
-        self.mcp_tool_adapter = MCPToolAdapter(self.mcp_runtime)
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
         self.plugin_runtime = PluginRuntime.from_workspace(self.runtime_config.cwd, self.tool_registry)
         self.tool_registry = self.plugin_runtime.merge_tool_registry(self.tool_registry)
@@ -335,8 +339,47 @@ class LocalAgent:
                 }
             )
 
+        # 仅向模型暴露精简的 MCP 能力搜索与统一调用门面，避免把整份工具目录直接转成上下文噪音。
         if self.mcp_runtime.servers:
-            merged_registry.update(self.mcp_tool_adapter.build_tools(merged_registry))
+            merged_registry.update(
+                {
+                    'mcp_search_capabilities': LocalTool(
+                        name='mcp_search_capabilities',
+                        description='Search concise MCP capability candidates from configured MCP servers.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'query': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+                            },
+                        },
+                        handler=self._run_mcp_search_capabilities,
+                    ),
+                    'mcp_call_tool': LocalTool(
+                        name='mcp_call_tool',
+                        description='Call a remote MCP tool by capability_handle or tool_name, optionally scoped to a specific server.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'capability_handle': {'type': 'string'},
+                                'tool_name': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'arguments': {
+                                    'type': 'object',
+                                    'additionalProperties': True,
+                                },
+                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
+                            },
+                            'anyOf': [
+                                {'required': ['capability_handle']},
+                                {'required': ['tool_name']},
+                            ],
+                        },
+                        handler=self._run_mcp_call_tool,
+                    ),
+                }
+            )
 
         return merged_registry
 
@@ -455,35 +498,47 @@ class LocalAgent:
             raise ToolExecutionError(str(exc)) from exc
         return content, {'uri': uri}
 
-    def _run_mcp_list_tools(
+    def _run_mcp_search_capabilities(
         self,
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
-        """列出当前 MCP 运行时可见的远程工具索引。
+        """搜索当前 MCP 运行时可见的能力目录。
 
         Args:
-            arguments (JSONDict): mcp_list_tools 的工具调用参数。
+            arguments (JSONDict): mcp_search_capabilities 的工具调用参数。
             context (Any): 当前工具执行上下文。
         Returns:
-            str | tuple[str, JSONDict]: 渲染后的工具索引文本，以及附带统计信息的元数据。
+            str | tuple[str, JSONDict]: 渲染后的能力目录文本，以及附带统计信息的元数据。
         Raises:
             ToolExecutionError: 当参数非法或 MCP 运行时调用失败时抛出。
         """
         query = self._optional_tool_string(arguments, 'query')
         server_name = self._optional_tool_string(arguments, 'server_name')
-        limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 50
+        limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 20
 
         try:
-            tools = self.mcp_runtime.list_tools(query=query, server_name=server_name, limit=limit)
+            capabilities = self.mcp_runtime.search_capabilities(query=query, server_name=server_name, limit=limit)
         except (MCPTransportError, ValueError, FileNotFoundError) as exc:
             raise ToolExecutionError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.mcp_runtime.render_tool_index(query=query, server_name=server_name, limit=limit),
+            self.mcp_runtime.render_capability_index(query=query, server_name=server_name, limit=limit),
             context.max_output_chars,
         )
-        return content, {'tool_count': len(tools), 'server_name': server_name or ''}
+        materialized_handles = [
+            capability.handle
+            for capability in capabilities[:_MCP_MATERIALIZED_TOOL_LIMIT]
+        ]
+        return (
+            content,
+            {
+                'capability_count': len(capabilities),
+                'server_name': server_name or '',
+                'capabilities': [capability.to_dict() for capability in capabilities],
+                'materialized_handles': materialized_handles,
+            },
+        )
 
     def _run_mcp_call_tool(
         self,
@@ -500,17 +555,62 @@ class LocalAgent:
         Raises:
             ToolExecutionError: 当参数非法或 MCP 运行时调用失败时抛出。
         """
-        tool_name = self._require_tool_string(arguments, 'tool_name')
-        server_name = self._optional_tool_string(arguments, 'server_name')
+        tool_name, server_name, capability_handle = self._resolve_mcp_tool_target(arguments)
         raw_tool_arguments = arguments.get('arguments', {})
         if raw_tool_arguments is None:
             raw_tool_arguments = {}
         if not isinstance(raw_tool_arguments, dict):
             raise ToolExecutionError('mcp_call_tool.arguments must be a JSON object')
 
-        max_chars = self._resolve_tool_output_limit(arguments, context, key='max_chars')
+        return self._execute_mcp_tool_call(
+            tool_name=tool_name,
+            server_name=server_name,
+            capability_handle=capability_handle,
+            raw_tool_arguments=raw_tool_arguments,
+            context=context,
+            max_chars=self._resolve_tool_output_limit(arguments, context, key='max_chars'),
+        )
 
+    def _resolve_mcp_tool_target(self, arguments: JSONDict) -> tuple[str, str | None, str | None]:
+        """把 mcp_call_tool 的输入统一解析为真实工具目标。
+
+        Args:
+            arguments (JSONDict): mcp_call_tool 的原始参数对象。
+        Returns:
+            tuple[str, str | None, str | None]: 解析后的工具名、server 名与能力句柄。
+        Raises:
+            ToolExecutionError: 当 tool_name 与 capability_handle 都缺失，或显式参数与能力句柄冲突时抛出。
+        """
+        capability_handle = self._optional_tool_string(arguments, 'capability_handle')
+        tool_name = self._optional_tool_string(arguments, 'tool_name')
+        server_name = self._optional_tool_string(arguments, 'server_name')
+
+        if capability_handle is None:
+            if tool_name is None:
+                raise ToolExecutionError('tool_name or capability_handle must be a non-empty string')
+            return tool_name, server_name, None
+
+        capability = self.mcp_runtime.resolve_capability(capability_handle)
+        if tool_name is not None and tool_name != capability.tool_name:
+            raise ToolExecutionError('tool_name does not match capability_handle')
+        if server_name is not None and server_name != capability.server_name:
+            raise ToolExecutionError('server_name does not match capability_handle')
+        return capability.tool_name, capability.server_name, capability.handle
+
+    def _execute_mcp_tool_call(
+        self,
+        *,
+        tool_name: str,
+        server_name: str | None,
+        capability_handle: str | None,
+        raw_tool_arguments: JSONDict,
+        context,
+        max_chars: int,
+    ) -> str | tuple[str, JSONDict]:
+        """执行一次远端 MCP 工具调用并统一渲染结果。"""
         try:
+            remote_tool = self.mcp_runtime.resolve_tool(tool_name, server_name=server_name)
+            self._ensure_mcp_tool_allowed(remote_tool, context)
             result = self.mcp_runtime.call_tool(
                 tool_name,
                 arguments=dict(raw_tool_arguments),
@@ -524,7 +624,122 @@ class LocalAgent:
             self.mcp_runtime.render_tool_result(result),
             context.max_output_chars,
         )
-        return content, {'server_name': result.server_name, 'tool_name': result.tool_name, 'is_error': result.is_error}
+        metadata = {
+            'server_name': result.server_name,
+            'tool_name': result.tool_name,
+            'is_error': result.is_error,
+        }
+        if capability_handle is not None:
+            metadata['capability_handle'] = capability_handle
+        return content, metadata
+
+    def _run_materialized_mcp_tool(
+        self,
+        capability_handle: str,
+        arguments: JSONDict,
+        context,
+    ) -> str | tuple[str, JSONDict]:
+        """执行由 capability window 物化出的临时 MCP 工具。"""
+        if not isinstance(arguments, dict):
+            raise ToolExecutionError('materialized MCP tool arguments must be a JSON object')
+
+        try:
+            capability = self.mcp_runtime.resolve_capability(capability_handle)
+        except (MCPTransportError, ValueError, FileNotFoundError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        return self._execute_mcp_tool_call(
+            tool_name=capability.tool_name,
+            server_name=capability.server_name,
+            capability_handle=capability.handle,
+            raw_tool_arguments=arguments,
+            context=context,
+            max_chars=context.max_output_chars,
+        )
+
+    def _build_effective_tool_registry(
+        self,
+        session_state: AgentSessionState,
+    ) -> dict[str, LocalTool]:
+        """构建当前轮次对模型和执行器可见的完整工具表。"""
+        effective_registry = dict(self.tool_registry)
+        effective_registry.update(self._build_materialized_mcp_tool_registry(session_state))
+        return effective_registry
+
+    def _build_materialized_mcp_tool_registry(
+        self,
+        session_state: AgentSessionState,
+    ) -> dict[str, LocalTool]:
+        """根据当前会话的 capability window 构建临时物化工具表。"""
+        materialized_tools: dict[str, LocalTool] = {}
+        for capability_handle in session_state.materialized_mcp_capabilities():
+            tool = self._build_materialized_mcp_tool(capability_handle)
+            if tool is None:
+                continue
+            materialized_tools[tool.name] = tool
+        return materialized_tools
+
+    def _build_materialized_mcp_tool(self, capability_handle: str) -> LocalTool | None:
+        """把单个 capability handle 物化为当前轮次可调用的临时工具。"""
+        try:
+            capability = self.mcp_runtime.resolve_capability(capability_handle)
+            remote_tool = self.mcp_runtime.resolve_tool(
+                capability.tool_name,
+                server_name=capability.server_name,
+            )
+        except (MCPTransportError, ValueError, FileNotFoundError):
+            return None
+
+        description = capability.description or f'Materialized MCP capability from server {capability.server_name}.'
+        return LocalTool(
+            name=self._materialized_mcp_tool_name(capability.handle),
+            description=description,
+            parameters=dict(remote_tool.input_schema),
+            handler=partial(self._run_materialized_mcp_tool, capability.handle),
+        )
+
+    @staticmethod
+    def _materialized_mcp_tool_name(capability_handle: str) -> str:
+        """把 capability handle 转成稳定的临时工具名。"""
+        sanitized = [character if character.isalnum() else '_' for character in capability_handle]
+        return 'mcp_cap_' + ''.join(sanitized).strip('_')
+
+    def _update_mcp_capability_window(
+        self,
+        session_state: AgentSessionState,
+        tool_call: ToolCall,
+        tool_result: ToolExecutionResult,
+    ) -> None:
+        """在工具执行完成后同步会话内的 capability shortlist 与物化窗口。"""
+        if tool_call.name != 'mcp_search_capabilities' or not tool_result.ok:
+            return
+
+        raw_shortlist = tool_result.metadata.get('capabilities')
+        raw_materialized_handles = tool_result.metadata.get('materialized_handles')
+        if not isinstance(raw_shortlist, list):
+            raw_shortlist = []
+        if not isinstance(raw_materialized_handles, list):
+            raw_materialized_handles = []
+        shortlist = [
+            dict(item)
+            for item in raw_shortlist
+            if isinstance(item, dict)
+        ]
+        materialized_handles = [
+            item.strip()
+            for item in raw_materialized_handles
+            if isinstance(item, str) and item.strip()
+        ]
+        session_state.update_mcp_capability_window(
+            shortlist=shortlist,
+            materialized_handles=materialized_handles,
+        )
+
+    @staticmethod
+    def _ensure_mcp_tool_allowed(remote_tool: MCPTool, context) -> None:
+        """检查远端工具是否越过当前会话权限边界。"""
+        if remote_tool.server_name == 'filesystem' and remote_tool.name in _FILESYSTEM_WRITE_TOOL_NAMES:
+            if not context.permissions.allow_file_write:
+                raise ToolPermissionError('File write permission denied: allow_file_write=false')
 
     def _run_delegate_agent(
         self,
@@ -1192,16 +1407,16 @@ class LocalAgent:
             pricing=self.client.model_config.pricing,
             cost_baseline=cost_baseline,
         )
-        tool_context = self.tool_service.build_context(
-            self.runtime_config,
-            tool_registry=self.tool_registry,
-            safe_env=self.hook_policy_runtime.safe_env,
-        )
-
         for turn_index in range(1, self.runtime_config.max_turns + 1):
             turns_this_run = turn_index
 
-            openai_tools = self._build_openai_tools()
+            effective_tool_registry = self._build_effective_tool_registry(session_state)
+            tool_context = self.tool_service.build_context(
+                self.runtime_config,
+                tool_registry=effective_tool_registry,
+                safe_env=self.hook_policy_runtime.safe_env,
+            )
+            openai_tools = self._build_openai_tools(effective_tool_registry)
             pre_model_outcome = self.budget_context_orchestrator.run_pre_model_cycle(
                 session_state=session_state,
                 runtime_config=self.runtime_config,
@@ -1353,10 +1568,12 @@ class LocalAgent:
                         tool_result = self._execute_tool_call(
                             tool_call=tool_call,
                             turn_index=turn_index,
+                            tool_registry=effective_tool_registry,
                             tool_context=tool_context,
                         )
                     tool_result = self._merge_tool_result_metadata(tool_result, metadata_updates)
 
+                self._update_mcp_capability_window(session_state, tool_call, tool_result)
                 session_state.append_tool_result(tool_call, tool_result)
 
                 for hook in after_hooks:
@@ -1484,12 +1701,13 @@ class LocalAgent:
         *,
         tool_call: ToolCall,
         turn_index: int,
+        tool_registry: dict[str, LocalTool],
         tool_context,
     ) -> ToolExecutionResult:
         """执行单个工具调用，必要时发射实时 stdout 或 stderr 事件。"""
         if tool_call.name != 'bash' or self.progress_reporter is None:
             return self.tool_service.execute(
-                self.tool_registry,
+                tool_registry,
                 tool_call.name,
                 tool_call.arguments,
                 tool_context,
@@ -1497,7 +1715,7 @@ class LocalAgent:
 
         final_result: ToolExecutionResult | None = None
         for update in self.tool_service.execute_streaming(
-            self.tool_registry,
+            tool_registry,
             tool_call.name,
             tool_call.arguments,
             tool_context,
@@ -1528,9 +1746,15 @@ class LocalAgent:
             metadata={'error_kind': 'tool_execution_error'},
         )
 
-    def _build_openai_tools(self) -> list[JSONDict]:
-        """构建发送给模型的工具定义列表。"""
-        return [tool.to_openai_tool() for tool in self.tool_registry.values()]
+    def _build_openai_tools(self, tool_registry: dict[str, LocalTool]) -> list[JSONDict]:
+        """构建发送给模型的工具定义列表。
+
+        Args:
+            tool_registry (dict[str, LocalTool]): 当前轮次对模型可见的完整工具表。
+        Returns:
+            list[JSONDict]: OpenAI function-calling 兼容工具定义列表。
+        """
+        return [tool.to_openai_tool() for tool in tool_registry.values()]
 
     @staticmethod
     def _merge_tool_result_metadata(
@@ -1665,6 +1889,8 @@ class LocalAgent:
             usage=usage_total,
             total_cost_usd=total_cost_usd,
             stop_reason=stop_reason,
+            mcp_capability_shortlist=session_state.mcp_capability_candidates(),
+            materialized_mcp_capability_handles=session_state.materialized_mcp_capabilities(),
         )
         session_path = self.session_store.save(session_snapshot)
         return AgentRunResult(

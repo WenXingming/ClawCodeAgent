@@ -62,8 +62,8 @@ class MCPResource:
 class MCPTool:
     """表示远端 MCP server 暴露的单个工具定义。
 
-    该对象主要被 MCPToolAdapter 用来展开顶层工具 schema，也会被运行时
-    用于定位具体 server 和输入参数约束。
+    该对象会被运行时用于定位具体 server、缓存远端发现结果，以及渲染
+    面向模型的参数摘要。
     """
 
     name: str  # str: 远端工具原始名称。
@@ -85,6 +85,50 @@ class MCPTool:
             'name': self.name,
             'server_name': self.server_name,
             'input_schema': dict(self.input_schema),
+        }
+        if self.description is not None:
+            payload['description'] = self.description
+        if self.source_path is not None:
+            payload['source_path'] = str(self.source_path)
+        if self.metadata:
+            payload['metadata'] = dict(self.metadata)
+        return payload
+
+
+@dataclass(frozen=True)
+class MCPCapability:
+    """表示面向模型暴露的 MCP 能力目录项。
+
+    该对象是对远端 `MCPTool` 的轻量投影，专门服务于能力搜索、排序和
+    按需物化场景。它避免把完整 schema 与冗长目录文本一次性塞进上下文，
+    但仍保留模型完成下一步决策所需的最小信息。
+    """
+
+    handle: str  # str: 能力的稳定句柄，通常形如 mcp:<server>:<tool>。
+    tool_name: str  # str: 对应的远端工具名称。
+    server_name: str  # str: 提供该能力的 MCP server 名称。
+    description: str | None = None  # str | None: 能力用途说明。
+    required_parameters: tuple[str, ...] = ()  # tuple[str, ...]: 必填参数名列表。
+    parameter_summary: tuple[str, ...] = ()  # tuple[str, ...]: 主要参数摘要，如 query:string。
+    risk_level: str = 'unknown'  # str: 粗粒度风险等级，如 read、write 或 unknown。
+    source_path: Path | None = None  # Path | None: 能力来源 manifest 路径。
+    metadata: JSONDict = field(default_factory=dict)  # JSONDict: 目录搜索和调试所需的补充元数据。
+
+    def to_dict(self) -> JSONDict:
+        """把能力目录项转换为可序列化字典。
+
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            JSONDict: 能力目录项的字典表达。
+        """
+        payload: JSONDict = {
+            'handle': self.handle,
+            'tool_name': self.tool_name,
+            'server_name': self.server_name,
+            'required_parameters': list(self.required_parameters),
+            'parameter_summary': list(self.parameter_summary),
+            'risk_level': self.risk_level,
         }
         if self.description is not None:
             payload['description'] = self.description
