@@ -18,7 +18,7 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
 from session.session_state import AgentSessionState
-from tools.local_tools import LocalTool
+from tools.registry import LocalTool, render_openai_tools
 
 
 @dataclass(frozen=True)
@@ -375,7 +375,7 @@ class SlashCommandDispatcher:
         Returns:
             list[JSONDict]: 供预算评估器计算 token 占用的工具 schema 列表。
         """
-        return [tool.to_openai_tool() for tool in tool_registry.values()]
+        return render_openai_tools(tool_registry)
 
     def _render_optional_int(self, value: int | None) -> str:
         """把可选整数格式化为展示文本。

@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .mcp_models import MCPLoadError, MCPResource, MCPServerProfile
+from .models import MCPLoadError, MCPResource, MCPServerProfile
 
 
 MCP_SCHEMA_VERSION = 1  # int: 当前支持的 MCP manifest schema 版本。

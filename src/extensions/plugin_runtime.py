@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Mapping
 
 from core_contracts.protocol import JSONDict
-from tools.local_tools import LocalTool, ToolExecutionContext
+from tools.executor import ToolExecutionContext
+from tools.registry import LocalTool
 
 
 _PLUGIN_MANIFEST_FILE = Path('.claw') / 'plugins.json'

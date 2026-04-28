@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict
-from tools.local_tools import LocalTool
+from tools.registry import LocalTool
 
 
 _POLICY_MANIFEST_FILE = Path('.claw') / 'policies.json'

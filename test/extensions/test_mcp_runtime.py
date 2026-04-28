@@ -9,8 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.mcp_models import MCPServerProfile, MCPTool, MCPTransportError
-from tools.mcp_runtime import MCPRuntime
+from tools.mcp import MCPRuntime, MCPServerProfile, MCPTool, MCPTransportError
 
 
 class MCPRuntimeTests(unittest.TestCase):

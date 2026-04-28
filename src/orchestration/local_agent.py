@@ -31,9 +31,10 @@ from extensions.plugin_runtime import PluginRuntime
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
-from tools.local_tools import LocalTool, LocalToolService, ToolExecutionError, ToolPermissionError
-from tools.mcp_models import MCPTool, MCPTransportError
-from tools.mcp_runtime import MCPRuntime
+from tools.executor import ToolExecutionError, ToolPermissionError, ToolStreamUpdate
+from tools.registry import LocalTool
+from tools.tool_gateway import ToolGateway
+from tools.mcp import MCPRuntime, MCPTool, MCPTransportError
 
 
 _FILESYSTEM_WRITE_TOOL_NAMES = frozenset({'write_file', 'edit_file', 'create_directory', 'move_file'})
@@ -58,7 +59,7 @@ class LocalAgent:
     budget_config: BudgetConfig  # 预算配置。
     session_paths: SessionPaths  # 会话路径配置。
     session_store: AgentSessionStore  # 会话持久化依赖。
-    tool_service: LocalToolService = field(default_factory=LocalToolService)
+    tool_gateway: ToolGateway = field(default_factory=ToolGateway)
     agent_manager: AgentManager = field(default_factory=AgentManager)  # AgentManager: 当前 run/resume 树共享的子代理编排器。
     current_agent_id: str | None = None  # str | None: 当前 LocalAgent 对应的受管代理标识；根调用与 child 调用均会设置。
     progress_reporter: Callable[[JSONDict], None] | None = None  # Callable[[JSONDict], None] | None: 可选的实时进度上报回调。
@@ -204,7 +205,7 @@ class LocalAgent:
         Returns:
             None: 该方法原地补全实例的运行时依赖。
         """
-        self.tool_registry = self.tool_service.default_registry()
+        self.tool_registry = self.tool_gateway.default_registry()
         self.search_runtime = SearchRuntime.from_workspace(self.workspace_scope.cwd)
         self.mcp_runtime = MCPRuntime.from_workspace(self.workspace_scope.cwd)
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
@@ -900,7 +901,7 @@ class LocalAgent:
                         self.budget_config,
                         self.session_paths,
                         self.session_store,
-                        tool_service=self.tool_service,
+                        tool_gateway=self.tool_gateway,
                         agent_manager=self.agent_manager,
                         current_agent_id=child_agent_id,
                     )
@@ -1386,14 +1387,14 @@ class LocalAgent:
             run_state.begin_turn(turn_index)
 
             effective_tool_registry = self._build_effective_tool_registry(run_state)
-            tool_context = self.tool_service.build_context(
+            tool_context = self.tool_gateway.build_context(
                 self.workspace_scope,
                 self.execution_policy,
                 self.permissions,
                 tool_registry=effective_tool_registry,
                 safe_env=self.hook_policy_runtime.safe_env,
             )
-            openai_tools = self._build_openai_tools(effective_tool_registry)
+            openai_tools = self.tool_gateway.to_openai_tools(effective_tool_registry)
             pre_model_outcome = self.budget_context_orchestrator.run_pre_model_cycle(
                 run_state=run_state,
                 budget_config=self.budget_config,
@@ -1578,26 +1579,9 @@ class LocalAgent:
         tool_context,
     ) -> ToolExecutionResult:
         """执行单个工具调用，必要时发射实时 stdout 或 stderr 事件。"""
-        if tool_call.name != 'bash' or self.progress_reporter is None:
-            return self.tool_service.execute(
-                run_state.effective_tool_registry,
-                tool_call.name,
-                tool_call.arguments,
-                tool_context,
-            )
-
-        final_result: ToolExecutionResult | None = None
-        for update in self.tool_service.execute_streaming(
-            run_state.effective_tool_registry,
-            tool_call.name,
-            tool_call.arguments,
-            tool_context,
-        ):
-            if update.kind == 'result':
-                final_result = update.result
-                continue
-            if not update.chunk:
-                continue
+        def _emit_stream_update(update: ToolStreamUpdate) -> None:
+            if self.progress_reporter is None or not update.chunk:
+                return
             self._emit_progress_event(
                 {
                     'type': 'tool_stream',
@@ -1610,24 +1594,13 @@ class LocalAgent:
                 }
             )
 
-        if final_result is not None:
-            return final_result
-        return ToolExecutionResult(
-            name=tool_call.name,
-            ok=False,
-            content='Streaming tool execution returned no final result.',
-            metadata={'error_kind': 'tool_execution_error'},
+        return self.tool_gateway.execute_call(
+            run_state.effective_tool_registry,
+            tool_call.name,
+            tool_call.arguments,
+            tool_context,
+            on_stream_update=_emit_stream_update,
         )
-
-    def _build_openai_tools(self, tool_registry: dict[str, LocalTool]) -> list[JSONDict]:
-        """构建发送给模型的工具定义列表。
-
-        Args:
-            tool_registry (dict[str, LocalTool]): 当前轮次对模型可见的完整工具表。
-        Returns:
-            list[JSONDict]: OpenAI function-calling 兼容工具定义列表。
-        """
-        return [tool.to_openai_tool() for tool in tool_registry.values()]
 
     @staticmethod
     def _merge_tool_result_metadata(

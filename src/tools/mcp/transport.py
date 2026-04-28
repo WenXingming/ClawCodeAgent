@@ -15,7 +15,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-from .mcp_models import MCPServerProfile, MCPTransportError
+from .models import MCPServerProfile, MCPTransportError
 
 
 MCP_PROTOCOL_VERSION = '2025-11-25'  # str: 当前请求默认使用的 MCP 协议版本。
