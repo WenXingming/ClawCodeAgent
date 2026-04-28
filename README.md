@@ -82,8 +82,8 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent-resume <session_id> --no
 ```powershell
 # 进入任意命令后在提示符处输入 slash 命令
 C:/ProgramData/anaconda3/python.exe ./src/main.py agent
-agent> /help
-agent> /status
+agent> /
+agent> /st
 agent> /clear
 ```
 
@@ -95,6 +95,13 @@ agent> /clear
 - `/permissions`：查看当前工具权限开关。
 - `/tools`：列出当前注册的本地工具。
 - `/clear`：保留旧 session 文件，生成新的 cleared session 快照。
+
+交互体验说明：
+
+- 在支持交互式补全的终端中，输入 `/` 时会出现 slash 命令候选，可继续输入或直接补全。
+- 输入 `/` 会直接列出当前支持的本地 slash 命令。
+- 输入唯一前缀会自动解析到对应命令，例如 `/st` 会执行 `/status`。
+- slash 命令结果会以统一终端面板展示。
 
 这些命令只会写入 `slash_command` event，不会写入模型 transcript。
 

@@ -164,7 +164,7 @@ class ExitRenderer(TerminalRenderer):
         Returns:
             str: 已补齐宽度并按需着色后的单行正文文本。
         """
-        padded_text = text.ljust(content_width)
+        padded_text = self._pad_to_display_width(text, content_width)
         if use_ansi and text == self._title:
             return self._colorize_title(padded_text)
         return padded_text

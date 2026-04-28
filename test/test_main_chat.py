@@ -53,6 +53,18 @@ def _assert_exit_summary_rendered(
     testcase.assertNotIn('To resume this session:', output)
 
 
+def _assert_slash_panel_rendered(
+    testcase: unittest.TestCase,
+    output: str,
+    *,
+    title: str,
+    expected_body_line: str,
+) -> None:
+    testcase.assertIn(title, output)
+    testcase.assertIn(expected_body_line, output)
+    testcase.assertNotIn('==============', output)
+
+
 class _ChatFakeAgent:
     last_client = None
     last_runtime = None
@@ -289,6 +301,50 @@ class MainChatEntryTests(unittest.TestCase):
         _assert_banner_rendered(self, stdout.getvalue())
         _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='cleared-002', show_resume_hint=True)
         self.assertIn('Cleared session id: cleared-002', stdout.getvalue())
+
+    def test_agent_chat_renders_slash_status_as_panel(self) -> None:
+        _ChatFakeAgent.queue_results(
+            AgentRunResult(
+                final_output=(
+                    'Session Status\n'
+                    '==============\n'
+                    'Session id: chat-session-001\n'
+                    'Model: demo-model\n'
+                    f'Working directory: {Path.cwd()}\n'
+                    'Completed turns: 0\n'
+                    'Tool calls: 0'
+                ),
+                turns=0,
+                tool_calls=0,
+                transcript=(),
+                usage=TokenUsage(),
+                stop_reason='slash_command',
+                session_id='chat-session-001',
+                session_path=str((Path.cwd() / '.port_sessions' / 'agent' / 'chat-session-001.json').resolve()),
+                events=(
+                    {'type': 'slash_command', 'command': 'status', 'mode': 'read_only'},
+                ),
+            )
+        )
+
+        with (
+            patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
+            patch('main.LocalAgent', _ChatFakeAgent),
+            patch('builtins.input', side_effect=['/status', '/exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent-chat'])
+
+        self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
+        _assert_slash_panel_rendered(
+            self,
+            stdout.getvalue(),
+            title='Session Status',
+            expected_body_line='Working directory:',
+        )
+        _assert_exit_summary_rendered(self, stdout.getvalue(), session_id='chat-session-001', show_resume_hint=True)
 
     def test_agent_chat_prints_progress_events_by_default(self) -> None:
         _ChatFakeAgent.queue_results(

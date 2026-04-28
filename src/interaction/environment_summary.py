@@ -64,7 +64,7 @@ class EnvironmentLoadSummary:
         Returns:
             None: 该方法只原地修改片段列表。
         """
-        if count <= 0:
+        if count <= 0: # 只展示正向统计结果，0 或负数都不予展示
             return
         noun = singular if count == 1 else plural
         parts.append(f'{count} {noun}')

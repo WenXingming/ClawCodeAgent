@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from interaction.exit_render import ExitRenderer
+from interaction.quit_render import ExitRenderer
 from interaction.session_summary import SessionSummary
 
 

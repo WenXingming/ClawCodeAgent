@@ -6,7 +6,7 @@ from dataclasses import replace
 import unittest
 from pathlib import Path
 
-from interaction.slash_commands_interaction import (
+from interaction.slash_commands import (
     SlashCommandContext,
     SlashCommandDispatcher,
 )
@@ -63,12 +63,46 @@ class SlashCommandModuleTests(unittest.TestCase):
         self.assertEqual(parsed.command_name, 'tools')
         self.assertEqual(spec.names[0], 'tools')
 
+    def test_get_command_completions_returns_matching_names_and_aliases(self) -> None:
+        self.assertEqual(self.dispatcher.get_command_completions('st'), ('status',))
+        self.assertEqual(self.dispatcher.get_command_completions('q'), ('quit',))
+
     def test_dispatch_unknown_command_returns_local_error(self) -> None:
         result = self.dispatcher.dispatch_slash_command(self._make_context(), '/unknown')
         self.assertTrue(result.handled)
         self.assertFalse(result.continue_query)
         self.assertEqual(result.metadata.get('error'), 'unknown_command')
         self.assertIn('Unknown slash command', result.output)
+
+    def test_dispatch_unique_prefix_resolves_to_matching_command(self) -> None:
+        result = self.dispatcher.dispatch_slash_command(self._make_context(), '/st')
+
+        self.assertTrue(result.handled)
+        self.assertFalse(result.continue_query)
+        self.assertEqual(result.command_name, 'status')
+        self.assertEqual(result.metadata.get('match_mode'), 'prefix')
+        self.assertEqual(result.metadata.get('typed_name'), 'st')
+        self.assertEqual(result.metadata.get('matched_name'), 'status')
+        self.assertIn('Session id: session-001', result.output)
+
+    def test_dispatch_ambiguous_prefix_returns_candidates(self) -> None:
+        result = self.dispatcher.dispatch_slash_command(self._make_context(), '/c')
+
+        self.assertTrue(result.handled)
+        self.assertFalse(result.continue_query)
+        self.assertEqual(result.metadata.get('error'), 'ambiguous_command')
+        self.assertIn('/context - Show local context status.', result.output)
+        self.assertIn('/clear - Fork a new cleared session snapshot.', result.output)
+
+    def test_dispatch_bare_slash_lists_supported_commands(self) -> None:
+        result = self.dispatcher.dispatch_slash_command(self._make_context(), '/')
+
+        self.assertTrue(result.handled)
+        self.assertFalse(result.continue_query)
+        self.assertEqual(result.command_name, 'help')
+        self.assertEqual(result.metadata.get('match_mode'), 'list_all')
+        self.assertIn('/help - Show supported local slash commands.', result.output)
+        self.assertIn('Tip: input / to list commands', result.output)
 
     def test_dispatch_context_uses_current_session_only(self) -> None:
         result = self.dispatcher.dispatch_slash_command(self._make_context(), '/context')

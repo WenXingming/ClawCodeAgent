@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Mapping
+from dataclasses import dataclass, field, replace
+from typing import Callable, Literal, Mapping
 
 from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
@@ -74,6 +74,16 @@ class SlashCommandSpec:
     handler: SlashHandler  # SlashHandler: 真正执行业务逻辑的命令处理函数。
 
 
+@dataclass(frozen=True)
+class SlashCommandResolution:
+    """表示一次 slash 命令匹配的解析结果。"""
+
+    kind: Literal['exact', 'prefix', 'ambiguous', 'none', 'empty']
+    spec: SlashCommandSpec | None = None
+    matched_name: str = ''
+    candidates: tuple[str, ...] = ()
+
+
 class SlashCommandDispatcher:
     """本地 slash 命令的面向对象分发器。
 
@@ -124,11 +134,40 @@ class SlashCommandDispatcher:
                 prompt=input_text,
             )
 
-        spec = self.find_slash_command(parsed.command_name)
-        if spec is None:
+        resolution = self.resolve_slash_command(parsed.command_name)
+        if resolution.kind == 'empty':
+            return SlashCommandResult(
+                handled=True,
+                continue_query=False,
+                command_name='help',
+                output='\n'.join(self._build_help_lines()),
+                metadata={'match_mode': 'list_all'},
+            )
+
+        if resolution.kind == 'ambiguous':
+            return self._build_ambiguous_command_result(parsed.command_name, resolution.candidates)
+
+        if resolution.kind == 'none' or resolution.spec is None:
             return self._build_unknown_command_result(parsed.command_name)
 
-        return spec.handler(context, parsed)
+        effective_parsed = ParsedSlashCommand(
+            command_name=resolution.matched_name,
+            arguments=parsed.arguments,
+            raw_input=parsed.raw_input,
+        )
+        result = resolution.spec.handler(context, effective_parsed)
+        if resolution.kind != 'prefix':
+            return result
+
+        return replace(
+            result,
+            metadata={
+                **result.metadata,
+                'match_mode': 'prefix',
+                'typed_name': parsed.command_name,
+                'matched_name': resolution.matched_name,
+            },
+        )
 
     def parse_slash_command(self, input_text: str) -> ParsedSlashCommand | None:
         """从原始输入中提取 slash 命令。
@@ -158,6 +197,16 @@ class SlashCommandDispatcher:
         """
         return self._specs
 
+    def get_command_completions(self, prefix: str) -> tuple[str, ...]:
+        """返回给定前缀可匹配的全部命令名与别名。"""
+        normalized_prefix = prefix.strip().lower()
+        completions: list[str] = []
+        for spec in self._specs:
+            for name in spec.names:
+                if not normalized_prefix or name.startswith(normalized_prefix):
+                    completions.append(name)
+        return tuple(completions)
+
     def find_slash_command(self, command_name: str) -> SlashCommandSpec | None:
         """按名称查找 slash 命令规格。
 
@@ -167,6 +216,32 @@ class SlashCommandDispatcher:
             SlashCommandSpec | None: 找到时返回规格对象，否则返回 None。
         """
         return self._spec_index.get(command_name.strip().lower())
+
+    def resolve_slash_command(self, command_name: str) -> SlashCommandResolution:
+        """按精确名或唯一前缀解析 slash 命令。"""
+        normalized_name = command_name.strip().lower()
+        if not normalized_name:
+            return SlashCommandResolution(
+                kind='empty',
+                candidates=self.get_command_completions(''),
+            )
+
+        spec = self.find_slash_command(normalized_name)
+        if spec is not None:
+            return SlashCommandResolution(kind='exact', spec=spec, matched_name=normalized_name)
+
+        candidates = self.get_command_completions(normalized_name)
+        if not candidates:
+            return SlashCommandResolution(kind='none')
+        if len(candidates) == 1:
+            matched_name = candidates[0]
+            return SlashCommandResolution(
+                kind='prefix',
+                spec=self._spec_index[matched_name],
+                matched_name=matched_name,
+                candidates=candidates,
+            )
+        return SlashCommandResolution(kind='ambiguous', candidates=candidates)
 
     def _build_unknown_command_result(self, command_name: str) -> SlashCommandResult:
         """为未知 slash 命令构造统一错误结果。
@@ -183,9 +258,29 @@ class SlashCommandDispatcher:
             command_name=command_label,
             output=(
                 f'Unknown slash command: /{command_label}\n'
-                'Run /help to list supported local commands.'
+                'Type / to list supported local commands.'
             ),
             metadata={'error': 'unknown_command'},
+        )
+
+    def _build_ambiguous_command_result(
+        self,
+        command_name: str,
+        candidates: tuple[str, ...],
+    ) -> SlashCommandResult:
+        """为歧义前缀构造统一提示结果。"""
+        lines = [f'Ambiguous slash command: /{command_name}', 'Matches:']
+        lines.extend(self._build_candidate_lines(candidates))
+        lines.append('Type a longer prefix or input / to list all commands.')
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name=command_name,
+            output='\n'.join(lines),
+            metadata={
+                'error': 'ambiguous_command',
+                'candidates': list(candidates),
+            },
         )
 
     def _build_specs(self) -> tuple[SlashCommandSpec, ...]:
@@ -218,14 +313,11 @@ class SlashCommandDispatcher:
             SlashCommandResult: 包含帮助文本的本地处理结果。
         """
         del context, parsed
-        lines = ['Slash Commands', '==============', '']
-        for spec in self.get_slash_command_specs():
-            lines.append(f'/{spec.names[0]} - {spec.description}')
         return SlashCommandResult(
             handled=True,
             continue_query=False,
             command_name='help',
-            output='\n'.join(lines),
+            output='\n'.join(self._build_help_lines()),
         )
 
     def _handle_context(
@@ -461,3 +553,18 @@ class SlashCommandDispatcher:
                 index[name] = spec
         return index
 
+    def _build_help_lines(self) -> list[str]:
+        """构建 slash 命令总览文本。"""
+        lines = ['Slash Commands', '==============', '']
+        for spec in self.get_slash_command_specs():
+            lines.append(f'/{spec.names[0]} - {spec.description}')
+        lines.extend(['', 'Tip: input / to list commands, or use a unique prefix such as /st.'])
+        return lines
+
+    def _build_candidate_lines(self, candidates: tuple[str, ...]) -> list[str]:
+        """把候选命令名格式化为带描述的文本行。"""
+        lines: list[str] = []
+        for candidate in candidates:
+            spec = self._spec_index[candidate]
+            lines.append(f'/{candidate} - {spec.description}')
+        return lines

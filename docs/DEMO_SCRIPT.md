@@ -30,17 +30,18 @@ C:/ProgramData/anaconda3/python.exe ./src/main.py agent
 在提示符里依次输入：
 
 ```text
-/help
+/
 读取 README 并总结当前支持的主命令
-/status
-.exit
+/st
+/exit
 ```
 
 预期：
 
-1. `/help` 与 `/status` 不触发模型调用。
-2. 普通自然语言请求可返回总结。
-3. 退出时会打印 session_id 提示。
+1. `/` 与 `/st` 不触发模型调用。
+2. slash 结果以统一终端面板展示。
+3. 普通自然语言请求可返回总结。
+4. 退出时会打印 session_id 提示。
 
 ## 4. agent-chat / agent-resume 演示
 

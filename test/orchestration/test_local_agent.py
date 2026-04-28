@@ -189,6 +189,21 @@ class LocalAgentTests(unittest.TestCase):
         self.assertIn('Session id:', second.final_output)
         self.assertIn(first.session_id or '', second.final_output)
 
+    def test_run_status_prefix_slash_bypasses_model_and_resolves_to_status(self) -> None:
+        workspace = _make_test_dir()
+        fake_client = _FakeOpenAIClient([])
+        agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
+
+        result = agent.run('/st')
+        stored = self._load_session_snapshot(workspace, result.session_id or '')
+
+        self.assertEqual(len(fake_client.calls), 0)
+        self.assertEqual(result.stop_reason, 'slash_command')
+        self.assertEqual(result.turns, 0)
+        self.assertEqual(stored.messages, ())
+        self.assertIn('Session id:', result.final_output)
+        self.assertTrue(any(item.get('match_mode') == 'prefix' for item in result.events))
+
     def test_resume_clear_slash_forks_new_session(self) -> None:
         workspace = _make_test_dir()
         fake_client = _FakeOpenAIClient([

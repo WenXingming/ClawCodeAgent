@@ -18,9 +18,12 @@ from dataclasses import replace
 from pathlib import Path
 
 from interaction.environment_summary import EnvironmentLoadSummary
-from interaction.exit_render import ExitRenderer
+from interaction.quit_render import ExitRenderer
 from interaction.runtime_event_printer import RuntimeEventPrinter
 from interaction.session_summary import SessionInteractionTracker
+from interaction.slash_autocomplete import SlashAutocompleteEntry, SlashAutocompletePrompt
+from interaction.slash_commands import SlashCommandDispatcher
+from interaction.slash_render import SlashCommandRenderer
 from interaction.startup_render import StartupRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.model_pricing import ModelPricing
@@ -60,6 +63,7 @@ class CLI:
         session_store_cls: type[AgentSessionStore] = AgentSessionStore,
         startup_renderer: StartupRenderer | None = None,
         exit_renderer: ExitRenderer | None = None,
+        slash_renderer: SlashCommandRenderer | None = None,
         chat_exit_commands: frozenset[str] | None = None,
     ) -> None:
         """初始化 CLI 协调器，注入全部可替换的外部依赖。
@@ -75,6 +79,8 @@ class CLI:
                 为 None 时使用默认 StartupRenderer 实例。
             exit_renderer (ExitRenderer | None): 结束渲染器；
                 为 None 时使用默认 ExitRenderer 实例。
+            slash_renderer (SlashCommandRenderer | None): slash 命令结果渲染器；
+                为 None 时使用默认 SlashCommandRenderer 实例。
             chat_exit_commands (frozenset[str] | None): 交互循环的本地退出命令集合；
                 为 None 时使用默认的 {'/exit', '/quit'}。
         Returns:
@@ -94,6 +100,9 @@ class CLI:
 
         self._exit_renderer = exit_renderer or ExitRenderer()
         # ExitRenderer: 交互循环结束时输出总结提示框的渲染器实例。
+
+        self._slash_renderer = slash_renderer or SlashCommandRenderer()
+        # SlashCommandRenderer: 本地 slash 命令结果的统一面板渲染器。
 
         self._chat_exit_commands = chat_exit_commands or self._DEFAULT_CHAT_EXIT_COMMANDS
         # frozenset[str]: 交互式聊天循环的本地退出命令集合，如 '/exit'、'/quit'。
@@ -660,10 +669,11 @@ class CLI:
         self._startup_renderer.render(environment_summary=environment_summary)
         progress_printer = RuntimeEventPrinter() if show_progress else None
         self._configure_agent_progress(agent, progress_printer)
+        prompt_reader = self._build_slash_autocomplete_prompt(agent)
         interaction_tracker = SessionInteractionTracker.start(current_session_id)
         while True:
             try:
-                prompt = input('agent> ')
+                prompt = prompt_reader.read('agent> ')
             except EOFError:
                 self._flush_progress_printer(progress_printer)
                 return self._finalize_interactive_loop(interaction_tracker, leading_blank_line=True)
@@ -687,7 +697,7 @@ class CLI:
             )
             pending_session_snapshot = None
             self._flush_progress_printer(progress_printer)
-            self._render_chat_result(result, previous_session_id=current_session_id)
+            self._render_chat_result(result)
             current_session_id, current_session_directory = self._advance_chat_state(
                 result,
                 current_session_id=current_session_id,
@@ -831,6 +841,20 @@ class CLI:
             return agent.resume(prompt, effective_snapshot)
         return agent.run(prompt)
 
+    @staticmethod
+    def _build_slash_autocomplete_prompt(agent: LocalAgent) -> SlashAutocompletePrompt:
+        """根据 agent 的 slash 命令表构造自动补全输入读取器。"""
+        slash_dispatcher = getattr(agent, 'slash_dispatcher', None)
+        if slash_dispatcher is None:
+            slash_dispatcher = SlashCommandDispatcher()
+
+        slash_entries = tuple(
+            SlashAutocompleteEntry(name=name, description=spec.description)
+            for spec in slash_dispatcher.get_slash_command_specs()
+            for name in spec.names
+        )
+        return SlashAutocompletePrompt(entries=slash_entries)
+
     def _load_session_snapshot(
         self,
         session_id: str,
@@ -850,21 +874,72 @@ class CLI:
         session_store = self._session_store_cls(directory)
         return session_store.load(session_id)
 
-    def _render_chat_result(self, result: AgentRunResult, *, previous_session_id: str | None) -> None:
+    def _render_chat_result(self, result: AgentRunResult) -> None:
         """把单轮执行结果渲染到标准输出。
 
         Args:
             result (AgentRunResult): 当前轮的执行结果。
-            previous_session_id (str | None): 上一轮已知的会话 ID，用于判断是否需要打印新会话行。
         Returns:
             None: 该方法只负责输出，不返回值。
         """
-        if result.final_output:
+        slash_event = self._find_slash_event(result)
+        if result.final_output and (slash_event is not None or result.stop_reason == 'slash_command'):
+            self._render_slash_result(result, slash_event)
+        elif result.final_output:
             print(result.final_output)
         elif fallback_message := self._derive_empty_result_message(result):
             print(fallback_message)
-        # if result.session_id and result.session_id != previous_session_id:
-        #     print(f'[session] {result.session_id}')
+
+    def _render_slash_result(
+        self,
+        result: AgentRunResult,
+        slash_event: dict[str, object] | None,
+    ) -> None:
+        """把 slash 结果交给专用渲染器输出。"""
+        metadata = dict(slash_event or {})
+        metadata.pop('type', None)
+        command_name = self._extract_slash_command_name(slash_event, result.final_output)
+        self._slash_renderer.render(
+            command_name=command_name,
+            output=result.final_output,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _find_slash_event(result: AgentRunResult) -> dict[str, object] | None:
+        """从事件列表中找到最近的 slash_command 事件。"""
+        for event in reversed(result.events):
+            if event.get('type') != 'slash_command':
+                continue
+            return dict(event)
+        return None
+
+    @staticmethod
+    def _extract_slash_command_name(
+        slash_event: dict[str, object] | None,
+        final_output: str,
+    ) -> str:
+        """优先从事件载荷中提取命令名，必要时根据输出文本回退猜测。"""
+        if slash_event is not None:
+            command_value = slash_event.get('command')
+            if isinstance(command_value, str) and command_value.strip():
+                return command_value.strip().lower()
+
+        first_line = final_output.splitlines()[0].strip() if final_output.splitlines() else ''
+        first_line_map = {
+            'Slash Commands': 'help',
+            'Context Status': 'context',
+            'Session Status': 'status',
+            'Permissions': 'permissions',
+            'Registered Tools': 'tools',
+        }
+        if first_line in first_line_map:
+            return first_line_map[first_line]
+        if final_output.startswith('Cleared in-memory session context.'):
+            return 'clear'
+        if final_output.startswith('Exiting local session interaction.'):
+            return 'exit'
+        return ''
 
     @staticmethod
     def _derive_empty_result_message(result: AgentRunResult) -> str | None:

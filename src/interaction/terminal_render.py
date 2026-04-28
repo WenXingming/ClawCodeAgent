@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import sys
+import unicodedata
 from typing import TextIO
 
 
@@ -130,7 +131,7 @@ class TerminalRenderer:
             tuple[str, ...]: 已添加边框与内边距的完整文本行元组。
         """
         padded_lines = self._apply_vertical_padding(content_lines)
-        content_width = max((len(line) for line in padded_lines), default=0)
+        content_width = max((self._display_width(line) for line in padded_lines), default=0)
         inner_width = content_width + self._frame_horizontal_padding * 2
         rendered_lines = [self._frame_border_line(inner_width, top=True, use_ansi=use_ansi)]
         rendered_lines.extend(
@@ -202,7 +203,33 @@ class TerminalRenderer:
         Returns:
             str: 已补齐到目标宽度的单行正文文本。
         """
-        return text.ljust(content_width)
+        del use_ansi
+        return self._pad_to_display_width(text, content_width)
+
+    def _pad_to_display_width(self, text: str, target_width: int) -> str:
+        """按终端显示宽度补齐单行文本。"""
+        padding_width = max(target_width - self._display_width(text), 0)
+        return f'{text}{" " * padding_width}'
+
+    def _display_width(self, text: str) -> int:
+        """估算文本在终端中的显示宽度。"""
+        return sum(self._character_display_width(char) for char in text)
+
+    @staticmethod
+    def _character_display_width(char: str) -> int:
+        """估算单个字符在终端中的显示宽度。"""
+        if not char:
+            return 0
+        if char == '\t':
+            return 4
+        if unicodedata.combining(char):
+            return 0
+        category = unicodedata.category(char)
+        if category in {'Cc', 'Cf'}:
+            return 0
+        if unicodedata.east_asian_width(char) in {'F', 'W'}:
+            return 2
+        return 1
 
     def _interpolate_gradient(self, position: float) -> tuple[int, int, int]:
         """在当前类配置的渐变锚点之间执行插值。

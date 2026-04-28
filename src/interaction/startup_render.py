@@ -137,7 +137,7 @@ class StartupRenderer(TerminalRenderer):
         Returns:
             str: 已补齐宽度并按需着色后的单行正文文本。
         """
-        padded_text = text.ljust(content_width)
+        padded_text = self._pad_to_display_width(text, content_width)
         if not use_ansi:
             return padded_text
         return self._colorize_line(padded_text)
