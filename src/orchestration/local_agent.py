@@ -1,15 +1,6 @@
-"""LocalAgent 最小闭环实现。
+"""实现本地代理的 run/resume 主循环与工具编排。
 
-本模块实现最小 run 主循环：
-1) 调模型。
-2) 执行工具并回填。
-3) 达到停止条件后返回 AgentRunResult。
-
-ISSUE-008 扩展：
-4) resume(prompt, session_snapshot) 从持久化会话恢复并继续执行。
-    - 严格继承 session_snapshot 的 model/runtime 配置。
-   - usage/cost/turns/tool_calls 从历史基线累计。
-   - session_id 保持不变。
+本模块负责串起模型调用、工具执行、上下文治理、slash 控制面、插件与策略运行时，以及会话快照持久化，形成当前仓库中的本地代理主入口。`LocalAgent` 是 orchestration 层真正把各子模块拼装在一起的核心对象。
 """
 
 from __future__ import annotations
@@ -18,7 +9,7 @@ from typing import Any, Callable, Iterable
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from context.context_budget_evaluator import ContextBudgetEvaluator
+from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from interaction.slash_commands_interaction import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from context.context_compactor import ContextCompactor
@@ -44,7 +35,13 @@ from tools.mcp_tool_adapter import MCPToolAdapter
 
 @dataclass
 class LocalAgent:
-    """最小可用的本地编码代理。"""
+    """最小可用的本地编码代理。
+
+    典型工作流如下：
+    1. `run()` 为新会话建立初始状态并进入主循环。
+    2. `resume()` 从持久化会话恢复状态后继续执行。
+    3. `_execute_loop()` 在预算、上下文治理、模型调用和工具执行之间反复推进，直到命中停止条件。
+    """
 
     client: OpenAIClient  # 模型客户端。
     runtime_config: AgentRuntimeConfig  # 运行配置。
@@ -54,7 +51,7 @@ class LocalAgent:
     current_agent_id: str | None = None  # str | None: 当前 LocalAgent 对应的受管代理标识；根调用与 child 调用均会设置。
     progress_reporter: Callable[[JSONDict], None] | None = None  # Callable[[JSONDict], None] | None: 可选的实时进度上报回调。
     tool_registry: dict[str, LocalTool] = field(init=False)  # 可用工具集合。
-    budget_evaluator: ContextBudgetEvaluator = field(default_factory=ContextBudgetEvaluator)
+    budget_evaluator: ContextTokenBudgetEvaluator = field(default_factory=ContextTokenBudgetEvaluator)
     context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
     context_compactor: ContextCompactor = field(init=False)
     budget_context_orchestrator: BudgetContextOrchestrator = field(init=False)
@@ -202,13 +199,12 @@ class LocalAgent:
         return result
 
     def __post_init__(self) -> None:
-        """内部方法：执行 `__post_init__` 相关逻辑。
+        """初始化派生运行时对象与动态工具注册表。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            None: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            None: 该方法原地补全实例的运行时依赖。
         """
         self.tool_registry = self.tool_service.default_registry()
         self.search_runtime = SearchRuntime.from_workspace(self.runtime_config.cwd)
@@ -253,13 +249,12 @@ class LocalAgent:
         self,
         tool_registry: dict[str, LocalTool],
     ) -> dict[str, LocalTool]:
-        """内部方法：执行 `_register_workspace_runtime_tools` 相关逻辑。
+        """把工作区相关的动态工具注册到当前工具表中。
+
         Args:
-            tool_registry (dict[str, LocalTool]): 参数 `tool_registry`。
+            tool_registry (dict[str, LocalTool]): 当前已有的工具注册表。
         Returns:
-            dict[str, LocalTool]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            dict[str, LocalTool]: 追加 workspace_search、MCP 与 delegate_agent 等动态工具后的注册表副本。
         """
         merged_registry = dict(tool_registry)
 
@@ -350,14 +345,15 @@ class LocalAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
-        """内部方法：执行 `_run_workspace_search` 相关逻辑。
+        """执行 workspace_search 工具并渲染搜索结果。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (Any): 参数 `context`。
+            arguments (JSONDict): workspace_search 的工具调用参数。
+            context (Any): 当前工具执行上下文。
         Returns:
-            str | tuple[str, JSONDict]: 函数返回结果。
+            str | tuple[str, JSONDict]: 渲染后的搜索结果文本，以及附带统计信息的元数据。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当查询参数非法或底层搜索运行时调用失败时抛出。
         """
         query = self._require_tool_string(arguments, 'query')
         provider_id = self._optional_tool_string(arguments, 'provider_id')
@@ -410,14 +406,15 @@ class LocalAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
-        """内部方法：执行 `_run_mcp_list_resources` 相关逻辑。
+        """列出当前 MCP 运行时可见的资源索引。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (Any): 参数 `context`。
+            arguments (JSONDict): mcp_list_resources 的工具调用参数。
+            context (Any): 当前工具执行上下文。
         Returns:
-            str | tuple[str, JSONDict]: 函数返回结果。
+            str | tuple[str, JSONDict]: 渲染后的资源索引文本，以及附带统计信息的元数据。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当参数非法或 MCP 运行时调用失败时抛出。
         """
         query = self._optional_tool_string(arguments, 'query')
         server_name = self._optional_tool_string(arguments, 'server_name')
@@ -439,14 +436,15 @@ class LocalAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
-        """内部方法：执行 `_run_mcp_read_resource` 相关逻辑。
+        """读取单个 MCP 资源并返回渲染结果。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (Any): 参数 `context`。
+            arguments (JSONDict): mcp_read_resource 的工具调用参数。
+            context (Any): 当前工具执行上下文。
         Returns:
-            str | tuple[str, JSONDict]: 函数返回结果。
+            str | tuple[str, JSONDict]: 渲染后的资源内容，以及资源 URI 元数据。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当参数非法或 MCP 运行时调用失败时抛出。
         """
         uri = self._require_tool_string(arguments, 'uri')
         max_chars = self._resolve_tool_output_limit(arguments, context, key='max_chars')
@@ -462,14 +460,15 @@ class LocalAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
-        """内部方法：执行 `_run_mcp_list_tools` 相关逻辑。
+        """列出当前 MCP 运行时可见的远程工具索引。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (Any): 参数 `context`。
+            arguments (JSONDict): mcp_list_tools 的工具调用参数。
+            context (Any): 当前工具执行上下文。
         Returns:
-            str | tuple[str, JSONDict]: 函数返回结果。
+            str | tuple[str, JSONDict]: 渲染后的工具索引文本，以及附带统计信息的元数据。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当参数非法或 MCP 运行时调用失败时抛出。
         """
         query = self._optional_tool_string(arguments, 'query')
         server_name = self._optional_tool_string(arguments, 'server_name')
@@ -491,14 +490,15 @@ class LocalAgent:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
-        """内部方法：执行 `_run_mcp_call_tool` 相关逻辑。
+        """调用单个 MCP 远程工具并返回渲染结果。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (Any): 参数 `context`。
+            arguments (JSONDict): mcp_call_tool 的工具调用参数。
+            context (Any): 当前工具执行上下文。
         Returns:
-            str | tuple[str, JSONDict]: 函数返回结果。
+            str | tuple[str, JSONDict]: 渲染后的工具结果文本，以及 server/tool 维度的元数据。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当参数非法或 MCP 运行时调用失败时抛出。
         """
         tool_name = self._require_tool_string(arguments, 'tool_name')
         server_name = self._optional_tool_string(arguments, 'server_name')
@@ -904,14 +904,13 @@ class LocalAgent:
 
     @staticmethod
     def _truncate_tool_output(content: str, max_chars: int) -> str:
-        """内部方法：执行 `_truncate_tool_output` 相关逻辑。
+        """按给定上限截断工具输出文本。
+
         Args:
-            content (str): 参数 `content`。
-            max_chars (int): 参数 `max_chars`。
+            content (str): 原始工具输出文本。
+            max_chars (int): 允许保留的最大字符数。
         Returns:
-            str: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            str: 超长时带有截断提示的输出文本；否则返回原文。
         """
         if len(content) <= max_chars:
             return content
@@ -922,14 +921,15 @@ class LocalAgent:
 
     @staticmethod
     def _require_tool_string(arguments: JSONDict, key: str) -> str:
-        """内部方法：执行 `_require_tool_string` 相关逻辑。
+        """读取必填字符串型工具参数。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            key (str): 参数 `key`。
+            arguments (JSONDict): 工具参数字典。
+            key (str): 目标字段名。
         Returns:
-            str: 函数返回结果。
+            str: 去除首尾空白后的参数值。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当字段缺失、为空或不是字符串时抛出。
         """
         value = arguments.get(key)
         if not isinstance(value, str) or not value.strip():
@@ -938,14 +938,15 @@ class LocalAgent:
 
     @staticmethod
     def _optional_tool_string(arguments: JSONDict, key: str) -> str | None:
-        """内部方法：执行 `_optional_tool_string` 相关逻辑。
+        """读取可选字符串型工具参数。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            key (str): 参数 `key`。
+            arguments (JSONDict): 工具参数字典。
+            key (str): 目标字段名。
         Returns:
-            str | None: 函数返回结果。
+            str | None: 去除首尾空白后的参数值；未提供或为空时返回 None。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当字段存在但不是字符串时抛出。
         """
         value = arguments.get(key)
         if value is None:
@@ -963,16 +964,17 @@ class LocalAgent:
         min_value: int,
         max_value: int,
     ) -> int | None:
-        """内部方法：执行 `_optional_tool_int` 相关逻辑。
+        """读取可选整型工具参数，并校验范围。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            key (str): 参数 `key`。
-            min_value (int): 参数 `min_value`。
-            max_value (int): 参数 `max_value`。
+            arguments (JSONDict): 工具参数字典。
+            key (str): 目标字段名。
+            min_value (int): 允许的最小值。
+            max_value (int): 允许的最大值。
         Returns:
-            int | None: 函数返回结果。
+            int | None: 参数存在时返回整数值；未提供时返回 None。
         Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionError: 当字段存在但不是整数或超出范围时抛出。
         """
         value = arguments.get(key)
         if value is None:
@@ -990,15 +992,14 @@ class LocalAgent:
         *,
         key: str,
     ) -> int:
-        """内部方法：执行 `_resolve_tool_output_limit` 相关逻辑。
+        """解析单次工具调用允许使用的输出上限。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (Any): 参数 `context`。
-            key (str): 参数 `key`。
+            arguments (JSONDict): 工具参数字典。
+            context (Any): 当前工具执行上下文。
+            key (str): 表示输出上限字段名的参数键。
         Returns:
-            int: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            int: 工具请求值与上下文上限中的较小值。
         """
         requested = self._optional_tool_int(arguments, key, min_value=1, max_value=20000)
         if requested is None:
@@ -1115,15 +1116,14 @@ class LocalAgent:
         session_id_before: str,
         session_id_after: str,
     ) -> JSONDict:
-        """内部方法：执行 `_make_slash_event` 相关逻辑。
+        """为本地 slash 命令构造统一事件载荷。
+
         Args:
-            slash_result (SlashCommandResult): 参数 `slash_result`。
-            session_id_before (str): 参数 `session_id_before`。
-            session_id_after (str): 参数 `session_id_after`。
+            slash_result (SlashCommandResult): 已完成分流的 slash 处理结果。
+            session_id_before (str): 执行 slash 之前的会话 ID。
+            session_id_after (str): 执行 slash 之后的会话 ID。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 可写入事件日志的结构化 slash_command 事件。
         """
         event: JSONDict = {
             'type': 'slash_command',
@@ -1144,15 +1144,14 @@ class LocalAgent:
         session_id_before: str,
         session_id_after: str,
     ) -> str:
-        """内部方法：执行 `_format_slash_output` 相关逻辑。
+        """把 slash 处理结果格式化为最终输出文本。
+
         Args:
-            slash_result (SlashCommandResult): 参数 `slash_result`。
-            session_id_before (str): 参数 `session_id_before`。
-            session_id_after (str): 参数 `session_id_after`。
+            slash_result (SlashCommandResult): 已完成分流的 slash 处理结果。
+            session_id_before (str): 执行 slash 之前的会话 ID。
+            session_id_after (str): 执行 slash 之后的会话 ID。
         Returns:
-            str: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            str: 面向用户展示的 slash 结果文本。
         """
         if slash_result.command_name != 'clear':
             return slash_result.output
@@ -1538,14 +1537,13 @@ class LocalAgent:
         result: ToolExecutionResult,
         metadata_updates: JSONDict,
     ) -> ToolExecutionResult:
-        """内部方法：执行 `_merge_tool_result_metadata` 相关逻辑。
+        """把附加元数据合并到工具结果中。
+
         Args:
-            result (ToolExecutionResult): 参数 `result`。
-            metadata_updates (JSONDict): 参数 `metadata_updates`。
+            result (ToolExecutionResult): 原始工具执行结果。
+            metadata_updates (JSONDict): 需要叠加到结果中的附加元数据。
         Returns:
-            ToolExecutionResult: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionResult: 合并元数据后的新工具结果对象。
         """
         merged_metadata = dict(result.metadata)
         for key, value in metadata_updates.items():
@@ -1564,15 +1562,14 @@ class LocalAgent:
         block_decision: JSONDict,
         metadata_updates: JSONDict,
     ) -> ToolExecutionResult:
-        """内部方法：执行 `_make_blocked_tool_result` 相关逻辑。
+        """根据阻断决策构造统一的工具阻断结果。
+
         Args:
-            tool_call (ToolCall): 参数 `tool_call`。
-            block_decision (JSONDict): 参数 `block_decision`。
-            metadata_updates (JSONDict): 参数 `metadata_updates`。
+            tool_call (ToolCall): 当前被阻断的工具调用对象。
+            block_decision (JSONDict): 来自插件或策略运行时的阻断决策。
+            metadata_updates (JSONDict): 需要叠加到结果中的附加元数据。
         Returns:
-            ToolExecutionResult: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            ToolExecutionResult: 统一结构化后的阻断工具结果。
         """
         merged_metadata = dict(metadata_updates)
         merged_metadata.update(
@@ -1599,17 +1596,16 @@ class LocalAgent:
         turn_index: int,
         events: list[JSONDict],
     ) -> None:
-        """内部方法：执行 `_append_tool_hook_message` 相关逻辑。
+        """把工具 hook 消息写入会话并同步记录对应事件。
+
         Args:
-            session_state (AgentSessionState): 参数 `session_state`。
-            hook (JSONDict): 参数 `hook`。
-            tool_call (ToolCall): 参数 `tool_call`。
-            turn_index (int): 参数 `turn_index`。
-            events (list[JSONDict]): 参数 `events`。
+            session_state (AgentSessionState): 当前会话状态对象。
+            hook (JSONDict): 当前要写入的 hook 定义。
+            tool_call (ToolCall): 触发当前 hook 的工具调用对象。
+            turn_index (int): 当前 turn 序号。
+            events (list[JSONDict]): 当前运行事件列表。
         Returns:
-            None: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            None: 该方法原地更新会话状态并追加事件。
         """
         phase = str(hook.get('phase', 'before'))
         event_type = 'tool_preflight' if phase == 'before' else 'tool_after_hook'

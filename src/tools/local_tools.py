@@ -77,7 +77,7 @@ class LocalTool:
         """把工具定义转换为 OpenAI 兼容的函数 schema。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: OpenAI tools 兼容的函数定义对象。
         """
@@ -147,9 +147,15 @@ class _TextSlice:
 
 @dataclass(frozen=True)
 class LocalToolService:
-    """封装本地工具注册、上下文构造与执行流程。"""
+    """封装本地工具注册、上下文构造与执行流程。
 
-    shell_security_policy: ShellSecurityPolicy = field(default_factory=ShellSecurityPolicy)
+    典型工作流如下：
+    1. 通过 `default_registry()` 构造基础工具注册表。
+    2. 通过 `build_context()` 把运行时配置转换成工具执行上下文。
+    3. 通过 `execute()` 或 `execute_streaming()` 驱动具体工具调用。
+    """
+
+    shell_security_policy: ShellSecurityPolicy = field(default_factory=ShellSecurityPolicy)  # ShellSecurityPolicy：shell 工具执行前使用的安全策略对象。
 
     def build_context(
         self,
@@ -158,7 +164,15 @@ class LocalToolService:
         tool_registry: dict[str, LocalTool] | None = None,
         safe_env: dict[str, str] | None = None,
     ) -> ToolExecutionContext:
-        """根据运行时配置构造工具执行上下文。"""
+        """根据运行时配置构造工具执行上下文。
+
+        Args:
+            config (AgentRuntimeConfig): 当前运行时配置对象。
+            tool_registry (dict[str, LocalTool] | None): 当前可见工具注册表。
+            safe_env (dict[str, str] | None): 允许注入 shell 的额外安全环境变量映射。
+        Returns:
+            ToolExecutionContext: 归一化后的工具执行上下文对象。
+        """
         return ToolExecutionContext(
             root=config.cwd.resolve(),
             command_timeout_seconds=config.command_timeout_seconds,
@@ -175,7 +189,16 @@ class LocalToolService:
         arguments: JSONDict,
         context: ToolExecutionContext,
     ) -> ToolExecutionResult:
-        """按工具名执行一次普通工具调用。"""
+        """按工具名执行一次普通工具调用。
+
+        Args:
+            tool_registry (dict[str, LocalTool]): 当前可见工具注册表。
+            name (str): 需要执行的工具名称。
+            arguments (JSONDict): 工具调用参数。
+            context (ToolExecutionContext): 当前工具执行上下文。
+        Returns:
+            ToolExecutionResult: 统一结构化后的工具执行结果。
+        """
         tool = tool_registry.get(name)
         if tool is None:
             return _unknown_tool_result(name)
@@ -188,7 +211,16 @@ class LocalToolService:
         arguments: JSONDict,
         context: ToolExecutionContext,
     ) -> Iterator[ToolStreamUpdate]:
-        """按工具名执行一次流式工具调用。"""
+        """按工具名执行一次流式工具调用。
+
+        Args:
+            tool_registry (dict[str, LocalTool]): 当前可见工具注册表。
+            name (str): 需要执行的工具名称。
+            arguments (JSONDict): 工具调用参数。
+            context (ToolExecutionContext): 当前工具执行上下文。
+        Returns:
+            Iterator[ToolStreamUpdate]: 顺序产出的流式工具更新事件。
+        """
         tool = tool_registry.get(name)
         if tool is None:
             yield ToolStreamUpdate(kind='result', result=_unknown_tool_result(name))
@@ -222,7 +254,13 @@ class LocalToolService:
             )
 
     def default_registry(self) -> dict[str, LocalTool]:
-        """返回内置基础工具注册表。"""
+        """返回内置基础工具注册表。
+
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            dict[str, LocalTool]: 包含基础文件工具与 shell 工具的注册表。
+        """
         tools = [
             LocalTool(
                 name='list_dir',

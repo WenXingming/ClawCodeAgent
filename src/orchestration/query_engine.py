@@ -1,9 +1,8 @@
-"""ISSUE-025 QueryEngine：面向上层交互的 runtime facade 与统计汇总。
+"""提供面向上层交互的 runtime facade 与累计统计汇总。
 
-本模块把 `LocalAgent` 的 run/resume 能力封装为统一的 submit / stream_submit /
-persist 门面，并在每次调用后累计运行事件、mutation、orchestration 与 lineage 统计。
+本模块把 `LocalAgent` 的 run/resume 能力封装为统一的 submit、stream_submit 和 persist 门面，并在每次调用后累计运行事件、mutation、orchestration 与 lineage 统计，供控制面或外层集成直接消费。
 
-当前版本只实现 runtime agent 模式，不引入旧兼容端口或额外控制面抽象。
+当前实现只支持 runtime agent 模式，不引入旧兼容端口或额外控制面抽象。
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ class TurnResult:
         """把单轮结果转换为字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 适合序列化或日志记录的字典对象。
         """
@@ -169,7 +168,7 @@ class QueryEngine:
         """返回最近一次提交已落盘的 session 文件路径。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             str: 最近一次提交的 session_path。
         Raises:
@@ -183,7 +182,7 @@ class QueryEngine:
         """渲染当前 QueryEngine 的累计运行摘要。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             str: 可读的多行摘要文本。
         """
@@ -333,7 +332,7 @@ class QueryEngine:
         """构造当前累计统计的 summary 事件。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 适合 stream_submit 尾部输出的 runtime summary 事件。
         """

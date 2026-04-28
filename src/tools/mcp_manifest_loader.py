@@ -1,7 +1,6 @@
-"""MCP manifest 发现与归一化加载器。
+"""负责 MCP manifest 的发现、解析与归一化加载。
 
-该模块负责在工作区内查找 .claw 下的 MCP 配置文件，把原始 JSON 解析成
-资源定义、server 配置和加载错误三类结构化对象，供运行时直接消费。
+本模块在工作区内查找 .claw 下的 MCP 配置文件，把原始 JSON 解析成资源定义、server 配置和加载错误三类结构化对象，供运行时直接消费，同时尽量把路径解析、字段规范化和去重逻辑局部收束在 loader 邻域。
 """
 
 from __future__ import annotations
@@ -13,16 +12,17 @@ from typing import Any
 from .mcp_models import MCPLoadError, MCPResource, MCPServerProfile
 
 
-MCP_SCHEMA_VERSION = 1
-_MCP_MANIFEST_FILE = Path('.claw') / 'mcp.json'
-_MCP_MANIFEST_DIR = Path('.claw') / 'mcp'
+MCP_SCHEMA_VERSION = 1  # int: 当前支持的 MCP manifest schema 版本。
+_MCP_MANIFEST_FILE = Path('.claw') / 'mcp.json'  # Path: 工作区级单文件 MCP manifest 位置。
+_MCP_MANIFEST_DIR = Path('.claw') / 'mcp'  # Path: 多文件 MCP manifest 目录位置。
 
 
 class MCPManifestLoader:
     """负责从工作区发现并加载 MCP manifest。
 
     外部通常只需要传入工作区根目录，然后调用 load 获取资源、server 与
-    错误列表。具体的 manifest 查找和字段归一化都在该类及其邻近私有函数中完成。
+    错误列表。具体的 manifest 查找、字段归一化、路径解析和 server 去重，
+    都在该类及其邻近辅助函数中完成。
     """
 
     def __init__(self, workspace: Path) -> None:
@@ -31,7 +31,7 @@ class MCPManifestLoader:
         Args:
             workspace (Path): 工作区根目录。
         Returns:
-            None: 无返回值。
+            None: 该方法初始化规范化后的工作区根路径。
         """
         self.workspace = workspace.resolve()  # Path: 规范化后的工作区根目录。
 
@@ -39,10 +39,10 @@ class MCPManifestLoader:
         """加载当前工作区下全部 MCP manifest。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             tuple[tuple[MCPResource, ...], tuple[MCPServerProfile, ...], tuple[MCPLoadError, ...]]:
-                依次返回资源、去重后的 server 配置以及加载错误列表。
+                依次返回资源、按连接维度去重后的 server 配置以及加载错误列表。
         """
         resources: list[MCPResource] = []
         servers: list[MCPServerProfile] = []
@@ -60,9 +60,9 @@ class MCPManifestLoader:
         """发现工作区内所有 MCP manifest 文件。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            tuple[Path, ...]: 已解析为绝对路径的 manifest 文件元组。
+            tuple[Path, ...]: 按稳定顺序排列、且已解析为绝对路径的 manifest 文件元组。
         """
         discovered: list[Path] = []
         single_manifest = self.workspace / _MCP_MANIFEST_FILE
@@ -187,6 +187,8 @@ def _extract_resources(server_name: str, raw_resources: list[Any], *, manifest_p
         )
 
     return tuple(resources)
+
+
 def normalize_name(value: object, *, label: str) -> str:
     """把名称字段校验并归一化为非空标识符。
 
@@ -229,7 +231,7 @@ def resolve_manifest_path(manifest_path: Path, raw_path: str) -> Path:
         manifest_path (Path): 当前 manifest 文件路径。
         raw_path (str): manifest 中声明的原始路径。
     Returns:
-        Path: 解析后的绝对路径。
+        Path: 优先基于工作区根目录、其次基于 manifest 所在目录解析出的绝对路径。
     """
     candidate = Path(raw_path).expanduser()
     if candidate.is_absolute():
@@ -247,7 +249,7 @@ def _infer_workspace_root(manifest_path: Path) -> Path | None:
     Args:
         manifest_path (Path): 当前 manifest 文件路径。
     Returns:
-        Path | None: 推断出的工作区根目录；无法推断时返回 None。
+        Path | None: 推断出的工作区根目录；当 manifest 不在约定层级时返回 None。
     """
     parent = manifest_path.parent.resolve()
     if parent.name == '.claw':
@@ -270,7 +272,7 @@ def _extract_server_profile(
         payload (dict[str, Any]): 原始 server 配置字典。
         manifest_path (Path): 当前 manifest 文件路径。
     Returns:
-        MCPServerProfile | None: 归一化后的 server 配置；不支持时返回 None。
+        MCPServerProfile | None: 归一化后的 server 配置；transport 不支持或关键信息缺失时返回 None。
     Raises:
         ValueError: 当名称字段不合法时抛出。
     """
@@ -330,7 +332,7 @@ def dedupe_servers(servers: list[MCPServerProfile] | tuple[MCPServerProfile, ...
     Args:
         servers (list[MCPServerProfile] | tuple[MCPServerProfile, ...]): 原始 server 配置序列。
     Returns:
-        tuple[MCPServerProfile, ...]: 去重后的 server 配置元组。
+        tuple[MCPServerProfile, ...]: 以名称、transport、命令和参数为键去重后的 server 配置元组。
     """
     deduped: list[MCPServerProfile] = []
     seen: set[tuple[str, str, str, tuple[str, ...]]] = set()

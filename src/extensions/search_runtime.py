@@ -1,4 +1,7 @@
-"""ISSUE-020 Search Runtime：provider 发现、激活与检索。"""
+"""管理搜索 provider 的发现、激活、状态持久化与检索。
+
+本模块负责从工作区和环境变量发现搜索 provider，维护当前激活的 provider 状态，并把不同后端的搜索调用统一封装为结构化 `SearchResponse`。
+"""
 
 from __future__ import annotations
 
@@ -24,25 +27,24 @@ _DEFAULT_WTTR_BASE_URL = 'https://wttr.in'
 
 @dataclass(frozen=True)
 class SearchProviderProfile:
-    """单个搜索 provider profile。"""
+    """表示单个搜索 provider 配置。"""
 
-    provider_id: str
-    provider: str
-    title: str
-    base_url: str
-    description: str = ''
-    api_key_env: str | None = None
-    default_max_results: int = 5
-    source_path: Path | None = None
+    provider_id: str  # str：搜索 provider 的稳定唯一标识。
+    provider: str  # str：后端类型，如 searxng 或 duckduckgo。
+    title: str  # str：面向用户展示的 provider 名称。
+    base_url: str  # str：当前 provider 的基础请求地址。
+    description: str = ''  # str：provider 的补充说明。
+    api_key_env: str | None = None  # str | None：保存 API Key 的环境变量名。
+    default_max_results: int = 5  # int：未显式传参时的默认返回条数。
+    source_path: Path | None = None  # Path | None：provider 定义来源文件路径。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把 provider 配置转换成 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前 provider 配置的可序列化字典表示。
         """
         payload: JSONDict = {
             'provider_id': self.provider_id,
@@ -60,14 +62,15 @@ class SearchProviderProfile:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None, *, source_path: Path | None = None) -> 'SearchProviderProfile':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复 provider 配置对象。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
-            source_path (Path | None): 参数 `source_path`。
+            payload (JSONDict | None): 待反序列化的原始字典。
+            source_path (Path | None): 当前 provider 配置来源文件路径。
         Returns:
-            'SearchProviderProfile': 函数返回结果。
+            SearchProviderProfile: 恢复后的 provider 配置对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当 provider_id、provider、title 或 base_url 非法时抛出。
         """
         data = dict(payload or {})
         provider_id = _normalize_provider_id(data.get('provider_id', data.get('providerId', '')))
@@ -101,29 +104,28 @@ class SearchProviderProfile:
 class SearchLoadError:
     """provider manifest 加载错误。"""
 
-    provider_id: str
-    error: str
-    source_path: Path | None = None
+    provider_id: str  # str：加载失败的 provider ID 或文件 stem。
+    error: str  # str：对应的错误说明文本。
+    source_path: Path | None = None  # Path | None：出错的来源文件路径。
 
 
 @dataclass(frozen=True)
 class SearchResult:
     """单条结构化搜索结果。"""
 
-    title: str
-    url: str
-    snippet: str
-    provider_id: str
-    rank: int
+    title: str  # str：搜索结果标题。
+    url: str  # str：搜索结果链接。
+    snippet: str  # str：搜索结果摘要文本。
+    provider_id: str  # str：产生该结果的 provider 标识。
+    rank: int  # int：该结果在本次返回中的排序序号。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把单条搜索结果转换成 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前搜索结果的可序列化字典表示。
         """
         return {
             'title': self.title,
@@ -138,19 +140,18 @@ class SearchResult:
 class SearchResponse:
     """一次搜索调用的结构化返回。"""
 
-    provider: SearchProviderProfile
-    query: str
-    results: tuple[SearchResult, ...]
-    attempts: int
+    provider: SearchProviderProfile  # SearchProviderProfile：本次搜索实际使用的 provider。
+    query: str  # str：本次搜索的规范化查询文本。
+    results: tuple[SearchResult, ...]  # tuple[SearchResult, ...]：本次搜索返回的结果集合。
+    attempts: int  # int：本次搜索实际尝试的请求次数。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把搜索响应转换成 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前搜索响应的可序列化字典表示。
         """
         return {
             'provider': self.provider.to_dict(),
@@ -164,16 +165,15 @@ class SearchQueryError(RuntimeError):
     """搜索请求在重试后仍失败。"""
 
     def __init__(self, *, provider_id: str, query: str, attempts: int, last_error: str) -> None:
-        """初始化对象状态。
+        """初始化搜索请求异常对象。
+
         Args:
-            provider_id (str): 参数 `provider_id`。
-            query (str): 参数 `query`。
-            attempts (int): 参数 `attempts`。
-            last_error (str): 参数 `last_error`。
+            provider_id (str): 出错的 provider 标识。
+            query (str): 本次搜索查询文本。
+            attempts (int): 已尝试的请求次数。
+            last_error (str): 最后一次失败的错误说明。
         Returns:
-            None: 无返回值。
-        Raises:
-            Exception: 按调用链透传的异常。
+            None: 该方法初始化异常对象状态。
         """
         self.provider_id = provider_id
         self.query = query
@@ -186,13 +186,19 @@ class SearchQueryError(RuntimeError):
 
 @dataclass
 class SearchRuntime:
-    """工作区本地 Search Runtime。"""
+    """表示工作区本地搜索 provider 运行时。
 
-    workspace: Path
-    providers: tuple[SearchProviderProfile, ...] = ()
-    active_provider_id: str | None = None
-    load_errors: tuple[SearchLoadError, ...] = ()
-    schema_version: int = _SCHEMA_VERSION
+    典型工作流如下：
+    1. 调用 `from_workspace()` 发现并加载全部 provider 配置。
+    2. 通过 `list_providers()`、`get_provider()` 和 `current_provider()` 读取当前 provider 状态。
+    3. 调用 `activate_provider()` 更新当前激活 provider，并由 `search()` 执行统一的搜索入口。
+    """
+
+    workspace: Path  # Path：当前搜索运行时所属的工作区根目录。
+    providers: tuple[SearchProviderProfile, ...] = ()  # tuple[SearchProviderProfile, ...]：已发现并加载成功的 provider 集合。
+    active_provider_id: str | None = None  # str | None：当前工作区保存的激活 provider 标识。
+    load_errors: tuple[SearchLoadError, ...] = ()  # tuple[SearchLoadError, ...]：加载 provider 过程中收集到的错误信息。
+    schema_version: int = _SCHEMA_VERSION  # int：当前搜索状态文件使用的 schema 版本。
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'SearchRuntime':
@@ -241,24 +247,24 @@ class SearchRuntime:
         )
 
     def list_providers(self) -> tuple[SearchProviderProfile, ...]:
-        """执行 `list_providers` 逻辑。
+        """返回当前已加载的全部搜索 provider。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            tuple[SearchProviderProfile, ...]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            tuple[SearchProviderProfile, ...]: 当前 provider 集合的只读视图。
         """
         return self.providers
 
     def get_provider(self, provider_id: str) -> SearchProviderProfile:
-        """执行 `get_provider` 逻辑。
+        """按 provider_id 获取单个搜索 provider。
+
         Args:
-            provider_id (str): 参数 `provider_id`。
+            provider_id (str): 需要查找的 provider 标识。
         Returns:
-            SearchProviderProfile: 函数返回结果。
+            SearchProviderProfile: 找到的 provider 配置对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当 provider 不存在或 provider_id 非法时抛出。
         """
         normalized_provider_id = _normalize_provider_id(provider_id)
         for provider in self.providers:
@@ -267,13 +273,14 @@ class SearchRuntime:
         raise ValueError(f'Unknown search provider: {normalized_provider_id!r}')
 
     def current_provider(self) -> SearchProviderProfile:
-        """执行 `current_provider` 逻辑。
+        """返回当前生效的搜索 provider。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            SearchProviderProfile: 函数返回结果。
+            SearchProviderProfile: 当前激活或默认回退后的 provider 配置对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当没有任何可用 provider 时抛出。
         """
         if self.active_provider_id is not None:
             try:
@@ -293,13 +300,14 @@ class SearchRuntime:
         return self.providers[0]
 
     def activate_provider(self, provider_id: str) -> SearchProviderProfile:
-        """执行 `activate_provider` 逻辑。
+        """激活指定 provider 并写回状态文件。
+
         Args:
-            provider_id (str): 参数 `provider_id`。
+            provider_id (str): 需要激活的 provider 标识。
         Returns:
-            SearchProviderProfile: 函数返回结果。
+            SearchProviderProfile: 被成功激活的 provider 配置对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当 provider 不存在或 provider_id 非法时抛出。
         """
         provider = self.get_provider(provider_id)
         self.active_provider_id = provider.provider_id
@@ -315,17 +323,19 @@ class SearchRuntime:
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = 0,
     ) -> SearchResponse:
-        """执行 `search` 逻辑。
+        """执行一次统一的搜索请求。
+
         Args:
-            query (str): 参数 `query`。
-            provider_id (str | None): 参数 `provider_id`。
-            max_results (int | None): 参数 `max_results`。
-            timeout_seconds (float): 参数 `timeout_seconds`。
-            max_retries (int): 参数 `max_retries`。
+            query (str): 本次搜索的原始查询文本。
+            provider_id (str | None): 可选的 provider 标识；不传时使用当前激活 provider。
+            max_results (int | None): 可选的最大返回结果数；不传时使用 provider 默认值。
+            timeout_seconds (float): 单次请求超时时间，单位为秒。
+            max_retries (int): 请求失败后的最大重试次数。
         Returns:
-            SearchResponse: 函数返回结果。
+            SearchResponse: 本次搜索的结构化返回结果。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当查询文本为空或 provider 非法时抛出。
+            SearchQueryError: 当所有重试都失败后抛出。
         """
         normalized_query = str(query).strip()
         if not normalized_query:
@@ -364,13 +374,12 @@ class SearchRuntime:
         )
 
     def _save_state(self) -> Path:
-        """内部方法：执行 `_save_state` 相关逻辑。
+        """把当前激活 provider 状态写回工作区文件。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            Path: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            Path: 实际写入的搜索状态文件路径。
         """
         path = self.workspace / _SEARCH_STATE_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -389,13 +398,12 @@ class SearchRuntime:
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
-    """内部方法：执行 `_discover_manifest_paths` 相关逻辑。
+    """发现工作区中所有候选搜索 provider 清单文件路径。
+
     Args:
-        workspace (Path): 参数 `workspace`。
+        workspace (Path): 工作区根目录。
     Returns:
-        tuple[Path, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[Path, ...]: 按稳定顺序返回的 provider 清单文件路径元组。
     """
     discovered: list[Path] = []
     single_manifest = workspace / _SEARCH_MANIFEST_FILE
@@ -413,13 +421,12 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
 
 
 def _load_manifest_providers(path: Path) -> tuple[tuple[SearchProviderProfile, ...], tuple[SearchLoadError, ...]]:
-    """内部方法：执行 `_load_manifest_providers` 相关逻辑。
+    """从单个清单文件中加载一个或多个 provider 配置。
+
     Args:
-        path (Path): 参数 `path`。
+        path (Path): 待读取的 provider 清单文件路径。
     Returns:
-        tuple[tuple[SearchProviderProfile, ...], tuple[SearchLoadError, ...]]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[tuple[SearchProviderProfile, ...], tuple[SearchLoadError, ...]]: 成功加载的 provider 集合与对应的加载错误集合。
     """
     try:
         payload = json.loads(path.read_text(encoding='utf-8'))
@@ -448,13 +455,12 @@ def _load_manifest_providers(path: Path) -> tuple[tuple[SearchProviderProfile, .
 
 
 def _load_env_providers() -> tuple[SearchProviderProfile, ...]:
-    """内部方法：执行 `_load_env_providers` 相关逻辑。
+    """从环境变量发现额外的搜索 provider。
+
     Args:
-        None: 无参数。
+        None: 该函数不接收额外参数。
     Returns:
-        tuple[SearchProviderProfile, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[SearchProviderProfile, ...]: 从环境变量派生出的 provider 集合。
     """
     providers: list[SearchProviderProfile] = []
     searxng_base_url = _normalize_optional_text(os.environ.get('SEARXNG_BASE_URL'))
@@ -472,13 +478,14 @@ def _load_env_providers() -> tuple[SearchProviderProfile, ...]:
 
 
 def _load_active_provider_id(workspace: Path) -> str | None:
-    """内部方法：执行 `_load_active_provider_id` 相关逻辑。
+    """从工作区状态文件中读取当前激活的 provider_id。
+
     Args:
-        workspace (Path): 参数 `workspace`。
+        workspace (Path): 工作区根目录。
     Returns:
-        str | None: 函数返回结果。
+        str | None: 当前已保存的激活 provider 标识；未保存时返回 None。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当状态文件结构非法时抛出。
     """
     state_path = workspace / _SEARCH_STATE_FILE
     if not state_path.is_file():
@@ -498,16 +505,18 @@ def _search_with_provider(
     max_results: int,
     timeout_seconds: float,
 ) -> tuple[SearchResult, ...]:
-    """内部方法：执行 `_search_with_provider` 相关逻辑。
+    """根据 provider 后端类型分发到具体搜索实现。
+
     Args:
-        provider (SearchProviderProfile): 参数 `provider`。
-        query (str): 参数 `query`。
-        max_results (int): 参数 `max_results`。
-        timeout_seconds (float): 参数 `timeout_seconds`。
+        provider (SearchProviderProfile): 当前执行搜索的 provider 配置。
+        query (str): 已规范化的查询文本。
+        max_results (int): 当前最多返回的结果数量。
+        timeout_seconds (float): 单次请求超时时间，单位为秒。
     Returns:
-        tuple[SearchResult, ...]: 函数返回结果。
+        tuple[SearchResult, ...]: 当前 provider 返回的搜索结果集合。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当 provider 后端类型不受支持时抛出。
+        OSError: 当底层网络请求失败时按现有逻辑透传。
     """
     if provider.provider == 'searxng':
         return _search_searxng(provider, query, max_results=max_results, timeout_seconds=timeout_seconds)
@@ -523,16 +532,15 @@ def _search_searxng(
     max_results: int,
     timeout_seconds: float,
 ) -> tuple[SearchResult, ...]:
-    """内部方法：执行 `_search_searxng` 相关逻辑。
+    """调用 Searxng 后端执行搜索并标准化结果。
+
     Args:
-        provider (SearchProviderProfile): 参数 `provider`。
-        query (str): 参数 `query`。
-        max_results (int): 参数 `max_results`。
-        timeout_seconds (float): 参数 `timeout_seconds`。
+        provider (SearchProviderProfile): 当前执行搜索的 provider 配置。
+        query (str): 已规范化的查询文本。
+        max_results (int): 当前最多返回的结果数量。
+        timeout_seconds (float): 单次请求超时时间，单位为秒。
     Returns:
-        tuple[SearchResult, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[SearchResult, ...]: 标准化后的搜索结果集合。
     """
     endpoint = provider.base_url.rstrip('/')
     if not endpoint.endswith('/search'):
@@ -587,16 +595,15 @@ def _search_duckduckgo(
     max_results: int,
     timeout_seconds: float,
 ) -> tuple[SearchResult, ...]:
-    """内部方法：执行 `_search_duckduckgo` 相关逻辑。
+    """调用 DuckDuckGo 后端执行搜索并标准化结果。
+
     Args:
-        provider (SearchProviderProfile): 参数 `provider`。
-        query (str): 参数 `query`。
-        max_results (int): 参数 `max_results`。
-        timeout_seconds (float): 参数 `timeout_seconds`。
+        provider (SearchProviderProfile): 当前执行搜索的 provider 配置。
+        query (str): 已规范化的查询文本。
+        max_results (int): 当前最多返回的结果数量。
+        timeout_seconds (float): 单次请求超时时间，单位为秒。
     Returns:
-        tuple[SearchResult, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[SearchResult, ...]: 标准化后的搜索结果集合，必要时会回退到天气查询兜底逻辑。
     """
     payload = _query_duckduckgo_payload(query, provider.base_url, timeout_seconds=timeout_seconds)
 
@@ -799,13 +806,14 @@ def _collect_duckduckgo_topics(topics: list[object]) -> list[tuple[str, str]]:
 
 
 def _normalize_provider_id(value: object) -> str:
-    """内部方法：执行 `_normalize_provider_id` 相关逻辑。
+    """规范化并校验 provider_id。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待校验的原始 provider_id。
     Returns:
-        str: 函数返回结果。
+        str: 去除首尾空白后的合法 provider_id。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当 provider_id 不是字符串、为空或包含非法路径成分时抛出。
     """
     if not isinstance(value, str):
         raise ValueError('provider_id must be a string')
@@ -818,13 +826,15 @@ def _normalize_provider_id(value: object) -> str:
 
 
 def _normalize_base_url(value: object, *, provider: str) -> str:
-    """内部方法：执行 `_normalize_base_url` 相关逻辑。
+    """规范化 provider 的基础 URL，并在缺失时给出默认值。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待校验的原始 base_url。
+        provider (str): 当前 provider 后端类型，用于决定默认 URL。
     Returns:
-        str: 函数返回结果。
+        str: 规范化后的 base_url。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当提供的 URL 不是合法的绝对 URL 时抛出。
     """
     normalized = _normalize_optional_text(value)
     if normalized is None:
@@ -846,13 +856,12 @@ def _resolve_provider_api_key(provider: SearchProviderProfile) -> str | None:
 
 
 def _normalize_optional_text(value: object) -> str | None:
-    """内部方法：执行 `_normalize_optional_text` 相关逻辑。
+    """把可选文本输入规范化为字符串或 None。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待规范化的原始输入值。
     Returns:
-        str | None: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        str | None: 去空白后的字符串；若为空则返回 None。
     """
     if value is None:
         return None
@@ -861,14 +870,13 @@ def _normalize_optional_text(value: object) -> str | None:
 
 
 def _coerce_positive_int(value: object, default: int) -> int:
-    """内部方法：执行 `_coerce_positive_int` 相关逻辑。
+    """把输入值安全转换为正整数。
+
     Args:
-        value (object): 参数 `value`。
-        default (int): 参数 `default`。
+        value (object): 待转换的原始值。
+        default (int): 输入无效或非正数时使用的默认值。
     Returns:
-        int: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        int: 转换后的正整数；失败时返回默认值。
     """
     if value is None or isinstance(value, bool):
         return default
@@ -880,13 +888,12 @@ def _coerce_positive_int(value: object, default: int) -> int:
 
 
 def _format_request_error(exc: BaseException) -> str:
-    """内部方法：执行 `_format_request_error` 相关逻辑。
+    """把底层请求异常格式化为简短可读的错误文本。
+
     Args:
-        exc (BaseException): 参数 `exc`。
+        exc (BaseException): 底层请求或解析阶段抛出的异常对象。
     Returns:
-        str: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        str: 适合写入重试错误聚合信息的人类可读文本。
     """
     if isinstance(exc, error.HTTPError):
         body = ''

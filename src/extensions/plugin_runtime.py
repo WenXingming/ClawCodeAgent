@@ -1,4 +1,7 @@
-"""ISSUE-014 Plugin Runtime：manifest 发现、alias/virtual 注册与摘要渲染。"""
+"""管理插件清单发现、alias/virtual 工具注册与摘要渲染。
+
+本模块负责从工作区发现插件清单，解析 alias 与 virtual 工具定义，处理注册冲突，并把插件提供的工具、hooks 与拦截规则暴露给上层运行时使用。
+"""
 
 from __future__ import annotations
 
@@ -18,23 +21,24 @@ _EMPTY_OBJECT_SCHEMA: JSONDict = {'type': 'object', 'properties': {}}
 
 @dataclass(frozen=True)
 class AliasToolSpec:
-    """manifest 中的 alias tool 定义。"""
+    """表示插件清单中的 alias tool 定义。"""
 
-    name: str
-    target: str
-    description: str = ''
-    arguments: JSONDict = field(default_factory=dict)
-    parameters: JSONDict = field(default_factory=dict)
+    name: str  # str：alias 工具对外暴露的名称。
+    target: str  # str：alias 实际转发到的目标工具名称。
+    description: str = ''  # str：alias 工具的人类可读描述。
+    arguments: JSONDict = field(default_factory=dict)  # JSONDict：调用目标工具时强制注入的参数。
+    parameters: JSONDict = field(default_factory=dict)  # JSONDict：alias 工具对模型暴露的参数 schema。
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'AliasToolSpec':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复 alias 工具定义。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
+            payload (JSONDict | None): 待反序列化的原始字典。
         Returns:
-            'AliasToolSpec': 函数返回结果。
+            AliasToolSpec: 恢复后的 alias 工具定义对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当 alias 名称、目标工具或参数结构非法时抛出。
         """
         data = dict(payload or {})
         name = str(data.get('name', '')).strip()
@@ -62,23 +66,24 @@ class AliasToolSpec:
 
 @dataclass(frozen=True)
 class VirtualToolSpec:
-    """manifest 中的 virtual tool 定义。"""
+    """表示插件清单中的 virtual tool 定义。"""
 
-    name: str
-    description: str
-    content: str
-    parameters: JSONDict = field(default_factory=dict)
-    metadata: JSONDict = field(default_factory=dict)
+    name: str  # str：virtual 工具对外暴露的名称。
+    description: str  # str：virtual 工具的人类可读描述。
+    content: str  # str：virtual 工具返回给调用方的固定内容。
+    parameters: JSONDict = field(default_factory=dict)  # JSONDict：virtual 工具对模型暴露的参数 schema。
+    metadata: JSONDict = field(default_factory=dict)  # JSONDict：virtual 工具调用时附带返回的固定元数据。
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'VirtualToolSpec':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复 virtual 工具定义。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
+            payload (JSONDict | None): 待反序列化的原始字典。
         Returns:
-            'VirtualToolSpec': 函数返回结果。
+            VirtualToolSpec: 恢复后的 virtual 工具定义对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当 virtual 工具名称、描述、内容或参数结构非法时抛出。
         """
         data = dict(payload or {})
         name = str(data.get('name', '')).strip()
@@ -109,28 +114,29 @@ class VirtualToolSpec:
 
 @dataclass(frozen=True)
 class PluginManifest:
-    """单个插件清单。"""
+    """表示单个插件清单。"""
 
-    name: str
-    summary: str = ''
-    deny_tools: tuple[str, ...] = ()
-    deny_prefixes: tuple[str, ...] = ()
-    before_hooks: tuple[JSONDict, ...] = ()
-    after_hooks: tuple[JSONDict, ...] = ()
-    aliases: tuple[AliasToolSpec, ...] = ()
-    virtual_tools: tuple[VirtualToolSpec, ...] = ()
-    source_path: Path | None = None
+    name: str  # str：插件清单名称。
+    summary: str = ''  # str：插件摘要说明。
+    deny_tools: tuple[str, ...] = ()  # tuple[str, ...]：插件显式阻断的工具名称列表。
+    deny_prefixes: tuple[str, ...] = ()  # tuple[str, ...]：插件按前缀阻断的工具名称前缀列表。
+    before_hooks: tuple[JSONDict, ...] = ()  # tuple[JSONDict, ...]：工具调用前暴露的 hook 定义集合。
+    after_hooks: tuple[JSONDict, ...] = ()  # tuple[JSONDict, ...]：工具调用后暴露的 hook 定义集合。
+    aliases: tuple[AliasToolSpec, ...] = ()  # tuple[AliasToolSpec, ...]：插件声明的 alias 工具集合。
+    virtual_tools: tuple[VirtualToolSpec, ...] = ()  # tuple[VirtualToolSpec, ...]：插件声明的 virtual 工具集合。
+    source_path: Path | None = None  # Path | None：插件清单来源文件路径。
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None, *, source_path: Path | None = None) -> 'PluginManifest':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复插件清单对象。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
-            source_path (Path | None): 参数 `source_path`。
+            payload (JSONDict | None): 待反序列化的原始字典。
+            source_path (Path | None): 当前清单来源的文件路径。
         Returns:
-            'PluginManifest': 函数返回结果。
+            PluginManifest: 恢复后的插件清单对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当插件名称、工具列表或工具定义非法时抛出。
         """
         data = dict(payload or {})
         name = str(data.get('name', '')).strip()
@@ -174,13 +180,16 @@ class PluginManifest:
 
     @classmethod
     def from_path(cls, manifest_path: Path) -> 'PluginManifest':
-        """执行 `from_path` 逻辑。
+        """从磁盘文件加载并解析插件清单。
+
         Args:
-            manifest_path (Path): 参数 `manifest_path`。
+            manifest_path (Path): 待加载的插件清单文件路径。
         Returns:
-            'PluginManifest': 函数返回结果。
+            PluginManifest: 解析成功后的插件清单对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当文件内容不是合法插件对象时抛出。
+            OSError: 当文件读取失败时抛出。
+            json.JSONDecodeError: 当文件内容不是合法 JSON 时抛出。
         """
         payload = json.loads(manifest_path.read_text(encoding='utf-8'))
         if not isinstance(payload, dict):
@@ -192,39 +201,45 @@ class PluginManifest:
 class PluginRegistration:
     """已注册的插件工具。"""
 
-    tool_name: str
-    plugin_name: str
-    tool_kind: str
-    target_name: str = ''
+    tool_name: str  # str：最终注册到工具表中的名称。
+    plugin_name: str  # str：提供该工具的插件名称。
+    tool_kind: str  # str：工具来源类型，如 alias 或 virtual。
+    target_name: str = ''  # str：alias 工具的目标工具名称；非 alias 时为空。
 
 
 @dataclass(frozen=True)
 class PluginConflict:
     """插件工具注册冲突。"""
 
-    tool_name: str
-    plugin_name: str
-    existing_source: str
+    tool_name: str  # str：发生冲突的工具名称。
+    plugin_name: str  # str：尝试注册该工具的插件名称。
+    existing_source: str  # str：当前已占用该名称的来源说明。
 
 
 @dataclass(frozen=True)
 class PluginLoadError:
     """插件 manifest 加载或注册错误。"""
 
-    plugin_name: str
-    error: str
-    source_path: Path | None = None
+    plugin_name: str  # str：出错的插件名称或文件 stem。
+    error: str  # str：对应的错误说明文本。
+    source_path: Path | None = None  # Path | None：出错的来源文件路径。
 
 
 @dataclass
 class PluginRuntime:
-    """工作区插件运行时快照。"""
+    """表示工作区插件清单加载与注册后的运行时快照。
 
-    manifests: tuple[PluginManifest, ...] = ()
-    plugin_registry: dict[str, LocalTool] = field(default_factory=dict)
-    registrations: tuple[PluginRegistration, ...] = ()
-    conflicts: tuple[PluginConflict, ...] = ()
-    load_errors: tuple[PluginLoadError, ...] = ()
+    典型工作流如下：
+    1. 调用 `from_workspace()` 发现并加载全部插件清单。
+    2. 在构建过程中注册 virtual/alias 工具，记录冲突和加载错误。
+    3. 上层通过 `merge_tool_registry()`、`resolve_block()`、`get_before_hooks()` 等接口消费插件运行时结果。
+    """
+
+    manifests: tuple[PluginManifest, ...] = ()  # tuple[PluginManifest, ...]：已成功加载的插件清单集合。
+    plugin_registry: dict[str, LocalTool] = field(default_factory=dict)  # dict[str, LocalTool]：插件新增工具的注册表。
+    registrations: tuple[PluginRegistration, ...] = ()  # tuple[PluginRegistration, ...]：成功注册的插件工具记录。
+    conflicts: tuple[PluginConflict, ...] = ()  # tuple[PluginConflict, ...]：注册阶段检测到的名称冲突记录。
+    load_errors: tuple[PluginLoadError, ...] = ()  # tuple[PluginLoadError, ...]：加载或注册阶段收集到的错误信息。
 
     @classmethod
     def from_workspace(
@@ -328,26 +343,24 @@ class PluginRuntime:
         )
 
     def merge_tool_registry(self, base_tool_registry: Mapping[str, LocalTool]) -> dict[str, LocalTool]:
-        """执行 `merge_tool_registry` 逻辑。
+        """把插件工具注册表合并到基础工具注册表中。
+
         Args:
-            base_tool_registry (Mapping[str, LocalTool]): 参数 `base_tool_registry`。
+            base_tool_registry (Mapping[str, LocalTool]): 当前基础工具注册表。
         Returns:
-            dict[str, LocalTool]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            dict[str, LocalTool]: 合并后的完整工具注册表副本。
         """
         merged = dict(base_tool_registry)
         merged.update(self.plugin_registry)
         return merged
 
     def resolve_block(self, tool_name: str) -> JSONDict | None:
-        """执行 `resolve_block` 逻辑。
+        """解析某个工具被插件规则阻断时的来源与原因。
+
         Args:
-            tool_name (str): 参数 `tool_name`。
+            tool_name (str): 需要解析阻断信息的工具名称。
         Returns:
-            JSONDict | None: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict | None: 命中插件阻断规则时返回结构化说明，否则返回 None。
         """
         if not self.manifests:
             return None
@@ -370,35 +383,32 @@ class PluginRuntime:
         return None
 
     def get_before_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
-        """执行 `get_before_hooks` 逻辑。
+        """获取指定工具在执行前需要注入的插件 hooks。
+
         Args:
-            tool_name (str): 参数 `tool_name`。
+            tool_name (str): 当前即将执行的工具名称。
         Returns:
-            tuple[JSONDict, ...]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            tuple[JSONDict, ...]: 当前工具可见的 before hooks 集合。
         """
         return self._collect_hooks('before', tool_name)
 
     def get_after_hooks(self, tool_name: str) -> tuple[JSONDict, ...]:
-        """执行 `get_after_hooks` 逻辑。
+        """获取指定工具在执行后需要注入的插件 hooks。
+
         Args:
-            tool_name (str): 参数 `tool_name`。
+            tool_name (str): 当前已执行的工具名称。
         Returns:
-            tuple[JSONDict, ...]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            tuple[JSONDict, ...]: 当前工具可见的 after hooks 集合。
         """
         return self._collect_hooks('after', tool_name)
 
     def render_summary(self) -> str:
-        """执行 `render_summary` 逻辑。
+        """把插件加载与注册结果渲染为终端可读摘要。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            str: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            str: 包含插件、注册工具、冲突与错误信息的文本摘要；无内容时返回空字符串。
         """
         if not self.manifests and not self.load_errors:
             return ''
@@ -438,14 +448,13 @@ class PluginRuntime:
         return '\n'.join(lines)
 
     def _collect_hooks(self, phase: str, tool_name: str) -> tuple[JSONDict, ...]:
-        """内部方法：执行 `_collect_hooks` 相关逻辑。
+        """按执行阶段收集插件提供的消息型 hooks。
+
         Args:
-            phase (str): 参数 `phase`。
-            tool_name (str): 参数 `tool_name`。
+            phase (str): 当前 hook 阶段，只支持 `before` 或 `after`。
+            tool_name (str): 当前关联的工具名称。
         Returns:
-            tuple[JSONDict, ...]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            tuple[JSONDict, ...]: 归一化后的 hook 载荷集合。
         """
         if not self.manifests:
             return ()
@@ -471,13 +480,12 @@ class PluginRuntime:
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
-    """内部方法：执行 `_discover_manifest_paths` 相关逻辑。
+    """发现工作区中所有候选插件清单文件路径。
+
     Args:
-        workspace (Path): 参数 `workspace`。
+        workspace (Path): 工作区根目录。
     Returns:
-        tuple[Path, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[Path, ...]: 按稳定顺序返回的插件清单文件路径元组。
     """
     candidates: list[Path] = []
     single_manifest = workspace / _PLUGIN_MANIFEST_FILE
@@ -495,13 +503,12 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
 
 
 def _normalize_string_list(value: object) -> tuple[str, ...]:
-    """内部方法：执行 `_normalize_string_list` 相关逻辑。
+    """规范化字符串列表输入。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待规范化的原始值。
     Returns:
-        tuple[str, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[str, ...]: 去空白后的字符串元组；非法输入返回空元组。
     """
     if not isinstance(value, list):
         return ()
@@ -516,13 +523,12 @@ def _normalize_string_list(value: object) -> tuple[str, ...]:
 
 
 def _normalize_hook_list(value: object) -> tuple[JSONDict, ...]:
-    """内部方法：执行 `_normalize_hook_list` 相关逻辑。
+    """规范化 hook 定义列表。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待规范化的原始值。
     Returns:
-        tuple[JSONDict, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[JSONDict, ...]: 仅保留字典项后的 hook 定义元组。
     """
     if not isinstance(value, list):
         return ()
@@ -539,15 +545,16 @@ def _validate_declared_tool_names(
     aliases: tuple[AliasToolSpec, ...],
     virtual_tools: tuple[VirtualToolSpec, ...],
 ) -> None:
-    """内部方法：执行 `_validate_declared_tool_names` 相关逻辑。
+    """校验插件声明的工具名称不存在重复。
+
     Args:
-        plugin_name (str): 参数 `plugin_name`。
-        aliases (tuple[AliasToolSpec, ...]): 参数 `aliases`。
-        virtual_tools (tuple[VirtualToolSpec, ...]): 参数 `virtual_tools`。
+        plugin_name (str): 当前插件名称。
+        aliases (tuple[AliasToolSpec, ...]): 当前插件声明的 alias 工具集合。
+        virtual_tools (tuple[VirtualToolSpec, ...]): 当前插件声明的 virtual 工具集合。
     Returns:
-        None: 函数返回结果。
+        None: 校验通过时不返回值。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当 alias 与 virtual 工具之间存在重名时抛出。
     """
     seen: set[str] = set()
     for tool_name in [item.name for item in virtual_tools] + [item.name for item in aliases]:
@@ -557,25 +564,23 @@ def _validate_declared_tool_names(
 
 
 def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_tool: LocalTool) -> LocalTool:
-    """内部方法：执行 `_build_alias_tool` 相关逻辑。
+    """根据 alias 定义构造一个代理目标工具的 LocalTool。
+
     Args:
-        manifest (PluginManifest): 参数 `manifest`。
-        alias (AliasToolSpec): 参数 `alias`。
-        target_tool (LocalTool): 参数 `target_tool`。
+        manifest (PluginManifest): 当前插件清单。
+        alias (AliasToolSpec): 需要构造的 alias 工具定义。
+        target_tool (LocalTool): alias 最终转发到的目标工具。
     Returns:
-        LocalTool: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        LocalTool: 构造完成的 alias 工具对象。
     """
     def _handler(arguments: JSONDict, context: ToolExecutionContext):
-        """内部方法：执行 `_handler` 相关逻辑。
+        """在 alias 工具被调用时转发到目标工具。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (ToolExecutionContext): 参数 `context`。
+            arguments (JSONDict): 本次 alias 调用传入的参数。
+            context (ToolExecutionContext): 当前工具执行上下文。
         Returns:
-            Any: 返回值。
-        Raises:
-            Exception: 按调用链透传的异常。
+            Any: 保持目标工具原有返回结构，并补充插件来源元数据。
         """
         resolved_arguments = dict(arguments)
         resolved_arguments.update(alias.arguments)
@@ -604,25 +609,24 @@ def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_too
 
 
 def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec) -> LocalTool:
-    """内部方法：执行 `_build_virtual_tool` 相关逻辑。
+    """根据 virtual 工具定义构造一个固定响应的 LocalTool。
+
     Args:
-        manifest (PluginManifest): 参数 `manifest`。
-        virtual_tool (VirtualToolSpec): 参数 `virtual_tool`。
+        manifest (PluginManifest): 当前插件清单。
+        virtual_tool (VirtualToolSpec): 需要构造的 virtual 工具定义。
     Returns:
-        LocalTool: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        LocalTool: 构造完成的 virtual 工具对象。
     """
     def _handler(arguments: JSONDict, context: ToolExecutionContext):
-        """内部方法：执行 `_handler` 相关逻辑。
+        """在 virtual 工具被调用时返回固定内容与插件元数据。
+
         Args:
-            arguments (JSONDict): 参数 `arguments`。
-            context (ToolExecutionContext): 参数 `context`。
+            arguments (JSONDict): 本次 virtual 调用传入的参数；当前实现不消费该值。
+            context (ToolExecutionContext): 当前工具执行上下文；当前实现不消费该值。
         Returns:
-            Any: 返回值。
-        Raises:
-            Exception: 按调用链透传的异常。
+            Any: 固定内容和附加元数据组成的工具返回结构。
         """
+        del arguments, context
         metadata = dict(virtual_tool.metadata)
         metadata.update(
             {
@@ -641,14 +645,13 @@ def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec)
 
 
 def _derive_alias_parameters(target_parameters: JSONDict, forced_arguments: JSONDict) -> JSONDict:
-    """内部方法：执行 `_derive_alias_parameters` 相关逻辑。
+    """从目标工具参数 schema 推导 alias 对外暴露的参数 schema。
+
     Args:
-        target_parameters (JSONDict): 参数 `target_parameters`。
-        forced_arguments (JSONDict): 参数 `forced_arguments`。
+        target_parameters (JSONDict): 目标工具原始参数 schema。
+        forced_arguments (JSONDict): alias 已经固定注入、无需再暴露给调用方的参数集合。
     Returns:
-        JSONDict: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        JSONDict: 去掉固定参数后的 alias 参数 schema。
     """
     if target_parameters.get('type') != 'object':
         return dict(_EMPTY_OBJECT_SCHEMA)
@@ -678,15 +681,14 @@ def _describe_tool_source(
     base_tool_registry: Mapping[str, LocalTool],
     plugin_registry: Mapping[str, LocalTool],
 ) -> str:
-    """内部方法：执行 `_describe_tool_source` 相关逻辑。
+    """生成人类可读的工具来源说明文本。
+
     Args:
-        tool_name (str): 参数 `tool_name`。
-        base_tool_registry (Mapping[str, LocalTool]): 参数 `base_tool_registry`。
-        plugin_registry (Mapping[str, LocalTool]): 参数 `plugin_registry`。
+        tool_name (str): 需要描述来源的工具名称。
+        base_tool_registry (Mapping[str, LocalTool]): 基础工具注册表。
+        plugin_registry (Mapping[str, LocalTool]): 当前插件工具注册表。
     Returns:
-        str: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        str: 面向冲突诊断的人类可读来源说明。
     """
     if tool_name in base_tool_registry:
         return f'core tool {tool_name}'

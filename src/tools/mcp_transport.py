@@ -1,7 +1,6 @@
-"""MCP transport 请求客户端。
+"""负责 MCP transport 请求的分发、执行与错误归一化。
 
-该模块负责把一次 MCP 方法调用分发到 stdio 或 HTTP/SSE transport，并在
-一次请求内部完成 initialize、方法调用、响应解析与错误归一化。
+本模块把一次 MCP 方法调用分发到 stdio 或 HTTP/SSE transport，并在单次请求内部完成 initialize、notifications/initialized、业务方法调用、响应解析与错误封装，是运行时访问远端 server 的最低层执行入口。
 """
 
 from __future__ import annotations
@@ -19,8 +18,8 @@ from typing import Any
 from .mcp_models import MCPServerProfile, MCPTransportError
 
 
-MCP_PROTOCOL_VERSION = '2025-11-25'
-_DEFAULT_TIMEOUT_SECONDS = 10.0
+MCP_PROTOCOL_VERSION = '2025-11-25'  # str: 当前请求默认使用的 MCP 协议版本。
+_DEFAULT_TIMEOUT_SECONDS = 10.0  # float: 单次 MCP 请求的默认超时时间，单位秒。
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,6 @@
-"""MCP 文本渲染工具。
+"""负责 MCP 资源与工具结果的纯文本渲染。
 
-该模块负责把 MCP 资源内容与工具调用结果转换成适合模型直接阅读的纯文本，
-避免运行时层混入协议细节或格式化分支。
+本模块把 resources/read 和 tools/call 的协议负载转换成适合模型直接阅读的稳定文本，避免运行时层混入协议细节、序列化分支和截断格式选择。
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ class MCPRenderer:
     """负责把 MCP 返回负载渲染成稳定的文本格式。
 
     运行时通常通过该类完成资源过滤、文本裁剪以及协议 content 数组的可读化，
-    从而把上层逻辑保持在“选择资源/工具”这一层。
+    从而把上层逻辑保持在“选择资源/工具”这一层，而不需要感知底层 JSON 结构。
     """
 
     @staticmethod
@@ -26,7 +25,7 @@ class MCPRenderer:
         Args:
             contents (Any): MCP resources/read 返回的 contents 字段。
         Returns:
-            str: 拼接后的可读文本；无法识别时返回空字符串。
+            str: 拼接后的可读文本；无法识别或内容为空时返回空字符串。
         """
         if not isinstance(contents, list):
             return ''
@@ -54,7 +53,7 @@ class MCPRenderer:
         Args:
             result (dict[str, Any]): MCP tools/call 返回的 result 字典。
         Returns:
-            str: 供模型消费的文本结果。
+            str: 供模型消费的文本结果；当 content 不是数组时回退为 JSON 文本。
         """
         content = result.get('content')
         if not isinstance(content, list):
@@ -79,7 +78,7 @@ class MCPRenderer:
             resources (tuple[MCPResource, ...]): 待过滤的资源序列。
             query (str | None): 可选查询词，匹配 URI、server、名称或描述。
         Returns:
-            tuple[MCPResource, ...]: 过滤后的资源元组。
+            tuple[MCPResource, ...]: 过滤后的资源元组；未提供查询词时返回原序列。
         """
         if not query:
             return resources

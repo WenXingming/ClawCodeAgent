@@ -1,12 +1,6 @@
-"""CLI 进程入口。
+"""提供 CLI 进程的最顶层入口。
 
-本文件是最顶层的 Python 包入口，负责：
-- 组织所有控制面、运行时、客户端等组件的依赖注入
-- 通过@patch点可擦写关键依赖（OpenAIClient、LocalCodingAgent、AgentSessionStore）
-- 转发CLI命令到interaction.command_line_interaction的主逻辑
-
-控制面实现已下沉到 interaction.command_line_interaction；
-本文件仅保留顶层入口与可 patch 的依赖注入点。
+本模块只负责组织控制面、运行时、客户端与会话存储等核心依赖的注入，并把命令行参数转发给 `interaction.command_line_interaction`。控制面实现已经下沉到 interaction 层，这里仅保留最薄的入口与可 patch 的依赖注入点。
 """
 
 from __future__ import annotations
@@ -18,14 +12,14 @@ from session.session_store import AgentSessionStore
 
 
 def main(argv: list[str] | None = None) -> int:
-    """主CLI入口函数。
-    
-    以来自命令行的参数或test injected arguments构造Agent并执行，返回进程退出码。
-    可通过@patch装饰器注入测试用的openai_client_cls/agent_cls/session_store_cls。
+    """执行主 CLI 入口并返回进程退出码。
+
+    该函数根据传入的命令行参数创建 `CLI` 实例，并注入 `OpenAIClient`、`LocalAgent` 和 `AgentSessionStore` 作为默认依赖。测试可通过 patch 这些注入点来替换实际实现。
+
     Args:
-        argv (list[str] | None): 命令行参数列表；None时使用sys.argv[1:]
+        argv (list[str] | None): 命令行参数列表；为 None 时由 CLI 自行回退到默认参数来源。
     Returns:
-        int: 进程退出码（0=成功，非0=失败）
+        int: 进程退出码，0 表示成功，非 0 表示失败。
     """
     cli = CLI(
         openai_client_cls=OpenAIClient,

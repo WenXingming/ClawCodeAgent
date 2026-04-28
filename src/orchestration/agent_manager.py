@@ -1,11 +1,8 @@
-"""ISSUE-024 AgentManager：子代理记录、分组与依赖批处理。
+"""负责子代理记录、分组与依赖批处理。
 
-本模块负责主循环中的 delegate_agent 编排底座，聚焦三类职责：
-1. 为父代理维护 child agent / group / lineage 记录。
-2. 根据委派任务依赖关系生成稳定的 batch 计划。
-3. 汇总子代理 stop_reason、失败数与 dependency skip 统计，供上层事件与结果摘要复用。
+本模块提供主循环中的 delegate_agent 编排底座，聚焦三类职责：为父代理维护 child agent、group 与 lineage 记录；根据委派任务依赖关系生成稳定批次；汇总子代理 stop_reason、失败数与 dependency skip 统计，供上层事件与结果摘要复用。
 
-当前模块不直接执行模型调用；真正的 child run/resume 仍由 LocalAgent 触发。
+该模块不直接执行模型调用；真正的 child run/resume 仍由 LocalAgent 触发。
 """
 
 from __future__ import annotations
@@ -42,7 +39,7 @@ class DelegatedTaskSpec:
         """把子任务规格转换为可持久化字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 适合写入 JSON 的结构化对象。
         """
@@ -392,7 +389,7 @@ class AgentManager:
         """统计当前 manager 中的 child agent 数量。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             int: parent_agent_id 非空的受管代理数量。
         """

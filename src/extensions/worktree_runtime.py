@@ -1,12 +1,8 @@
-"""ISSUE-023 Worktree Runtime：受管工作树进入、退出与历史持久化。
+"""管理受管 git worktree 的进入、退出与历史持久化。
 
-本模块负责在工作区范围内管理单个“当前激活”的 git worktree，提供：
-1. 仓库根目录与 git common dir 探测。
-2. enter/exit managed worktree 的稳定状态切换。
-3. `.claw/worktree_state.json` 与 `.claw/worktree_history.json` 的持久化。
+本模块负责在工作区范围内维护单个“当前激活”的 git worktree，涵盖仓库根目录与 git common dir 探测、enter/exit managed worktree 的稳定状态切换，以及 `.claw/worktree_state.json` 与 `.claw/worktree_history.json` 的持久化。
 
-当前版本有意保持为独立 runtime，不直接接入主循环或 CLI 控制面；
-上层只需要消费 `current_cwd`、`active_worktree()` 与历史记录即可完成后续集成。
+该运行时目前保持为独立 runtime，不直接接入主循环或 CLI 控制面；上层只需要消费 `current_cwd`、`active_worktree()` 与历史记录即可完成后续集成。
 """
 
 from __future__ import annotations
@@ -68,7 +64,7 @@ class ManagedWorktreeRecord:
         """把受管工作树记录转换为可持久化字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 适合写入 JSON 文件的结构化对象。
         """
@@ -140,7 +136,7 @@ class WorktreeHistoryRecord:
         """把历史事件转换为可持久化字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 适合写入 JSON 的结构化对象。
         """
@@ -188,7 +184,7 @@ class WorktreeHistoryRecord:
 class WorktreeRuntime:
     """工作区本地 worktree 运行时。
 
-    当前版本明确只维护一个“激活中的受管工作树”，同时保留完整历史和已退出记录。
+    当前实现只维护一个“激活中的受管工作树”，同时保留完整历史和已退出记录。
     外部典型调用流为：
     1. `from_workspace()` 解析仓库与历史状态。
     2. `enter_worktree()` 创建分支和 worktree，并把 `current_cwd` 切到目标目录。
@@ -265,11 +261,11 @@ class WorktreeRuntime:
         """把当前 runtime 状态与历史写回磁盘。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             tuple[Path, Path]: 状态文件路径与历史文件路径。
         Raises:
-            OSError: 当底层文件写入失败时由调用链透传。
+            OSError: 当底层文件写入失败时抛出。
         """
         state_path = self.workspace / _WORKTREE_STATE_FILE
         state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -319,7 +315,7 @@ class WorktreeRuntime:
         """返回当前激活中的受管工作树。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             ManagedWorktreeRecord | None: 当前激活记录；若没有则返回 None。
         """
@@ -470,9 +466,9 @@ class WorktreeRuntime:
             current_cwd (Path): 更新后的逻辑 cwd。
             history_record (WorktreeHistoryRecord | None): 本次需要追加的历史事件。
         Returns:
-            None: 函数无返回值。
+            None: 该方法原地更新内存态并触发持久化。
         Raises:
-            OSError: 当状态文件写入失败时由调用链透传。
+            OSError: 当状态文件写入失败时抛出。
         """
         self.managed_worktrees = managed_worktrees
         self.current_cwd = current_cwd.resolve()
@@ -594,7 +590,7 @@ def _load_json_object(path: Path) -> JSONDict:
         JSONDict: 解析后的 JSON 对象；文件不存在时返回空对象。
     Raises:
         ValueError: 当 JSON 顶层不是对象时抛出。
-        json.JSONDecodeError: 当 JSON 语法非法时由调用链透传。
+        json.JSONDecodeError: 当 JSON 语法非法时抛出。
     """
     if not path.is_file():
         return {}
@@ -657,7 +653,7 @@ def _utc_now() -> str:
     """生成当前 UTC 时间戳。
 
     Args:
-        None: 无参数。
+        None: 该函数不接收额外参数。
     Returns:
         str: ISO-8601 UTC 时间字符串。
     """

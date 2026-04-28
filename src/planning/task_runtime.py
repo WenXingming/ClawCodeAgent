@@ -1,4 +1,7 @@
-"""ISSUE-017 Task Runtime：任务状态机、本地持久化与依赖解析。"""
+"""管理工作区本地任务状态机、持久化与依赖解析。
+
+本模块负责把任务的创建、更新、状态流转和依赖阻塞规则收敛到一个本地运行时对象中，并把状态稳定持久化到 `.claw/tasks.json`。上层通常通过 `TaskRuntime.from_workspace()` 加载状态，再调用公开方法驱动任务状态变化。
+"""
 
 from __future__ import annotations
 
@@ -26,24 +29,26 @@ class TaskStatus(StrEnum):
 
 @dataclass(frozen=True)
 class TaskRecord:
-    """单个任务的稳定表示。"""
+    """表示单个任务的稳定记录。
 
-    task_id: str
-    title: str
-    description: str = ''
-    status: TaskStatus = TaskStatus.PENDING
-    dependencies: tuple[str, ...] = ()
-    blocked_by: tuple[str, ...] = ()
-    manual_block_reason: str | None = None
+    该对象是任务在内存与 JSON 持久化中的统一表示，保存任务标题、描述、状态、依赖关系以及阻塞原因等核心信息。
+    """
+
+    task_id: str  # str：任务的稳定唯一标识。
+    title: str  # str：任务展示标题。
+    description: str = ''  # str：任务的补充说明文本。
+    status: TaskStatus = TaskStatus.PENDING  # TaskStatus：任务当前状态。
+    dependencies: tuple[str, ...] = ()  # tuple[str, ...]：当前任务依赖的上游任务 ID 列表。
+    blocked_by: tuple[str, ...] = ()  # tuple[str, ...]：当前仍未满足的依赖任务 ID 列表。
+    manual_block_reason: str | None = None  # str | None：人工阻塞任务时记录的原因。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把任务记录转换成可持久化的 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前任务记录的可序列化字典表示。
         """
         payload: JSONDict = {
             'task_id': self.task_id,
@@ -59,13 +64,14 @@ class TaskRecord:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'TaskRecord':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复单个任务记录。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
+            payload (JSONDict | None): 待反序列化的原始字典。
         Returns:
-            'TaskRecord': 函数返回结果。
+            TaskRecord: 恢复后的任务记录对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务 ID、标题或状态非法时抛出。
         """
         data = dict(payload or {})
         task_id = _normalize_task_id(data.get('task_id', data.get('taskId', '')))
@@ -92,12 +98,18 @@ class TaskRecord:
 
 @dataclass
 class TaskRuntime:
-    """工作区本地任务运行时。"""
+    """管理工作区本地任务状态的运行时对象。
 
-    workspace: Path
-    tasks_by_id: dict[str, TaskRecord] = field(default_factory=dict)
-    task_order: tuple[str, ...] = ()
-    schema_version: int = _SCHEMA_VERSION
+    典型工作流如下：
+    1. 调用 `from_workspace()` 从 `.claw/tasks.json` 加载当前状态。
+    2. 通过 `create_task()`、`update_task()`、`start_task()` 等公开方法驱动任务状态变化。
+    3. 每次状态变更后由 `_commit()` 统一做依赖重算并持久化保存。
+    """
+
+    workspace: Path  # Path：当前任务运行时所属的工作区根目录。
+    tasks_by_id: dict[str, TaskRecord] = field(default_factory=dict)  # dict[str, TaskRecord]：按任务 ID 建立的任务索引。
+    task_order: tuple[str, ...] = ()  # tuple[str, ...]：任务的稳定展示顺序。
+    schema_version: int = _SCHEMA_VERSION  # int：当前任务状态文件使用的 schema 版本。
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'TaskRuntime':
@@ -108,6 +120,8 @@ class TaskRuntime:
 
         Returns:
             TaskRuntime: 解析并校验后的任务运行时对象。
+        Raises:
+            ValueError: 当任务状态文件结构非法、字段类型错误或存在重复任务 ID 时抛出。
         """
         resolved_workspace = workspace.resolve()
         path = resolved_workspace / _TASKS_STATE_FILE
@@ -143,13 +157,12 @@ class TaskRuntime:
         return runtime
 
     def save(self) -> Path:
-        """执行 `save` 逻辑。
+        """把当前任务状态保存到工作区文件。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            Path: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            Path: 实际写入的任务状态文件路径。
         """
         path = self.workspace / _TASKS_STATE_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,16 +187,17 @@ class TaskRuntime:
         description: str = '',
         dependencies: tuple[str, ...] | list[str] = (),
     ) -> TaskRecord:
-        """执行 `create_task` 逻辑。
+        """创建一条新的任务记录。
+
         Args:
-            task_id (str): 参数 `task_id`。
-            title (str): 参数 `title`。
-            description (str): 参数 `description`。
-            dependencies (tuple[str, ...] | list[str]): 参数 `dependencies`。
+            task_id (str): 新任务的唯一标识。
+            title (str): 新任务的展示标题。
+            description (str): 新任务的补充说明。
+            dependencies (tuple[str, ...] | list[str]): 新任务依赖的上游任务 ID 列表。
         Returns:
-            TaskRecord: 函数返回结果。
+            TaskRecord: 创建并持久化后的任务记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务 ID 重复、标题为空或依赖非法时抛出。
         """
         normalized_id = _normalize_task_id(task_id)
         if normalized_id in self.tasks_by_id:
@@ -205,13 +219,14 @@ class TaskRuntime:
         return self.tasks_by_id[normalized_id]
 
     def replace_tasks(self, tasks: tuple[TaskRecord, ...] | list[TaskRecord]) -> tuple[TaskRecord, ...]:
-        """执行 `replace_tasks` 逻辑。
+        """用一组任务记录整体替换当前任务集。
+
         Args:
-            tasks (tuple[TaskRecord, ...] | list[TaskRecord]): 参数 `tasks`。
+            tasks (tuple[TaskRecord, ...] | list[TaskRecord]): 需要整体替换为当前状态的任务记录集合。
         Returns:
-            tuple[TaskRecord, ...]: 函数返回结果。
+            tuple[TaskRecord, ...]: 替换并持久化后的任务列表。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当输入中存在非 `TaskRecord` 项或重复任务 ID 时抛出。
         """
         normalized_tasks: list[TaskRecord] = []
         seen_ids: set[str] = set()
@@ -237,16 +252,17 @@ class TaskRuntime:
         description: str | None = None,
         dependencies: tuple[str, ...] | list[str] | None = None,
     ) -> TaskRecord:
-        """执行 `update_task` 逻辑。
+        """更新现有任务的基础字段。
+
         Args:
-            task_id (str): 参数 `task_id`。
-            title (str | None): 参数 `title`。
-            description (str | None): 参数 `description`。
-            dependencies (tuple[str, ...] | list[str] | None): 参数 `dependencies`。
+            task_id (str): 需要更新的任务 ID。
+            title (str | None): 新标题；为 None 时保持原值。
+            description (str | None): 新描述；为 None 时保持原值。
+            dependencies (tuple[str, ...] | list[str] | None): 新依赖集合；为 None 时保持原值。
         Returns:
-            TaskRecord: 函数返回结果。
+            TaskRecord: 更新并持久化后的任务记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务不存在、标题为空或依赖非法时抛出。
         """
         current = self.get_task(task_id)
         updated = replace(
@@ -268,13 +284,14 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def start_task(self, task_id: str) -> TaskRecord:
-        """执行 `start_task` 逻辑。
+        """把任务从可执行状态切换为进行中。
+
         Args:
-            task_id (str): 参数 `task_id`。
+            task_id (str): 需要启动的任务 ID。
         Returns:
-            TaskRecord: 函数返回结果。
+            TaskRecord: 启动并持久化后的任务记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务不存在、仍被依赖阻塞或当前状态不允许启动时抛出。
         """
         current = self._refreshed_task(task_id)
         if current.status is not TaskStatus.PENDING:
@@ -290,13 +307,14 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def complete_task(self, task_id: str) -> TaskRecord:
-        """执行 `complete_task` 逻辑。
+        """把进行中的任务标记为已完成。
+
         Args:
-            task_id (str): 参数 `task_id`。
+            task_id (str): 需要完成的任务 ID。
         Returns:
-            TaskRecord: 函数返回结果。
+            TaskRecord: 完成并持久化后的任务记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务不存在或当前状态不允许完成时抛出。
         """
         current = self.get_task(task_id)
         if current.status is not TaskStatus.IN_PROGRESS:
@@ -313,14 +331,15 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def block_task(self, task_id: str, *, reason: str) -> TaskRecord:
-        """执行 `block_task` 逻辑。
+        """把任务显式标记为阻塞，并记录人工阻塞原因。
+
         Args:
-            task_id (str): 参数 `task_id`。
-            reason (str): 参数 `reason`。
+            task_id (str): 需要阻塞的任务 ID。
+            reason (str): 人工阻塞的说明文本。
         Returns:
-            TaskRecord: 函数返回结果。
+            TaskRecord: 阻塞并持久化后的任务记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务不存在、当前状态不允许阻塞或原因为空时抛出。
         """
         current = self.get_task(task_id)
         if current.status in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}:
@@ -340,13 +359,14 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def cancel_task(self, task_id: str) -> TaskRecord:
-        """执行 `cancel_task` 逻辑。
+        """把任务标记为已取消。
+
         Args:
-            task_id (str): 参数 `task_id`。
+            task_id (str): 需要取消的任务 ID。
         Returns:
-            TaskRecord: 函数返回结果。
+            TaskRecord: 取消并持久化后的任务记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务不存在或当前状态不允许取消时抛出。
         """
         current = self.get_task(task_id)
         if current.status in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}:
@@ -363,13 +383,12 @@ class TaskRuntime:
         return self.tasks_by_id[current.task_id]
 
     def list_tasks(self) -> tuple[TaskRecord, ...]:
-        """执行 `list_tasks` 逻辑。
+        """按稳定顺序返回全部任务记录。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            tuple[TaskRecord, ...]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            tuple[TaskRecord, ...]: 当前任务列表的只读视图。
         """
         return tuple(
             self.tasks_by_id[task_id]
@@ -378,13 +397,12 @@ class TaskRuntime:
         )
 
     def next_tasks(self) -> tuple[TaskRecord, ...]:
-        """执行 `next_tasks` 逻辑。
+        """返回当前处于待处理状态的任务集合。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            tuple[TaskRecord, ...]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            tuple[TaskRecord, ...]: 当前状态为 `pending` 的任务列表。
         """
         return tuple(
             task
@@ -393,13 +411,14 @@ class TaskRuntime:
         )
 
     def get_task(self, task_id: str) -> TaskRecord:
-        """执行 `get_task` 逻辑。
+        """按任务 ID 获取单条任务记录。
+
         Args:
-            task_id (str): 参数 `task_id`。
+            task_id (str): 需要读取的任务 ID。
         Returns:
-            TaskRecord: 函数返回结果。
+            TaskRecord: 找到的任务记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当任务不存在或任务 ID 非法时抛出。
         """
         normalized_id = _normalize_task_id(task_id)
         task = self.tasks_by_id.get(normalized_id)
@@ -408,13 +427,12 @@ class TaskRuntime:
         return task
 
     def _refreshed_task(self, task_id: str) -> TaskRecord:
-        """内部方法：执行 `_refreshed_task` 相关逻辑。
+        """在读取任务前先基于当前依赖状态刷新阻塞信息。
+
         Args:
-            task_id (str): 参数 `task_id`。
+            task_id (str): 需要读取的任务 ID。
         Returns:
-            TaskRecord: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            TaskRecord: 依赖状态刷新后的任务记录。
         """
         refreshed = self._reconcile_dependency_states(self.tasks_by_id)
         self.tasks_by_id = refreshed
@@ -426,14 +444,13 @@ class TaskRuntime:
         *,
         task_order: tuple[str, ...] | None = None,
     ) -> None:
-        """内部方法：执行 `_commit` 相关逻辑。
+        """统一提交任务状态变更并持久化保存。
+
         Args:
-            tasks_by_id (dict[str, TaskRecord]): 参数 `tasks_by_id`。
-            task_order (tuple[str, ...] | None): 参数 `task_order`。
+            tasks_by_id (dict[str, TaskRecord]): 变更后的任务索引快照。
+            task_order (tuple[str, ...] | None): 可选的新任务顺序；为 None 时保留原顺序。
         Returns:
-            None: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            None: 该方法原地更新运行时并落盘保存。
         """
         if task_order is not None:
             self.task_order = task_order
@@ -444,13 +461,12 @@ class TaskRuntime:
         self,
         tasks_by_id: dict[str, TaskRecord],
     ) -> dict[str, TaskRecord]:
-        """内部方法：执行 `_reconcile_dependency_states` 相关逻辑。
+        """根据依赖完成情况重算任务阻塞状态。
+
         Args:
-            tasks_by_id (dict[str, TaskRecord]): 参数 `tasks_by_id`。
+            tasks_by_id (dict[str, TaskRecord]): 需要参与重算的任务索引。
         Returns:
-            dict[str, TaskRecord]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            dict[str, TaskRecord]: 经过阻塞状态重算后的新任务索引。
         """
         completed_tasks = {
             task_id
@@ -505,13 +521,14 @@ class TaskRuntime:
 
 
 def _normalize_task_id(value: object) -> str:
-    """内部方法：执行 `_normalize_task_id` 相关逻辑。
+    """规范化并校验任务 ID。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待校验的原始任务 ID。
     Returns:
-        str: 函数返回结果。
+        str: 去除首尾空白后的合法任务 ID。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当任务 ID 不是字符串、为空或包含非法路径成分时抛出。
     """
     if not isinstance(value, str):
         raise ValueError('task_id must be a string')
@@ -525,14 +542,15 @@ def _normalize_task_id(value: object) -> str:
 
 
 def _normalize_dependencies(value: object, *, task_id: str) -> tuple[str, ...]:
-    """内部方法：执行 `_normalize_dependencies` 相关逻辑。
+    """规范化任务依赖列表。
+
     Args:
-        value (object): 参数 `value`。
-        task_id (str): 参数 `task_id`。
+        value (object): 待校验的依赖列表原始值。
+        task_id (str): 当前任务 ID，用于阻止任务依赖自身。
     Returns:
-        tuple[str, ...]: 函数返回结果。
+        tuple[str, ...]: 去重并规范化后的依赖任务 ID 元组。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当依赖列表类型非法、依赖 ID 非法或任务依赖自身时抛出。
     """
     if value is None:
         return ()
@@ -550,13 +568,12 @@ def _normalize_dependencies(value: object, *, task_id: str) -> tuple[str, ...]:
 
 
 def _normalize_optional_text(value: object) -> str | None:
-    """内部方法：执行 `_normalize_optional_text` 相关逻辑。
+    """把可选文本输入规范化为字符串或 None。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待规范化的原始输入值。
     Returns:
-        str | None: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        str | None: 去空白后的字符串；若为空则返回 None。
     """
     if value is None:
         return None
@@ -565,14 +582,13 @@ def _normalize_optional_text(value: object) -> str | None:
 
 
 def _as_int(value: object, default: int) -> int:
-    """内部方法：执行 `_as_int` 相关逻辑。
+    """把输入值安全转换为整数。
+
     Args:
-        value (object): 参数 `value`。
-        default (int): 参数 `default`。
+        value (object): 待转换的原始值。
+        default (int): 转换失败或输入无效时返回的默认值。
     Returns:
-        int: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        int: 转换后的整数；失败时返回默认值。
     """
     if isinstance(value, bool) or value is None:
         return default

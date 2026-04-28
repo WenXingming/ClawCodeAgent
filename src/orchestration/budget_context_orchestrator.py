@@ -1,4 +1,7 @@
-"""上下文治理编排：统一 pre-model 阶段的 snip/compact/预算预检。"""
+"""统一编排 pre-model 阶段的上下文治理与预算检查。
+
+本模块负责把预算预检、snip、auto compact 和 reactive compact 重试收敛为单一编排层，供 `LocalAgent` 在模型调用前后复用一致的上下文治理逻辑。
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from budget.budget_guard import BudgetGuard
-from context.context_budget_evaluator import ContextBudgetEvaluator, ContextBudgetSnapshot
+from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator, ContextTokenBudgetSnapshot
 from context.context_compactor import CompactionResult, ContextCompactor
 from context.context_snipper import ContextSnipper
 from core_contracts.config import AgentRuntimeConfig
@@ -19,7 +22,7 @@ _MAX_REACTIVE_COMPACT_RETRIES = 2
 
 
 class _SessionStateLike(Protocol):
-    """用于描述 run loop 所需的最小 session_state 协议。"""
+    """描述 run loop 所需的最小 session_state 协议。"""
 
     messages: list[JSONDict]
 
@@ -29,33 +32,39 @@ class _SessionStateLike(Protocol):
 
 @dataclass(frozen=True)
 class PreModelContextOutcome:
-    """描述一次 pre-model 上下文治理后的状态。"""
+    """表示一次 pre-model 上下文治理后的结果快照。"""
 
-    snapshot: ContextBudgetSnapshot
-    usage_delta: TokenUsage
-    model_call_count: int
-    pre_model_stop: str | None
-    events: tuple[JSONDict, ...]
+    snapshot: ContextTokenBudgetSnapshot  # ContextTokenBudgetSnapshot：治理完成后的最新预算快照。
+    usage_delta: TokenUsage  # TokenUsage：包含 auto compact 额外消耗后的累计 usage 增量。
+    model_call_count: int  # int：包含 compact 调用后更新过的模型调用计数。
+    pre_model_stop: str | None  # str | None：pre-model 阶段命中的预算停止原因。
+    events: tuple[JSONDict, ...]  # tuple[JSONDict, ...]：本轮 pre-model 阶段产生的结构化事件集合。
 
 
 @dataclass(frozen=True)
 class ReactiveCompactOutcome:
-    """描述一次模型调用（含 reactive compact 重试）后的状态。"""
+    """表示一次模型调用及 reactive compact 重试链路的结果。"""
 
-    response: OneTurnResponse | None
-    usage_delta: TokenUsage
-    model_call_count: int
-    stop_reason: str | None
-    events: tuple[JSONDict, ...]
+    response: OneTurnResponse | None  # OneTurnResponse | None：成功完成模型调用时的最终响应。
+    usage_delta: TokenUsage  # TokenUsage：包含 reactive compact 额外消耗后的累计 usage 增量。
+    model_call_count: int  # int：包含 reactive compact 调用后的最新模型调用计数。
+    stop_reason: str | None  # str | None：reactive compact 之后命中的预算停止原因。
+    events: tuple[JSONDict, ...]  # tuple[JSONDict, ...]：本轮调用与重试过程中产生的结构化事件集合。
 
 
 @dataclass
 class BudgetContextOrchestrator:
-    """组合 snipper 与 compactor，统一处理上下文治理与预算编排。"""
+    """组合预算评估、snip 与 compact，统一处理上下文治理编排。
 
-    budget_evaluator: ContextBudgetEvaluator
-    context_snipper: ContextSnipper
-    context_compactor: ContextCompactor
+    典型工作流如下：
+    1. `run_pre_model_cycle()` 在真正请求模型前执行预算预检、soft-over snip 与 auto compact。
+    2. `complete_with_reactive_compact()` 在模型调用失败且命中 context-length 错误时执行 reactive compact 重试。
+    3. 上层消费 `PreModelContextOutcome` 与 `ReactiveCompactOutcome`，统一推进主循环状态。
+    """
+
+    budget_evaluator: ContextTokenBudgetEvaluator  # ContextTokenBudgetEvaluator：负责生成 token 预算快照。
+    context_snipper: ContextSnipper  # ContextSnipper：负责在 soft-over 时做轻量级上下文剪裁。
+    context_compactor: ContextCompactor  # ContextCompactor：负责主动与被动的摘要压缩。
 
     def run_pre_model_cycle(
         self,
@@ -70,7 +79,21 @@ class BudgetContextOrchestrator:
         usage_delta: TokenUsage,
         model_call_count: int,
     ) -> PreModelContextOutcome:
-        """执行模型调用前的上下文治理编排并返回统一结果。"""
+        """执行模型调用前的上下文治理编排并返回统一结果。
+
+        Args:
+            session_state (_SessionStateLike): 当前会话状态对象，提供消息列表与消息副本视图。
+            runtime_config (AgentRuntimeConfig): 当前运行配置，提供预算与 compact 参数。
+            guard (BudgetGuard): 预算闸门对象，用于统一判断是否需要停止。
+            openai_tools (list[JSONDict]): 当前可见工具定义列表。
+            turn_index (int): 当前 turn 序号，用于写入事件。
+            turns_offset (int): 本轮运行前已完成的历史 turn 数。
+            turns_this_run (int): 当前 run/resume 调用内已完成的 turn 数。
+            usage_delta (TokenUsage): 当前 run/resume 调用累计的 usage 增量。
+            model_call_count (int): 当前 run/resume 调用累计的模型调用次数。
+        Returns:
+            PreModelContextOutcome: 包含最新预算快照、计数、停止原因和事件的治理结果。
+        """
         events: list[JSONDict] = []
         next_usage_delta = usage_delta
         next_model_call_count = model_call_count
@@ -181,7 +204,22 @@ class BudgetContextOrchestrator:
         usage_delta: TokenUsage,
         model_call_count: int,
     ) -> ReactiveCompactOutcome:
-        """执行模型调用；必要时在 context-length 错误后进行 reactive compact 重试。"""
+        """执行模型调用，并在需要时做 reactive compact 重试。
+
+        Args:
+            client (OpenAIClient): 用于发起模型调用的客户端。
+            session_state (_SessionStateLike): 当前会话状态对象，提供消息列表与消息副本视图。
+            runtime_config (AgentRuntimeConfig): 当前运行配置，提供输出 schema 与 compact 参数。
+            openai_tools (list[JSONDict]): 当前可见工具定义列表。
+            turn_index (int): 当前 turn 序号，用于写入事件。
+            guard (BudgetGuard): 预算闸门对象，用于在重试后重新检查预算停止条件。
+            turns_offset (int): 本轮运行前已完成的历史 turn 数。
+            turns_this_run (int): 当前 run/resume 调用内已完成的 turn 数。
+            usage_delta (TokenUsage): 当前 run/resume 调用累计的 usage 增量。
+            model_call_count (int): 当前 run/resume 调用累计的模型调用次数。
+        Returns:
+            ReactiveCompactOutcome: 包含最终响应、累计用量、计数、停止原因和事件的调用结果。
+        """
         events: list[JSONDict] = []
         current_usage = usage_delta
         current_model_call_count = model_call_count
@@ -278,7 +316,16 @@ class BudgetContextOrchestrator:
         *,
         attempt: int | None = None,
     ) -> JSONDict:
-        """统一构造 compact_boundary 事件。"""
+        """统一构造 compact_boundary 事件。
+
+        Args:
+            turn_index (int): 当前 turn 序号。
+            trigger (str): 当前 compact 的触发方式，如 `auto` 或 `reactive`。
+            result (CompactionResult): compact 执行结果。
+            attempt (int | None): reactive compact 场景下的重试次数。
+        Returns:
+            JSONDict: 统一格式的 compact_boundary 事件载荷。
+        """
         event: JSONDict = {
             'type': 'compact_boundary',
             'turn': turn_index,

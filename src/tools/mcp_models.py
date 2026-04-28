@@ -1,7 +1,6 @@
-"""MCP 共享数据模型与传输错误定义。
+"""定义 MCP 子模块共享的数据模型与传输层错误类型。
 
-该模块只承载跨 MCP 子模块共享的值对象和错误类型，不负责 manifest 解析、
-transport 请求或文本渲染，从而把协议数据结构与运行时逻辑解耦。
+本模块只承载跨 manifest loader、runtime、renderer 和 transport 共享的值对象与异常类型，不直接负责 manifest 解析、远端请求或文本渲染，从而把协议数据结构与运行时逻辑清晰拆开。
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ class MCPResource:
         """把资源对象转换为可序列化字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 适合继续向上游透传的资源字典。
         """
@@ -78,7 +77,7 @@ class MCPTool:
         """把工具定义转换为可序列化字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 工具定义的字典表达。
         """
@@ -120,7 +119,7 @@ class MCPServerProfile:
         """把 server 配置转换为可序列化字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: server 配置的字典表达。
         """
@@ -149,7 +148,8 @@ class MCPServerProfile:
 class MCPToolCallResult:
     """表示一次远端 MCP 工具调用的归一化结果。
 
-    上层既可以直接读取 content，也可以通过 raw_result 继续追踪底层协议返回。
+    上层既可以直接读取 `content` 作为面向模型的文本结果，也可以通过
+    `raw_result` 继续追踪底层协议返回，便于调试、测试断言和二次渲染。
     """
 
     server_name: str  # str: 实际执行该工具的 server 名称。
@@ -162,7 +162,7 @@ class MCPToolCallResult:
         """把工具调用结果转换为可序列化字典。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             JSONDict: 工具调用结果的字典表达。
         """
@@ -177,7 +177,10 @@ class MCPToolCallResult:
 
 @dataclass(frozen=True)
 class MCPLoadError:
-    """表示 manifest 发现或解析阶段采集到的错误。"""
+    """表示 manifest 发现或解析阶段采集到的错误。
+
+    该对象只保留最小诊断信息，供运行时摘要、测试断言和上层错误展示直接消费。
+    """
 
     source_path: Path  # Path: 发生错误的 manifest 文件路径。
     detail: str  # str: 面向诊断的错误描述。
@@ -208,7 +211,7 @@ class MCPTransportError(RuntimeError):
             stderr (str): 子进程或远端返回的 stderr 文本。
             exit_code (int | None): stdio 子进程退出码。
         Returns:
-            None: 无返回值。
+            None: 该方法初始化异常对象状态并构造最终错误消息。
         """
         self.server_name = server_name  # str: 失败对应的 MCP server 名称。
         self.method = method  # str: 失败对应的 MCP 方法名。

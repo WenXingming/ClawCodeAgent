@@ -37,7 +37,7 @@ class MCPRuntime:
         """补齐运行时内部依赖并规范化工作区路径。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             None: 无返回值。
         """
@@ -67,7 +67,7 @@ class MCPRuntime:
         """输出当前运行时发现结果的摘要文本。
 
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
             str: 资源数、server 数及部分 server 列表组成的摘要文本。
         """

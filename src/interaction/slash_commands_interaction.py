@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
-from context.context_budget_evaluator import ContextBudgetEvaluator
+from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
 from core_contracts.config import AgentRuntimeConfig, ModelConfig
 from core_contracts.protocol import JSONDict
 from session.session_state import AgentSessionState
@@ -86,16 +86,16 @@ class SlashCommandDispatcher:
     可在构造时显式传入。
     """
 
-    def __init__(self, budget_evaluator: ContextBudgetEvaluator | None = None) -> None:
+    def __init__(self, budget_evaluator: ContextTokenBudgetEvaluator | None = None) -> None:
         """初始化 slash 命令分发器。
 
         Args:
-            budget_evaluator (ContextBudgetEvaluator | None): 可选的预算评估器；未提供时创建默认实例。
+            budget_evaluator (ContextTokenBudgetEvaluator | None): 可选的预算评估器；未提供时创建默认实例。
         Returns:
             None: 该构造函数只负责建立分发器内部状态。
         """
-        self._budget_evaluator = budget_evaluator or ContextBudgetEvaluator()
-        # ContextBudgetEvaluator: /context 命令使用的 token 预算评估器。
+        self._budget_evaluator = budget_evaluator or ContextTokenBudgetEvaluator()
+        # ContextTokenBudgetEvaluator: /context 命令使用的 token 预算评估器。
 
         self._specs = self._build_specs()
         # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，保持帮助展示顺序。

@@ -1,4 +1,7 @@
-"""ISSUE-019 Workflow Runtime：工作流定义读取、运行与历史记录。"""
+"""管理工作流清单读取、执行与运行历史持久化。
+
+本模块负责从工作区加载工作流定义，按步骤驱动 `TaskRuntime` 执行任务操作，并把每次工作流运行结果保存到历史记录中。它提供的是本地工作流运行时，不负责远程编排或模型调用。
+"""
 
 from __future__ import annotations
 
@@ -31,7 +34,7 @@ class WorkflowAction(StrEnum):
 
 
 class WorkflowRunStatus(StrEnum):
-    """工作流运行状态。"""
+    """工作流运行状态集合。"""
 
     SUCCEEDED = 'succeeded'
     FAILED = 'failed'
@@ -39,23 +42,25 @@ class WorkflowRunStatus(StrEnum):
 
 @dataclass(frozen=True)
 class WorkflowStepSpec:
-    """单个工作流步骤定义。"""
+    """表示单个工作流步骤定义。
 
-    action: WorkflowAction
-    task_id: str
-    title: str | None = None
-    description: str | None = None
-    dependencies: tuple[str, ...] | None = None
-    reason: str | None = None
+    每个步骤描述一次针对 `TaskRuntime` 的具体操作，包括动作类型、目标任务 ID，以及该动作所需的附加参数。
+    """
+
+    action: WorkflowAction  # WorkflowAction：当前步骤要执行的动作类型。
+    task_id: str  # str：当前步骤操作的目标任务 ID。
+    title: str | None = None  # str | None：创建或更新任务时使用的标题。
+    description: str | None = None  # str | None：创建或更新任务时使用的描述。
+    dependencies: tuple[str, ...] | None = None  # tuple[str, ...] | None：创建或更新任务时写入的依赖列表。
+    reason: str | None = None  # str | None：阻塞任务动作所需的原因说明。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把工作流步骤定义转换成可持久化的 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前步骤定义的可序列化字典表示。
         """
         payload: JSONDict = {
             'action': self.action.value,
@@ -73,13 +78,14 @@ class WorkflowStepSpec:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'WorkflowStepSpec':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复单个工作流步骤定义。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
+            payload (JSONDict | None): 待反序列化的原始字典。
         Returns:
-            'WorkflowStepSpec': 函数返回结果。
+            WorkflowStepSpec: 恢复后的工作流步骤定义对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当动作类型、任务 ID 或动作所需字段非法时抛出。
         """
         data = dict(payload or {})
         action = WorkflowAction(str(data.get('action', '')).strip())
@@ -106,22 +112,24 @@ class WorkflowStepSpec:
 
 @dataclass(frozen=True)
 class WorkflowManifest:
-    """单个工作流 manifest。"""
+    """表示单个工作流清单定义。
 
-    workflow_id: str
-    title: str
-    description: str = ''
-    steps: tuple[WorkflowStepSpec, ...] = ()
-    source_path: Path | None = None
+    该对象承载一个工作流的元数据和步骤列表，是工作流文件在内存中的稳定表示。外部通常通过 `from_path()` 或 `from_dict()` 构建此对象。
+    """
+
+    workflow_id: str  # str：工作流的稳定唯一标识。
+    title: str  # str：工作流展示标题。
+    description: str = ''  # str：工作流补充说明。
+    steps: tuple[WorkflowStepSpec, ...] = ()  # tuple[WorkflowStepSpec, ...]：按顺序执行的工作流步骤集合。
+    source_path: Path | None = None  # Path | None：当前清单文件的来源路径。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把工作流清单转换成可持久化的 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前工作流清单的可序列化字典表示。
         """
         return {
             'workflow_id': self.workflow_id,
@@ -132,14 +140,15 @@ class WorkflowManifest:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None, *, source_path: Path | None = None) -> 'WorkflowManifest':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复工作流清单对象。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
-            source_path (Path | None): 参数 `source_path`。
+            payload (JSONDict | None): 待反序列化的原始字典。
+            source_path (Path | None): 当前清单来源的文件路径。
         Returns:
-            'WorkflowManifest': 函数返回结果。
+            WorkflowManifest: 恢复后的工作流清单对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当工作流 ID、标题、步骤列表或步骤定义非法时抛出。
         """
         data = dict(payload or {})
         workflow_id = _normalize_identifier(
@@ -172,13 +181,16 @@ class WorkflowManifest:
 
     @classmethod
     def from_path(cls, manifest_path: Path) -> 'WorkflowManifest':
-        """执行 `from_path` 逻辑。
+        """从磁盘文件加载并解析工作流清单。
+
         Args:
-            manifest_path (Path): 参数 `manifest_path`。
+            manifest_path (Path): 待加载的工作流清单文件路径。
         Returns:
-            'WorkflowManifest': 函数返回结果。
+            WorkflowManifest: 解析成功后的工作流清单对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当文件内容不是合法的工作流对象时抛出。
+            OSError: 当文件读取失败时抛出。
+            json.JSONDecodeError: 当文件内容不是合法 JSON 时抛出。
         """
         payload = json.loads(manifest_path.read_text(encoding='utf-8'))
         if not isinstance(payload, dict):
@@ -188,34 +200,33 @@ class WorkflowManifest:
 
 @dataclass(frozen=True)
 class WorkflowLoadError:
-    """工作流 manifest 加载错误。"""
+    """表示工作流清单加载失败时的错误信息。"""
 
-    workflow_id: str
-    error: str
-    source_path: Path | None = None
+    workflow_id: str  # str：加载失败的工作流 ID 或文件 stem。
+    error: str  # str：对应的错误说明文本。
+    source_path: Path | None = None  # Path | None：出错的来源文件路径。
 
 
 @dataclass(frozen=True)
 class WorkflowStepResult:
-    """单个工作流步骤执行结果。"""
+    """表示单个工作流步骤的执行结果。"""
 
-    step_index: int
-    action: WorkflowAction
-    task_id: str
-    ok: bool
-    before_status: str | None = None
-    after_status: str | None = None
-    message: str = ''
-    error: str | None = None
+    step_index: int  # int：当前步骤在工作流中的 1-based 顺序。
+    action: WorkflowAction  # WorkflowAction：当前步骤执行的动作类型。
+    task_id: str  # str：当前步骤作用的任务 ID。
+    ok: bool  # bool：当前步骤是否执行成功。
+    before_status: str | None = None  # str | None：执行前任务状态。
+    after_status: str | None = None  # str | None：执行后任务状态。
+    message: str = ''  # str：面向用户或日志的简短结果描述。
+    error: str | None = None  # str | None：执行失败时记录的错误详情。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把步骤执行结果转换成可持久化的 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前步骤执行结果的可序列化字典表示。
         """
         payload: JSONDict = {
             'step_index': self.step_index,
@@ -234,13 +245,14 @@ class WorkflowStepResult:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'WorkflowStepResult':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复步骤执行结果对象。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
+            payload (JSONDict | None): 待反序列化的原始字典。
         Returns:
-            'WorkflowStepResult': 函数返回结果。
+            WorkflowStepResult: 恢复后的步骤执行结果对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当动作类型或任务 ID 非法时抛出。
         """
         data = dict(payload or {})
         return cls(
@@ -257,23 +269,22 @@ class WorkflowStepResult:
 
 @dataclass(frozen=True)
 class WorkflowRunRecord:
-    """单次工作流运行记录。"""
+    """表示一次完整的工作流运行记录。"""
 
-    run_id: str
-    workflow_id: str
-    status: WorkflowRunStatus
-    started_at: str
-    error_message: str | None = None
-    step_results: tuple[WorkflowStepResult, ...] = ()
+    run_id: str  # str：本次工作流运行的稳定唯一标识。
+    workflow_id: str  # str：本次运行对应的工作流 ID。
+    status: WorkflowRunStatus  # WorkflowRunStatus：本次运行的最终结果状态。
+    started_at: str  # str：本次运行开始时的 UTC ISO 时间戳。
+    error_message: str | None = None  # str | None：运行失败时的整体错误说明。
+    step_results: tuple[WorkflowStepResult, ...] = ()  # tuple[WorkflowStepResult, ...]：各步骤的执行结果集合。
 
     def to_dict(self) -> JSONDict:
-        """执行 `to_dict` 逻辑。
+        """把工作流运行记录转换成可持久化的 JSON 字典。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            JSONDict: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            JSONDict: 当前工作流运行记录的可序列化字典表示。
         """
         payload: JSONDict = {
             'run_id': self.run_id,
@@ -288,13 +299,14 @@ class WorkflowRunRecord:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'WorkflowRunRecord':
-        """执行 `from_dict` 逻辑。
+        """从 JSON 字典恢复工作流运行记录对象。
+
         Args:
-            payload (JSONDict | None): 参数 `payload`。
+            payload (JSONDict | None): 待反序列化的原始字典。
         Returns:
-            'WorkflowRunRecord': 函数返回结果。
+            WorkflowRunRecord: 恢复后的工作流运行记录对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当运行 ID、工作流 ID 或状态非法时抛出。
         """
         data = dict(payload or {})
         results_raw = data.get('step_results', data.get('stepResults', []))
@@ -319,12 +331,18 @@ class WorkflowRunRecord:
 
 @dataclass
 class WorkflowRuntime:
-    """工作区本地 workflow 运行时。"""
+    """管理工作区本地工作流清单与运行历史的运行时对象。
 
-    workspace: Path
-    manifests: tuple[WorkflowManifest, ...] = ()
-    run_history: tuple[WorkflowRunRecord, ...] = ()
-    load_errors: tuple[WorkflowLoadError, ...] = ()
+    典型工作流如下：
+    1. 调用 `from_workspace()` 加载工作流清单和历史记录。
+    2. 通过 `list_workflows()`、`get_workflow()` 和 `history()` 浏览当前状态。
+    3. 调用 `run_workflow()` 顺序执行某个工作流，并由 `_append_run_history()` 负责落盘记录。
+    """
+
+    workspace: Path  # Path：当前工作流运行时所属的工作区根目录。
+    manifests: tuple[WorkflowManifest, ...] = ()  # tuple[WorkflowManifest, ...]：当前工作区加载成功的工作流清单集合。
+    run_history: tuple[WorkflowRunRecord, ...] = ()  # tuple[WorkflowRunRecord, ...]：历史运行记录集合。
+    load_errors: tuple[WorkflowLoadError, ...] = ()  # tuple[WorkflowLoadError, ...]：加载清单阶段收集到的错误信息。
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'WorkflowRuntime':
@@ -335,6 +353,8 @@ class WorkflowRuntime:
 
         Returns:
             WorkflowRuntime: 初始化后的工作流运行时对象。
+        Raises:
+            ValueError: 当运行历史文件结构非法时抛出。
         """
         resolved_workspace = workspace.resolve()
         manifests: list[WorkflowManifest] = []
@@ -374,24 +394,24 @@ class WorkflowRuntime:
         )
 
     def list_workflows(self) -> tuple[WorkflowManifest, ...]:
-        """执行 `list_workflows` 逻辑。
+        """返回当前已成功加载的全部工作流清单。
+
         Args:
-            None: 无参数。
+            None: 该方法不接收额外参数。
         Returns:
-            tuple[WorkflowManifest, ...]: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            tuple[WorkflowManifest, ...]: 当前工作流清单集合的只读视图。
         """
         return self.manifests
 
     def get_workflow(self, workflow_id: str) -> WorkflowManifest:
-        """执行 `get_workflow` 逻辑。
+        """按工作流 ID 获取单个工作流清单。
+
         Args:
-            workflow_id (str): 参数 `workflow_id`。
+            workflow_id (str): 需要读取的工作流 ID。
         Returns:
-            WorkflowManifest: 函数返回结果。
+            WorkflowManifest: 找到的工作流清单对象。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当工作流不存在或工作流 ID 非法时抛出。
         """
         normalized_id = _normalize_identifier(workflow_id, label='workflow_id')
         for manifest in self.manifests:
@@ -400,13 +420,14 @@ class WorkflowRuntime:
         raise ValueError(f'Unknown workflow: {normalized_id!r}')
 
     def history(self, workflow_id: str | None = None) -> tuple[WorkflowRunRecord, ...]:
-        """执行 `history` 逻辑。
+        """返回工作流运行历史。
+
         Args:
-            workflow_id (str | None): 参数 `workflow_id`。
+            workflow_id (str | None): 可选的工作流 ID；传入后仅返回该工作流的历史。
         Returns:
-            tuple[WorkflowRunRecord, ...]: 函数返回结果。
+            tuple[WorkflowRunRecord, ...]: 过滤后的工作流运行历史集合。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当传入的工作流 ID 非法时抛出。
         """
         if workflow_id is None:
             return self.run_history
@@ -414,13 +435,14 @@ class WorkflowRuntime:
         return tuple(item for item in self.run_history if item.workflow_id == normalized_id)
 
     def run_workflow(self, workflow_id: str) -> WorkflowRunRecord:
-        """执行 `run_workflow` 逻辑。
+        """顺序执行指定工作流，并记录本次运行结果。
+
         Args:
-            workflow_id (str): 参数 `workflow_id`。
+            workflow_id (str): 需要执行的工作流 ID。
         Returns:
-            WorkflowRunRecord: 函数返回结果。
+            WorkflowRunRecord: 本次执行生成的运行记录。
         Raises:
-            Exception: 按调用链透传的异常。
+            ValueError: 当工作流不存在或某个步骤执行遇到非法输入时按现有逻辑记录失败结果。
         """
         manifest = self.get_workflow(workflow_id)
         task_runtime = TaskRuntime.from_workspace(self.workspace)
@@ -473,26 +495,24 @@ class WorkflowRuntime:
         return run_record
 
     def _append_run_history(self, run_record: WorkflowRunRecord) -> None:
-        """内部方法：执行 `_append_run_history` 相关逻辑。
+        """把新的运行记录追加到历史并写回磁盘。
+
         Args:
-            run_record (WorkflowRunRecord): 参数 `run_record`。
+            run_record (WorkflowRunRecord): 需要追加保存的工作流运行记录。
         Returns:
-            None: 函数返回结果。
-        Raises:
-            Exception: 按调用链透传的异常。
+            None: 该方法原地更新运行时并落盘保存。
         """
         self.run_history = self.run_history + (run_record,)
         _save_run_history(self.workspace, self.run_history)
 
 
 def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
-    """内部方法：执行 `_discover_manifest_paths` 相关逻辑。
+    """发现工作区中所有候选工作流清单文件路径。
+
     Args:
-        workspace (Path): 参数 `workspace`。
+        workspace (Path): 工作区根目录。
     Returns:
-        tuple[Path, ...]: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        tuple[Path, ...]: 按稳定顺序返回的工作流清单文件路径元组。
     """
     candidates: list[Path] = []
     single_manifest = workspace / _WORKFLOW_MANIFEST_FILE
@@ -510,13 +530,16 @@ def _discover_manifest_paths(workspace: Path) -> tuple[Path, ...]:
 
 
 def _load_run_history(workspace: Path) -> tuple[WorkflowRunRecord, ...]:
-    """内部方法：执行 `_load_run_history` 相关逻辑。
+    """从工作区加载工作流运行历史。
+
     Args:
-        workspace (Path): 参数 `workspace`。
+        workspace (Path): 工作区根目录。
     Returns:
-        tuple[WorkflowRunRecord, ...]: 函数返回结果。
+        tuple[WorkflowRunRecord, ...]: 恢复后的运行历史记录元组。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当历史文件结构非法时抛出。
+        OSError: 当文件读取失败时抛出。
+        json.JSONDecodeError: 当历史文件内容不是合法 JSON 时抛出。
     """
     path = workspace / _WORKFLOW_RUN_HISTORY_FILE
     if not path.is_file():
@@ -538,14 +561,13 @@ def _load_run_history(workspace: Path) -> tuple[WorkflowRunRecord, ...]:
 
 
 def _save_run_history(workspace: Path, run_history: tuple[WorkflowRunRecord, ...]) -> Path:
-    """内部方法：执行 `_save_run_history` 相关逻辑。
+    """把工作流运行历史写回工作区文件。
+
     Args:
-        workspace (Path): 参数 `workspace`。
-        run_history (tuple[WorkflowRunRecord, ...]): 参数 `run_history`。
+        workspace (Path): 工作区根目录。
+        run_history (tuple[WorkflowRunRecord, ...]): 需要持久化的运行历史集合。
     Returns:
-        Path: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        Path: 实际写入的运行历史文件路径。
     """
     path = workspace / _WORKFLOW_RUN_HISTORY_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -564,14 +586,15 @@ def _save_run_history(workspace: Path, run_history: tuple[WorkflowRunRecord, ...
 
 
 def _execute_workflow_step(task_runtime: TaskRuntime, step: WorkflowStepSpec) -> TaskRecord:
-    """内部方法：执行 `_execute_workflow_step` 相关逻辑。
+    """把单个工作流步骤映射为对应的任务运行时调用。
+
     Args:
-        task_runtime (TaskRuntime): 参数 `task_runtime`。
-        step (WorkflowStepSpec): 参数 `step`。
+        task_runtime (TaskRuntime): 当前要被驱动的任务运行时对象。
+        step (WorkflowStepSpec): 需要执行的工作流步骤定义。
     Returns:
-        TaskRecord: 函数返回结果。
+        TaskRecord: 当前步骤执行后返回的任务记录。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当步骤动作不受支持或所需参数非法时抛出。
     """
     if step.action is WorkflowAction.CREATE:
         return task_runtime.create_task(
@@ -599,14 +622,13 @@ def _execute_workflow_step(task_runtime: TaskRuntime, step: WorkflowStepSpec) ->
 
 
 def _get_task_status(task_runtime: TaskRuntime, task_id: str) -> str | None:
-    """内部方法：执行 `_get_task_status` 相关逻辑。
+    """安全读取指定任务的当前状态值。
+
     Args:
-        task_runtime (TaskRuntime): 参数 `task_runtime`。
-        task_id (str): 参数 `task_id`。
+        task_runtime (TaskRuntime): 当前任务运行时对象。
+        task_id (str): 需要读取状态的任务 ID。
     Returns:
-        str | None: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        str | None: 任务存在时返回状态值，否则返回 None。
     """
     try:
         return task_runtime.get_task(task_id).status.value
@@ -615,14 +637,15 @@ def _get_task_status(task_runtime: TaskRuntime, task_id: str) -> str | None:
 
 
 def _normalize_identifier(value: object, *, label: str) -> str:
-    """内部方法：执行 `_normalize_identifier` 相关逻辑。
+    """规范化并校验带标签的标识符。
+
     Args:
-        value (object): 参数 `value`。
-        label (str): 参数 `label`。
+        value (object): 待校验的原始标识符。
+        label (str): 当前标识符的字段标签，用于构造错误信息。
     Returns:
-        str: 函数返回结果。
+        str: 去除首尾空白后的合法标识符。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当标识符不是字符串、为空或包含非法路径成分时抛出。
     """
     if not isinstance(value, str):
         raise ValueError(f'{label} must be a string')
@@ -635,13 +658,12 @@ def _normalize_identifier(value: object, *, label: str) -> str:
 
 
 def _normalize_optional_text(value: object) -> str | None:
-    """内部方法：执行 `_normalize_optional_text` 相关逻辑。
+    """把可选文本输入规范化为字符串或 None。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待规范化的原始输入值。
     Returns:
-        str | None: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        str | None: 去空白后的字符串；若为空则返回 None。
     """
     if value is None:
         return None
@@ -650,13 +672,14 @@ def _normalize_optional_text(value: object) -> str | None:
 
 
 def _normalize_optional_dependencies(value: object) -> tuple[str, ...] | None:
-    """内部方法：执行 `_normalize_optional_dependencies` 相关逻辑。
+    """规范化可选依赖列表。
+
     Args:
-        value (object): 参数 `value`。
+        value (object): 待校验的依赖列表原始值。
     Returns:
-        tuple[str, ...] | None: 函数返回结果。
+        tuple[str, ...] | None: 去重并规范化后的依赖元组；若未提供则返回 None。
     Raises:
-        Exception: 按调用链透传的异常。
+        ValueError: 当依赖列表类型非法或依赖标识符非法时抛出。
     """
     if value is None:
         return None
@@ -671,14 +694,13 @@ def _normalize_optional_dependencies(value: object) -> tuple[str, ...] | None:
 
 
 def _as_int(value: object, default: int) -> int:
-    """内部方法：执行 `_as_int` 相关逻辑。
+    """把输入值安全转换为整数。
+
     Args:
-        value (object): 参数 `value`。
-        default (int): 参数 `default`。
+        value (object): 待转换的原始值。
+        default (int): 转换失败或输入无效时返回的默认值。
     Returns:
-        int: 函数返回结果。
-    Raises:
-        Exception: 按调用链透传的异常。
+        int: 转换后的整数；失败时返回默认值。
     """
     if isinstance(value, bool) or value is None:
         return default
