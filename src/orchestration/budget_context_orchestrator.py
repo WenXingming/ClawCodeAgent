@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
+from agent.run_state import AgentRunState
 from budget.budget_guard import BudgetGuard
 from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator, ContextTokenBudgetSnapshot
 from context.context_compactor import CompactionResult, ContextCompactor
@@ -22,22 +22,10 @@ from openai_client.openai_client import OpenAIClient, OpenAIClientError
 _MAX_REACTIVE_COMPACT_RETRIES = 2
 
 
-class _SessionStateLike(Protocol):
-    """描述 run loop 所需的最小 session_state 协议。"""
-
-    messages: list[JSONDict]
-
-    def to_messages(self) -> list[JSONDict]:
-        ...
-
-
 @dataclass(frozen=True)
 class PreModelContextOutcome:
     """表示一次 pre-model 上下文治理后的结果快照。"""
 
-    snapshot: ContextTokenBudgetSnapshot  # ContextTokenBudgetSnapshot：治理完成后的最新预算快照。
-    usage_delta: TokenUsage  # TokenUsage：包含 auto compact 额外消耗后的累计 usage 增量。
-    model_call_count: int  # int：包含 compact 调用后更新过的模型调用计数。
     pre_model_stop: str | None  # str | None：pre-model 阶段命中的预算停止原因。
     events: tuple[JSONDict, ...]  # tuple[JSONDict, ...]：本轮 pre-model 阶段产生的结构化事件集合。
 
@@ -47,8 +35,6 @@ class ReactiveCompactOutcome:
     """表示一次模型调用及 reactive compact 重试链路的结果。"""
 
     response: OneTurnResponse | None  # OneTurnResponse | None：成功完成模型调用时的最终响应。
-    usage_delta: TokenUsage  # TokenUsage：包含 reactive compact 额外消耗后的累计 usage 增量。
-    model_call_count: int  # int：包含 reactive compact 调用后的最新模型调用计数。
     stop_reason: str | None  # str | None：reactive compact 之后命中的预算停止原因。
     events: tuple[JSONDict, ...]  # tuple[JSONDict, ...]：本轮调用与重试过程中产生的结构化事件集合。
 
@@ -70,36 +56,28 @@ class BudgetContextOrchestrator:
     def run_pre_model_cycle(
         self,
         *,
-        session_state: _SessionStateLike,
+        run_state: AgentRunState,
         budget_config: BudgetConfig,
         context_policy: ContextPolicy,
         guard: BudgetGuard,
         openai_tools: list[JSONDict],
-        turn_index: int,
-        turns_offset: int,
-        turns_this_run: int,
-        usage_delta: TokenUsage,
-        model_call_count: int,
     ) -> PreModelContextOutcome:
         """执行模型调用前的上下文治理编排并返回统一结果。
 
         Args:
-            session_state (_SessionStateLike): 当前会话状态对象，提供消息列表与消息副本视图。
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
             budget_config (BudgetConfig): 当前预算配置对象。
             context_policy (ContextPolicy): 当前上下文治理策略对象。
             guard (BudgetGuard): 预算闸门对象，用于统一判断是否需要停止。
             openai_tools (list[JSONDict]): 当前可见工具定义列表。
-            turn_index (int): 当前 turn 序号，用于写入事件。
-            turns_offset (int): 本轮运行前已完成的历史 turn 数。
-            turns_this_run (int): 当前 run/resume 调用内已完成的 turn 数。
-            usage_delta (TokenUsage): 当前 run/resume 调用累计的 usage 增量。
-            model_call_count (int): 当前 run/resume 调用累计的模型调用次数。
         Returns:
-            PreModelContextOutcome: 包含最新预算快照、计数、停止原因和事件的治理结果。
+            PreModelContextOutcome: 包含停止原因和事件的治理结果；usage、计数和预算快照直接回写到 run_state。
         """
         events: list[JSONDict] = []
-        next_usage_delta = usage_delta
-        next_model_call_count = model_call_count
+        turn_index = run_state.turn_index
+        next_usage_delta = run_state.usage_delta
+        next_model_call_count = run_state.model_call_count
+        session_state = run_state.session_state
 
         snapshot = self.budget_evaluator.evaluate(
             messages=session_state.to_messages(),
@@ -130,8 +108,8 @@ class BudgetContextOrchestrator:
                 )
 
         pre_model_stop = guard.check_pre_model(
-            turns_offset=turns_offset,
-            turns_this_run=turns_this_run,
+            turns_offset=run_state.turns_offset,
+            turns_this_run=run_state.turns_this_run,
             model_call_count=next_model_call_count,
             snapshot=snapshot,
             usage_delta=next_usage_delta,
@@ -158,8 +136,8 @@ class BudgetContextOrchestrator:
                     max_input_tokens=budget_config.max_input_tokens,
                 )
                 pre_model_stop = guard.check_pre_model(
-                    turns_offset=turns_offset,
-                    turns_this_run=turns_this_run,
+                    turns_offset=run_state.turns_offset,
+                    turns_this_run=run_state.turns_this_run,
                     model_call_count=next_model_call_count,
                     snapshot=snapshot,
                     usage_delta=next_usage_delta,
@@ -185,10 +163,11 @@ class BudgetContextOrchestrator:
             }
         )
 
+        run_state.token_budget_snapshot = snapshot
+        run_state.usage_delta = next_usage_delta
+        run_state.model_call_count = next_model_call_count
+
         return PreModelContextOutcome(
-            snapshot=snapshot,
-            usage_delta=next_usage_delta,
-            model_call_count=next_model_call_count,
             pre_model_stop=pre_model_stop,
             events=tuple(events),
         )
@@ -197,37 +176,29 @@ class BudgetContextOrchestrator:
         self,
         *,
         client: OpenAIClient,
-        session_state: _SessionStateLike,
+        run_state: AgentRunState,
         budget_config: BudgetConfig,
         context_policy: ContextPolicy,
         openai_tools: list[JSONDict],
-        turn_index: int,
         guard: BudgetGuard,
-        turns_offset: int,
-        turns_this_run: int,
-        usage_delta: TokenUsage,
-        model_call_count: int,
     ) -> ReactiveCompactOutcome:
         """执行模型调用，并在需要时做 reactive compact 重试。
 
         Args:
             client (OpenAIClient): 用于发起模型调用的客户端。
-            session_state (_SessionStateLike): 当前会话状态对象，提供消息列表与消息副本视图。
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
             budget_config (BudgetConfig): 当前预算配置对象。
             context_policy (ContextPolicy): 当前上下文治理策略对象。
             openai_tools (list[JSONDict]): 当前可见工具定义列表。
-            turn_index (int): 当前 turn 序号，用于写入事件。
             guard (BudgetGuard): 预算闸门对象，用于在重试后重新检查预算停止条件。
-            turns_offset (int): 本轮运行前已完成的历史 turn 数。
-            turns_this_run (int): 当前 run/resume 调用内已完成的 turn 数。
-            usage_delta (TokenUsage): 当前 run/resume 调用累计的 usage 增量。
-            model_call_count (int): 当前 run/resume 调用累计的模型调用次数。
         Returns:
-            ReactiveCompactOutcome: 包含最终响应、累计用量、计数、停止原因和事件的调用结果。
+            ReactiveCompactOutcome: 包含最终响应、停止原因和事件的调用结果；usage 和模型调用计数直接回写到 run_state。
         """
         events: list[JSONDict] = []
-        current_usage = usage_delta
-        current_model_call_count = model_call_count
+        session_state = run_state.session_state
+        turn_index = run_state.turn_index
+        current_usage = run_state.usage_delta
+        current_model_call_count = run_state.model_call_count
         attempt = 0
         current_error: OpenAIClientError | None = None
 
@@ -240,10 +211,10 @@ class BudgetContextOrchestrator:
                 )
                 current_model_call_count += 1
                 current_usage = current_usage + response.usage
+                run_state.usage_delta = current_usage
+                run_state.model_call_count = current_model_call_count
                 return ReactiveCompactOutcome(
                     response=response,
-                    usage_delta=current_usage,
-                    model_call_count=current_model_call_count,
                     stop_reason=None,
                     events=tuple(events),
                 )
@@ -289,26 +260,27 @@ class BudgetContextOrchestrator:
                     tools=openai_tools,
                     max_input_tokens=budget_config.max_input_tokens,
                 )
+                run_state.token_budget_snapshot = snapshot
                 if stop := guard.check_pre_model(
-                    turns_offset=turns_offset,
-                    turns_this_run=turns_this_run,
+                    turns_offset=run_state.turns_offset,
+                    turns_this_run=run_state.turns_this_run,
                     model_call_count=current_model_call_count,
                     snapshot=snapshot,
                     usage_delta=current_usage,
                 ):
+                    run_state.usage_delta = current_usage
+                    run_state.model_call_count = current_model_call_count
                     return ReactiveCompactOutcome(
                         response=None,
-                        usage_delta=current_usage,
-                        model_call_count=current_model_call_count,
                         stop_reason=stop,
                         events=tuple(events),
                     )
 
         events.append({'type': 'backend_error', 'turn': turn_index, 'error': str(current_error)})
+        run_state.usage_delta = current_usage
+        run_state.model_call_count = current_model_call_count
         return ReactiveCompactOutcome(
             response=None,
-            usage_delta=current_usage,
-            model_call_count=current_model_call_count,
             stop_reason=None,
             events=tuple(events),
         )

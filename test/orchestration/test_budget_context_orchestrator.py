@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
+from agent.run_state import AgentRunState
 from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
 from budget.budget_guard import BudgetGuard
 from context.context_compactor import ContextCompactor
@@ -85,6 +86,11 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
             )
         )
         session_state.append_user('继续')
+        run_state = AgentRunState.for_new_session(
+            session_state=session_state,
+            session_id='session-001',
+        )
+        run_state.begin_turn(1)
 
         orchestrator = BudgetContextOrchestrator(
             budget_evaluator=ContextTokenBudgetEvaluator(),
@@ -98,22 +104,18 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
         )
 
         outcome = orchestrator.run_pre_model_cycle(
-            session_state=session_state,
+            run_state=run_state,
             budget_config=runtime_policies.budget_config,
             context_policy=runtime_policies.context_policy,
             guard=guard,
             openai_tools=[],
-            turn_index=1,
-            turns_offset=0,
-            turns_this_run=1,
-            usage_delta=TokenUsage(),
-            model_call_count=0,
         )
 
         event_types = [item.get('type') for item in outcome.events]
         self.assertIn('snip_boundary', event_types)
         self.assertIn('token_budget', event_types)
         self.assertIsNone(outcome.pre_model_stop)
+        self.assertIsNotNone(run_state.token_budget_snapshot)
 
     def test_run_pre_model_cycle_auto_compact_updates_usage_and_count(self) -> None:
         _make_test_dir()
@@ -127,6 +129,11 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
             OneTurnResponse(content='旧回答 ' * 80, tool_calls=(), finish_reason='stop', usage=TokenUsage())
         )
         session_state.append_user('继续执行')
+        run_state = AgentRunState.for_new_session(
+            session_state=session_state,
+            session_id='session-001',
+        )
+        run_state.begin_turn(1)
 
         compact_usage = TokenUsage(input_tokens=2, output_tokens=1)
         orchestrator = BudgetContextOrchestrator(
@@ -150,23 +157,19 @@ class BudgetContextOrchestratorTests(unittest.TestCase):
         )
 
         outcome = orchestrator.run_pre_model_cycle(
-            session_state=session_state,
+            run_state=run_state,
             budget_config=runtime_policies.budget_config,
             context_policy=runtime_policies.context_policy,
             guard=guard,
             openai_tools=[],
-            turn_index=1,
-            turns_offset=0,
-            turns_this_run=1,
-            usage_delta=TokenUsage(),
-            model_call_count=0,
         )
 
         compact_events = [item for item in outcome.events if item.get('type') == 'compact_boundary']
         self.assertGreater(len(compact_events), 0)
-        self.assertEqual(outcome.model_call_count, 1)
-        self.assertEqual(outcome.usage_delta.input_tokens, compact_usage.input_tokens)
-        self.assertEqual(outcome.usage_delta.output_tokens, compact_usage.output_tokens)
+        self.assertEqual(run_state.model_call_count, 1)
+        self.assertEqual(run_state.usage_delta.input_tokens, compact_usage.input_tokens)
+        self.assertEqual(run_state.usage_delta.output_tokens, compact_usage.output_tokens)
+        self.assertIsNone(outcome.pre_model_stop)
 
 
 if __name__ == '__main__':
