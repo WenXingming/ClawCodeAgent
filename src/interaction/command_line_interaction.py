@@ -2,7 +2,7 @@
 
 本模块负责：
 - 暴露 agent、agent-chat、agent-resume 三条命令入口
-- 把命令行参数装配为模型配置、运行时配置与会话存储
+- 把命令行参数装配为模型配置、静态契约与会话存储
 - 在新会话与恢复会话之间切换，并驱动统一的交互式聊天循环
 
 设计上，本模块以 CLI 作为命令协调器，对外保留模块级 main 兼容入口，
@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from interaction.environment_summary import EnvironmentLoadSummary
@@ -35,6 +35,29 @@ from openai_client.openai_client import OpenAIClient, OpenAIClientError
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
+
+
+@dataclass(frozen=True)
+class AgentLaunchSpec:
+    """描述一次 agent 启动所需的静态装配结果。
+
+    该对象只服务 CLI 装配路径：先把模型配置、静态策略契约与会话路径
+    合成为单个不可变规格，再统一实例化 client / store / agent，避免
+    新会话与恢复会话各自手工拼装一遍依赖。
+    """
+
+    model_config: ModelConfig
+    workspace_scope: WorkspaceScope
+    execution_policy: ExecutionPolicy
+    context_policy: ContextPolicy
+    permissions: ToolPermissionPolicy
+    budget_config: BudgetConfig
+    session_paths: SessionPaths
+
+    @property
+    def session_directory(self) -> Path:
+        """返回本次启动规格使用的会话目录绝对路径。"""
+        return self.session_paths.session_directory.resolve()
 
 
 class CLI:
@@ -358,28 +381,53 @@ class CLI:
             ValueError: 当必填配置字段缺失或运行时配置约束非法时抛出。
             OpenAIClientError: 当模型客户端初始化失败时透传。
         """
-        model_config = self._build_new_model_config(args)
-        workspace_scope = self._build_new_workspace_scope(args)
-        execution_policy = self._build_new_execution_policy(args)
-        context_policy = self._build_new_context_policy(args)
-        permissions = self._build_new_permissions(args)
-        budget_config = self._build_new_budget_config(args)
-        session_paths = self._build_new_session_paths(args)
-        self._validate_static_contracts(permissions)
-        client = self._openai_client_cls(model_config)
-        session_store = self._session_store_cls(session_paths.session_directory)
-        return (
-            self._agent_cls(
-                client,
-                workspace_scope,
-                execution_policy,
-                context_policy,
-                permissions,
-                budget_config,
-                session_paths,
-                session_store,
-            ),
-            session_paths,
+        launch_spec = self._build_launch_spec(args)
+        return self._build_agent_from_launch_spec(launch_spec), launch_spec.session_paths
+
+    def _build_launch_spec(
+        self,
+        args: argparse.Namespace,
+        *,
+        session_snapshot: AgentSessionSnapshot | None = None,
+    ) -> AgentLaunchSpec:
+        """把 CLI 参数与可选快照基线装配成统一启动规格。"""
+        if session_snapshot is None:
+            launch_spec = AgentLaunchSpec(
+                model_config=self._build_new_model_config(args),
+                workspace_scope=self._build_new_workspace_scope(args),
+                execution_policy=self._build_new_execution_policy(args),
+                context_policy=self._build_new_context_policy(args),
+                permissions=self._build_new_permissions(args),
+                budget_config=self._build_new_budget_config(args),
+                session_paths=self._build_new_session_paths(args),
+            )
+        else:
+            launch_spec = AgentLaunchSpec(
+                model_config=self._apply_model_overrides(session_snapshot.model_config, args),
+                workspace_scope=self._apply_workspace_scope_overrides(session_snapshot.workspace_scope, args),
+                execution_policy=self._apply_execution_overrides(session_snapshot.execution_policy, args),
+                context_policy=self._apply_context_policy_overrides(session_snapshot.context_policy, args),
+                permissions=self._apply_permission_overrides(session_snapshot.permissions, args),
+                budget_config=self._apply_budget_overrides(session_snapshot.budget_config, args),
+                session_paths=self._apply_session_path_overrides(session_snapshot.session_paths, args),
+            )
+
+        self._validate_static_contracts(launch_spec.permissions)
+        return launch_spec
+
+    def _build_agent_from_launch_spec(self, launch_spec: AgentLaunchSpec) -> LocalAgent:
+        """根据统一启动规格实例化 client、store 与 agent。"""
+        client = self._openai_client_cls(launch_spec.model_config)
+        session_store = self._session_store_cls(launch_spec.session_directory)
+        return self._agent_cls(
+            client,
+            launch_spec.workspace_scope,
+            launch_spec.execution_policy,
+            launch_spec.context_policy,
+            launch_spec.permissions,
+            launch_spec.budget_config,
+            launch_spec.session_paths,
+            session_store,
         )
 
     def _build_new_model_config(self, args: argparse.Namespace) -> ModelConfig:
@@ -1057,7 +1105,7 @@ class CLI:
     ) -> tuple[LocalAgent, AgentSessionSnapshot, Path | None]:
         """根据持久化会话快照构造恢复态代理。
 
-        从存储中加载快照后，以命令行参数对快照中的模型配置与运行时配置做覆盖，
+        从存储中加载快照后，以命令行参数对快照中的模型配置与静态契约做覆盖，
         再据此创建客户端、存储与代理实例。
 
         Args:
@@ -1075,29 +1123,11 @@ class CLI:
             session_id,
             directory=loader_directory,
         )
-        model_config = self._apply_model_overrides(session_snapshot.model_config, args)
-        workspace_scope = self._apply_workspace_scope_overrides(session_snapshot.workspace_scope, args)
-        execution_policy = self._apply_execution_overrides(session_snapshot.execution_policy, args)
-        context_policy = self._apply_context_policy_overrides(session_snapshot.context_policy, args)
-        permissions = self._apply_permission_overrides(session_snapshot.permissions, args)
-        budget_config = self._apply_budget_overrides(session_snapshot.budget_config, args)
-        session_paths = self._apply_session_path_overrides(session_snapshot.session_paths, args)
-        self._validate_static_contracts(permissions)
-        client = self._openai_client_cls(model_config)
-        session_store = self._session_store_cls(session_paths.session_directory)
+        launch_spec = self._build_launch_spec(args, session_snapshot=session_snapshot)
         return (
-            self._agent_cls(
-                client,
-                workspace_scope,
-                execution_policy,
-                context_policy,
-                permissions,
-                budget_config,
-                session_paths,
-                session_store,
-            ),
+            self._build_agent_from_launch_spec(launch_spec),
             session_snapshot,
-            loader_directory or session_paths.session_directory.resolve(),
+            loader_directory or launch_spec.session_directory,
         )
 
     # ------------------------------------------------------------------

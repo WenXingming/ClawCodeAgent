@@ -178,6 +178,30 @@ class MainEntryTests(unittest.TestCase):
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_shell_commands)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_destructive_shell_commands)
 
+    def test_main_session_directory_override_applies_to_runtime_and_store(self) -> None:
+        target_directory = (Path.cwd() / '.tmp-cli-session-dir').resolve()
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    'OPENAI_MODEL': 'demo-model',
+                    'OPENAI_API_KEY': 'demo-key',
+                },
+                clear=False,
+            ),
+            patch('main.LocalAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['/exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main(['agent', '--session-directory', str(target_directory)])
+
+        self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
+        self.assertEqual(_FakeAgent.last_runtime.session_paths.session_directory, target_directory)
+        self.assertEqual(_FakeAgent.last_session_store.directory, target_directory)
+
     def test_main_destructive_shell_requires_shell_flag(self) -> None:
         with patch.dict(
             os.environ,
@@ -283,6 +307,34 @@ class MainEntryTests(unittest.TestCase):
         self.assertEqual(_FakeAgent.last_runtime.max_turns, 9)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_shell_commands)
         self.assertFalse(_FakeAgent.last_runtime.permissions.allow_file_write)
+
+    def test_agent_resume_session_directory_override_applies_to_runtime_and_store(self) -> None:
+        stored = self._make_session_snapshot()
+        target_directory = (Path.cwd() / '.tmp-resume-session-dir').resolve()
+        load_directories: list[Path | None] = []
+
+        def _load_snapshot(session_id, directory):
+            load_directories.append(directory)
+            return stored
+
+        with (
+            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
+            patch('main.LocalAgent', _FakeAgent),
+            patch('builtins.input', side_effect=['/exit']),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                code = main([
+                    'agent-resume',
+                    '--session-directory', str(target_directory),
+                    'resume-test-001',
+                ])
+
+        self.assertEqual(code, 0)
+        _assert_banner_rendered(self, stdout.getvalue())
+        self.assertEqual(load_directories, [target_directory])
+        self.assertEqual(_FakeAgent.last_runtime.session_paths.session_directory, target_directory)
+        self.assertEqual(_FakeAgent.last_session_store.directory, target_directory)
 
     def test_agent_resume_trailing_flag_after_session_id_applies(self) -> None:
         stored = self._make_session_snapshot()

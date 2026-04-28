@@ -34,11 +34,14 @@ class SessionStoreTests(unittest.TestCase):
             session_id=session_id,
             model_config=ModelConfig(model='demo-model'),
             workspace_scope=WorkspaceScope(cwd=workspace),
-            execution_policy=ExecutionPolicy(),
-            context_policy=ContextPolicy(),
+            execution_policy=ExecutionPolicy(max_turns=7, command_timeout_seconds=45),
+            context_policy=ContextPolicy(auto_compact_threshold_tokens=2048, compact_preserve_messages=3),
             permissions=ToolPermissionPolicy(),
             budget_config=BudgetConfig(),
-            session_paths=SessionPaths(),
+            session_paths=SessionPaths(
+                session_directory=workspace / 'sessions',
+                scratchpad_root=workspace / 'scratchpads',
+            ),
             messages=(
                 {'role': 'user', 'content': '你好，世界'},
                 {'role': 'assistant', 'content': '收到'},
@@ -67,6 +70,9 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(restored.session_id, session_snapshot.session_id)
         self.assertEqual(restored.model_config, session_snapshot.model_config)
         self.assertEqual(restored.workspace_scope.cwd, session_snapshot.workspace_scope.cwd.resolve())
+        self.assertEqual(restored.execution_policy, session_snapshot.execution_policy)
+        self.assertEqual(restored.context_policy, session_snapshot.context_policy)
+        self.assertEqual(restored.session_paths, session_snapshot.session_paths)
         self.assertEqual(restored.messages, session_snapshot.messages)
         self.assertEqual(restored.transcript, session_snapshot.transcript)
         self.assertEqual(restored.events, session_snapshot.events)
@@ -138,7 +144,11 @@ class SessionStoreTests(unittest.TestCase):
 
         self.assertIsInstance(restored.model_config, ModelConfig)
         self.assertIsInstance(restored.workspace_scope, WorkspaceScope)
+        self.assertIsInstance(restored.execution_policy, ExecutionPolicy)
+        self.assertIsInstance(restored.context_policy, ContextPolicy)
+        self.assertIsInstance(restored.session_paths, SessionPaths)
         self.assertEqual(restored.workspace_scope.cwd, workspace.resolve())
+        self.assertEqual(restored.session_paths.session_directory, (workspace / 'sessions').resolve())
 
     def test_save_and_load_preserve_utf8_content(self) -> None:
         workspace = _make_test_dir()
