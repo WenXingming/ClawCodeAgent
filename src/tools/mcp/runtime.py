@@ -12,10 +12,10 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .mcp_manifest_loader import MCPManifestLoader, MCP_SCHEMA_VERSION, normalize_name, normalize_optional_text
-from .mcp_models import MCPCapability, MCPLoadError, MCPResource, MCPServerProfile, MCPTool, MCPToolCallResult, MCPTransportError
-from .mcp_renderer import MCPRenderer
-from .mcp_transport import MCPTransportClient
+from .manifest_loader import MCPManifestLoader, MCP_SCHEMA_VERSION, normalize_name, normalize_optional_text
+from .models import MCPCapability, MCPLoadError, MCPResource, MCPServerProfile, MCPTool, MCPToolCallResult, MCPTransportError
+from .renderer import MCPRenderer
+from .transport import MCPTransportClient
 
 
 @dataclass

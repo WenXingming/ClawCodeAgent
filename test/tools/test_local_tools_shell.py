@@ -10,14 +10,14 @@ from unittest.mock import patch
 
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
-from tools.local_tools import LocalToolService
+from tools.tool_gateway import ToolGateway
 
 
 class LocalToolsShellTests(unittest.TestCase):
     """验证 bash 工具权限、安全与流式执行行为。"""
 
     def setUp(self) -> None:
-        self.tool_service = LocalToolService()
+        self.tool_gateway = ToolGateway()
 
     def _build_context(
         self,
@@ -38,8 +38,8 @@ class LocalToolsShellTests(unittest.TestCase):
             allow_shell_commands=allow_shell_commands,
             allow_destructive_shell_commands=allow_destructive_shell_commands,
         )
-        registry = self.tool_service.default_registry()
-        context = self.tool_service.build_context(
+        registry = self.tool_gateway.default_registry()
+        context = self.tool_gateway.build_context(
             workspace_scope,
             execution_policy,
             permissions,
@@ -49,7 +49,7 @@ class LocalToolsShellTests(unittest.TestCase):
         return registry, context
 
     def test_registry_contains_bash_tool(self) -> None:
-        registry = self.tool_service.default_registry()
+        registry = self.tool_gateway.default_registry()
         self.assertIn('bash', registry)
 
     def test_bash_is_blocked_when_shell_disabled(self) -> None:
@@ -60,7 +60,7 @@ class LocalToolsShellTests(unittest.TestCase):
                 allow_shell_commands=False,
                 allow_destructive_shell_commands=False,
             )
-            result = self.tool_service.execute(registry, 'bash', {'command': 'echo hi'}, context)
+            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo hi'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'permission_denied')
@@ -73,7 +73,7 @@ class LocalToolsShellTests(unittest.TestCase):
                 allow_shell_commands=True,
                 allow_destructive_shell_commands=False,
             )
-            result = self.tool_service.execute(registry, 'bash', {'command': 'echo ok && rm -rf /tmp/a'}, context)
+            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo ok && rm -rf /tmp/a'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'permission_denied')
@@ -86,7 +86,7 @@ class LocalToolsShellTests(unittest.TestCase):
                 allow_shell_commands=True,
                 allow_destructive_shell_commands=False,
             )
-            result = self.tool_service.execute(registry, 'bash', {'command': 'echo hello-shell'}, context)
+            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo hello-shell'}, context)
 
         self.assertTrue(result.ok)
         self.assertEqual(result.metadata.get('action'), 'bash')
@@ -102,7 +102,7 @@ class LocalToolsShellTests(unittest.TestCase):
                 allow_destructive_shell_commands=False,
             )
             updates = list(
-                self.tool_service.execute_streaming(
+                self.tool_gateway.execute_streaming(
                     registry,
                     'bash',
                     {'command': 'echo alpha && echo beta'},
@@ -123,7 +123,7 @@ class LocalToolsShellTests(unittest.TestCase):
         self.assertIn('exit_code=', result_updates[0].result.content)
         self.assertLess(max(stdout_positions), result_position)
 
-    @patch('tools.local_tools.subprocess.Popen')
+    @patch('tools.local.shell_tools.subprocess.Popen')
     def test_bash_timeout_returns_structured_error(self, mock_popen: object) -> None:
         process = mock_popen.return_value
         process.communicate.side_effect = subprocess.TimeoutExpired(cmd='sleep', timeout=0.01)
@@ -136,13 +136,13 @@ class LocalToolsShellTests(unittest.TestCase):
                 allow_destructive_shell_commands=False,
                 command_timeout_seconds=0.01,
             )
-            result = self.tool_service.execute(registry, 'bash', {'command': 'sleep forever'}, context)
+            result = self.tool_gateway.execute(registry, 'bash', {'command': 'sleep forever'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'tool_execution_error')
         self.assertIn('timed out', result.content)
 
-    @patch('tools.local_tools.subprocess.Popen')
+    @patch('tools.local.shell_tools.subprocess.Popen')
     def test_bash_passes_safe_env_to_subprocess(self, mock_popen: object) -> None:
         process = mock_popen.return_value
         process.communicate.return_value = ('hello', '')
@@ -156,7 +156,7 @@ class LocalToolsShellTests(unittest.TestCase):
                 allow_destructive_shell_commands=False,
                 safe_env={'POLICY_FLAG': 'enabled'},
             )
-            result = self.tool_service.execute(registry, 'bash', {'command': 'echo hello'}, context)
+            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo hello'}, context)
 
         self.assertTrue(result.ok)
         self.assertEqual(mock_popen.call_args.kwargs['env']['POLICY_FLAG'], 'enabled')

@@ -8,7 +8,7 @@ from context.context_token_budget_evaluator import ContextTokenBudgetSnapshot
 from core_contracts.protocol import JSONDict, ToolCall, ToolExecutionResult
 from core_contracts.token_usage import TokenUsage
 from session.session_state import AgentSessionState
-from tools.local_tools import LocalTool
+from tools.registry import LocalTool
 
 
 @dataclass

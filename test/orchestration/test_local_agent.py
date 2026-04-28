@@ -20,7 +20,7 @@ from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, Ope
 from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
-from tools.mcp_models import MCPCapability, MCPTool, MCPToolCallResult
+from tools.mcp import MCPCapability, MCPTool, MCPToolCallResult
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -1626,13 +1626,13 @@ class LocalAgentTests(unittest.TestCase):
         agent.mcp_runtime.call_tool = mock.Mock()
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
 
-        context = agent.tool_service.build_context(
+        context = agent.tool_gateway.build_context(
             config.workspace_scope,
             config.execution_policy,
             config.permissions,
             tool_registry=agent.tool_registry,
         )
-        result = agent.tool_service.execute(
+        result = agent.tool_gateway.execute(
             agent.tool_registry,
             'mcp_call_tool',
             {
