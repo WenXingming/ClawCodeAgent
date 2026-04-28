@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from context.context_budget_evaluator import ContextBudgetEvaluator
 from budget.budget_guard import BudgetGuard
-from interface.slash_commands_interface import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
+from interaction.slash_commands_interaction import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from context.context_compactor import ContextCompactor
 from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from orchestration.agent_manager import AgentManager, DelegatedTaskSpec

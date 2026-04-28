@@ -3,15 +3,15 @@
 本文件是最顶层的 Python 包入口，负责：
 - 组织所有控制面、运行时、客户端等组件的依赖注入
 - 通过@patch点可擦写关键依赖（OpenAIClient、LocalCodingAgent、AgentSessionStore）
-- 转发CLI命令到interface.command_line_interface的主逻辑
+- 转发CLI命令到interaction.command_line_interaction的主逻辑
 
-控制面实现已下沉到 interface.command_line_interface；
+控制面实现已下沉到 interaction.command_line_interaction；
 本文件仅保留顶层入口与可 patch 的依赖注入点。
 """
 
 from __future__ import annotations
 
-from interface.command_line_interface import CLI
+from interaction.command_line_interaction import CLI
 from openai_client.openai_client import OpenAIClient
 from orchestration.local_agent import LocalAgent
 from session.session_store import AgentSessionStore

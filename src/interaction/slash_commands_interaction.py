@@ -1,4 +1,4 @@
-"""Slash 命令控制面模块。
+"""Slash 命令交互面模块。
 
 本模块负责三件事：
 1. 解析用户输入中的本地 slash 命令。
@@ -91,34 +91,17 @@ class SlashCommandDispatcher:
 
         Args:
             budget_evaluator (ContextBudgetEvaluator | None): 可选的预算评估器；未提供时创建默认实例。
-
         Returns:
             None: 该构造函数只负责建立分发器内部状态。
         """
-        self._budget_evaluator = budget_evaluator or ContextBudgetEvaluator()  # ContextBudgetEvaluator: /context 使用的 token 预算投影器。
-        self._specs = self._build_specs()  # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，按帮助输出顺序保存。
-        self._spec_index = self._build_spec_index(self._specs)  # dict[str, SlashCommandSpec]: 命令名到规格的查找索引。
+        self._budget_evaluator = budget_evaluator or ContextBudgetEvaluator()
+        # ContextBudgetEvaluator: /context 命令使用的 token 预算评估器。
 
-    def parse_slash_command(self, input_text: str) -> ParsedSlashCommand | None:
-        """从原始输入中提取 slash 命令。
+        self._specs = self._build_specs()
+        # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，保持帮助展示顺序。
 
-        Args:
-            input_text (str): 用户提交的原始输入文本。
-
-        Returns:
-            ParsedSlashCommand | None: 成功时返回解析结果；普通 prompt 返回 None。
-        """
-        stripped = input_text.strip()
-        if not stripped.startswith('/'):
-            return None
-
-        body = stripped[1:]
-        command_name, _, arguments = body.partition(' ')
-        return ParsedSlashCommand(
-            command_name=command_name.strip().lower(),
-            arguments=arguments.strip(),
-            raw_input=input_text,
-        )
+        self._spec_index = self._build_spec_index(self._specs)
+        # dict[str, SlashCommandSpec]: 命令名到规格对象的快速查找索引。
 
     def dispatch_slash_command(
         self,
@@ -130,7 +113,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行所需的只读上下文。
             input_text (str): 用户输入文本。
-
         Returns:
             SlashCommandResult: 分流结果，描述是否已处理以及后续是否继续 query。
         """
@@ -148,6 +130,26 @@ class SlashCommandDispatcher:
 
         return spec.handler(context, parsed)
 
+    def parse_slash_command(self, input_text: str) -> ParsedSlashCommand | None:
+        """从原始输入中提取 slash 命令。
+
+        Args:
+            input_text (str): 用户提交的原始输入文本。
+        Returns:
+            ParsedSlashCommand | None: 成功时返回解析结果；普通 prompt 返回 None。
+        """
+        stripped = input_text.strip()
+        if not stripped.startswith('/'):
+            return None
+
+        body = stripped[1:]
+        command_name, _, arguments = body.partition(' ')
+        return ParsedSlashCommand(
+            command_name=command_name.strip().lower(),
+            arguments=arguments.strip(),
+            raw_input=input_text,
+        )
+
     def get_slash_command_specs(self) -> tuple[SlashCommandSpec, ...]:
         """返回当前分发器支持的 slash 命令规格列表。
 
@@ -161,11 +163,30 @@ class SlashCommandDispatcher:
 
         Args:
             command_name (str): 待查找的命令名，可包含大小写与首尾空白。
-
         Returns:
             SlashCommandSpec | None: 找到时返回规格对象，否则返回 None。
         """
         return self._spec_index.get(command_name.strip().lower())
+
+    def _build_unknown_command_result(self, command_name: str) -> SlashCommandResult:
+        """为未知 slash 命令构造统一错误结果。
+
+        Args:
+            command_name (str): 用户输入的命令名，可能为空字符串。
+        Returns:
+            SlashCommandResult: 包含 unknown_command 错误码的本地处理结果。
+        """
+        command_label = command_name or '(empty)'
+        return SlashCommandResult(
+            handled=True,
+            continue_query=False,
+            command_name=command_label,
+            output=(
+                f'Unknown slash command: /{command_label}\n'
+                'Run /help to list supported local commands.'
+            ),
+            metadata={'error': 'unknown_command'},
+        )
 
     def _build_specs(self) -> tuple[SlashCommandSpec, ...]:
         """构建当前分发器支持的全部命令规格。
@@ -193,7 +214,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行上下文；当前命令不读取其中内容。
             parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
-
         Returns:
             SlashCommandResult: 包含帮助文本的本地处理结果。
         """
@@ -218,7 +238,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行上下文，提供消息、预算与工具注册信息。
             parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
-
         Returns:
             SlashCommandResult: 包含上下文预算快照的本地处理结果。
         """
@@ -254,7 +273,6 @@ class SlashCommandDispatcher:
 
         Args:
             tool_registry (Mapping[str, LocalTool]): 当前会话可见的本地工具注册表。
-
         Returns:
             list[JSONDict]: 供预算评估器计算 token 占用的工具 schema 列表。
         """
@@ -265,7 +283,6 @@ class SlashCommandDispatcher:
 
         Args:
             value (int | None): 需要展示的整数值；None 表示无限制。
-
         Returns:
             str: None 返回 unlimited，其余情况返回十进制字符串。
         """
@@ -278,7 +295,6 @@ class SlashCommandDispatcher:
 
         Args:
             value (bool): 待格式化的布尔值。
-
         Returns:
             str: True 返回 yes，False 返回 no。
         """
@@ -294,7 +310,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行上下文，提供会话 ID、模型与工作目录信息。
             parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
-
         Returns:
             SlashCommandResult: 包含会话状态信息的本地处理结果。
         """
@@ -325,7 +340,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行上下文，提供权限配置。
             parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
-
         Returns:
             SlashCommandResult: 包含权限摘要的本地处理结果。
         """
@@ -355,7 +369,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行上下文，提供工具注册表、权限与插件摘要。
             parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
-
         Returns:
             SlashCommandResult: 包含工具列表与插件摘要的本地处理结果。
         """
@@ -389,7 +402,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行上下文，提供当前会话历史以判断 had_history。
             parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
-
         Returns:
             SlashCommandResult: 包含清空提示与新会话状态的本地处理结果。
         """
@@ -420,7 +432,6 @@ class SlashCommandDispatcher:
         Args:
             context (SlashCommandContext): 命令执行上下文；当前命令不读取其中内容。
             parsed (ParsedSlashCommand): 已解析命令；用于保留用户输入的别名（exit/quit）。
-
         Returns:
             SlashCommandResult: 包含退出提示的本地处理结果。
         """
@@ -433,27 +444,6 @@ class SlashCommandDispatcher:
             metadata={'exit_requested': True},
         )
 
-    def _build_unknown_command_result(self, command_name: str) -> SlashCommandResult:
-        """为未知 slash 命令构造统一错误结果。
-
-        Args:
-            command_name (str): 用户输入的命令名，可能为空字符串。
-
-        Returns:
-            SlashCommandResult: 包含 unknown_command 错误码的本地处理结果。
-        """
-        command_label = command_name or '(empty)'
-        return SlashCommandResult(
-            handled=True,
-            continue_query=False,
-            command_name=command_label,
-            output=(
-                f'Unknown slash command: /{command_label}\n'
-                'Run /help to list supported local commands.'
-            ),
-            metadata={'error': 'unknown_command'},
-        )
-
     def _build_spec_index(
         self,
         specs: tuple[SlashCommandSpec, ...],
@@ -462,7 +452,6 @@ class SlashCommandDispatcher:
 
         Args:
             specs (tuple[SlashCommandSpec, ...]): 按展示顺序排列的命令规格列表。
-
         Returns:
             dict[str, SlashCommandSpec]: 命令名到规格对象的映射表。
         """

@@ -1,4 +1,4 @@
-"""控制面命令行接口模块。
+"""控制面命令行交互模块。
 
 本模块负责：
 - 暴露 agent、agent-chat、agent-resume 三条命令入口
@@ -17,9 +17,9 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from interface.exit_banner import SessionExitSummaryRenderer, SessionInteractionTracker
-from interface.runtime_event_printer import RuntimeEventPrinter
-from interface.startup_banner import StartupBannerRenderer
+from interaction.exit_banner import SessionExitSummaryRenderer, SessionInteractionTracker
+from interaction.runtime_event_printer import RuntimeEventPrinter
+from interaction.startup_banner import StartupBannerRenderer
 from core_contracts.config import AgentPermissions, AgentRuntimeConfig, BudgetConfig, ModelConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.run_result import AgentRunResult
@@ -29,11 +29,8 @@ from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 
 
-_DEFAULT_CHAT_EXIT_COMMANDS: frozenset[str] = frozenset({'/exit', '/quit'})
-
-
 class CLI:
-    """控制面命令行接口协调器。
+    """控制面命令行交互协调器。
 
     该类封装了命令解析、依赖注入、会话恢复、结果渲染与多轮交互循环。
     外部通常通过模块级 main() 创建该类的实例并调用 main()。测试场景下可在
@@ -45,6 +42,9 @@ class CLI:
         cli = CLI(openai_client_cls=..., agent_cls=..., session_store_cls=...)
         exit_code = cli.main(['agent', '--model', 'gpt-4o'])
     """
+
+    _DEFAULT_CHAT_EXIT_COMMANDS: frozenset[str] = frozenset({'/exit', '/quit'})
+    # frozenset[str]: 交互式聊天循环中立即结束本地会话的内建命令集合。
 
     # ------------------------------------------------------------------
     # 构造与初始化
@@ -93,7 +93,7 @@ class CLI:
         self._exit_summary_renderer = exit_summary_renderer or SessionExitSummaryRenderer()
         # SessionExitSummaryRenderer: 交互循环结束时输出总结提示框的渲染器实例。
 
-        self._chat_exit_commands = chat_exit_commands or _DEFAULT_CHAT_EXIT_COMMANDS
+        self._chat_exit_commands = chat_exit_commands or self._DEFAULT_CHAT_EXIT_COMMANDS
         # frozenset[str]: 交互式聊天循环的本地退出命令集合，如 '/exit'、'/quit'。
 
     # ------------------------------------------------------------------
@@ -618,6 +618,19 @@ class CLI:
     # 交互循环：执行、渲染、状态推进
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _resolve_show_progress(args: argparse.Namespace) -> bool:
+        """解析交互式 progress 输出开关。
+
+        Args:
+            args (argparse.Namespace): 已解析的命令行参数。
+        Returns:
+            bool: 未显式指定时默认返回 True，否则返回 show_progress 的布尔值。
+        """
+        if args.show_progress is None:
+            return True
+        return bool(args.show_progress)
+
     def _run_interactive_loop(
         self,
         agent: LocalAgent,
@@ -637,6 +650,7 @@ class CLI:
             current_session_id (str | None): 当前活动会话 ID；新会话场景下为 None。
             current_session_directory (Path | None): 当前会话快照所在目录；可为 None。
             pending_session_snapshot (AgentSessionSnapshot | None): 已预加载但尚未消费的快照。
+            show_progress (bool): 是否启用运行期 progress 日志与动态状态栏。
         Returns:
             int: 交互循环退出码；用户主动退出、EOF、KeyboardInterrupt 均返回 0。
         """
@@ -676,34 +690,58 @@ class CLI:
                 current_session_id=current_session_id,
                 current_session_directory=current_session_directory,
             )
-            self._update_interaction_tracker(
-                interaction_tracker,
+            interaction_tracker.observe_run_result(
                 result,
                 current_session_id=current_session_id,
             )
             print()  # turn separator, 每轮结束后输出一个空行分隔
 
     @staticmethod
-    def _resolve_show_progress(args: argparse.Namespace) -> bool:
-        """解析交互式 progress 输出开关，默认开启。"""
-        if args.show_progress is None:
-            return True
-        return bool(args.show_progress)
-
-    @staticmethod
     def _configure_agent_progress(
         agent: object,
         progress_printer: RuntimeEventPrinter | None,
     ) -> None:
-        """为当前 agent 动态挂载 progress reporter。"""
+        """为当前 agent 动态挂载 progress reporter。
+
+        Args:
+            agent (object): 需要被挂载 progress_reporter 属性的代理对象。
+            progress_printer (RuntimeEventPrinter | None): 负责消费结构化事件的打印器；为空时清空 reporter。
+        Returns:
+            None: 该方法只修改 agent 对象上的 progress_reporter 属性。
+        """
         reporter = progress_printer.emit if progress_printer is not None else None
         setattr(agent, 'progress_reporter', reporter)
 
     @staticmethod
     def _flush_progress_printer(progress_printer: RuntimeEventPrinter | None) -> None:
-        """输出 progress printer 中尚未刷新的残留片段。"""
+        """输出 progress printer 中尚未刷新的残留片段。
+
+        Args:
+            progress_printer (RuntimeEventPrinter | None): 待冲刷的 progress 打印器。
+        Returns:
+            None: 该方法只在打印器存在时触发 flush。
+        """
         if progress_printer is not None:
             progress_printer.flush()
+
+    def _finalize_interactive_loop(
+        self,
+        tracker: SessionInteractionTracker,
+        *,
+        leading_blank_line: bool = False,
+    ) -> int:
+        """渲染交互结束提示框并返回退出码。
+
+        Args:
+            tracker (SessionInteractionTracker): 当前交互期间的累计统计追踪器。
+            leading_blank_line (bool): 是否在提示框前额外输出一个空行。
+        Returns:
+            int: 固定返回 0，表示交互循环正常结束。
+        """
+        if leading_blank_line:
+            print()
+        self._exit_summary_renderer.render(tracker.to_summary())
+        return 0
 
     def _execute_chat_turn(
         self,
@@ -778,7 +816,13 @@ class CLI:
 
     @staticmethod
     def _derive_empty_result_message(result: AgentRunResult) -> str | None:
-        """当 final_output 为空时，从 stop_reason 或 events 里提取可读诊断信息。"""
+        """当 final_output 为空时，从 stop_reason 或 events 里提取可读诊断信息。
+
+        Args:
+            result (AgentRunResult): 当前轮的执行结果。
+        Returns:
+            str | None: 找到可读诊断文本时返回消息，否则返回 None。
+        """
         for event in reversed(result.events):
             if event.get('type') != 'backend_error':
                 continue
@@ -818,32 +862,6 @@ class CLI:
         if result.session_path:
             next_directory = Path(result.session_path).resolve().parent
         return next_session_id, next_directory
-
-    def _update_interaction_tracker(
-        self,
-        tracker: SessionInteractionTracker,
-        result: AgentRunResult,
-        *,
-        current_session_id: str | None,
-    ) -> None:
-        """把单轮结果中的增量统计写入交互期汇总。"""
-        tracker.update_session_id(result.session_id or current_session_id)
-        for event in result.events:
-            if event.get('type') != 'tool_result':
-                continue
-            tracker.observe_tool_result(ok=bool(event.get('ok')))
-
-    def _finalize_interactive_loop(
-        self,
-        tracker: SessionInteractionTracker,
-        *,
-        leading_blank_line: bool = False,
-    ) -> int:
-        """渲染交互结束提示框并返回退出码。"""
-        if leading_blank_line:
-            print()
-        self._exit_summary_renderer.render(tracker.to_summary())
-        return 0
 
     # ------------------------------------------------------------------
     # agent-resume 子命令：恢复会话

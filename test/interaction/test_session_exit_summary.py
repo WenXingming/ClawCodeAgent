@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from interface.exit_banner import SessionExitSummary, SessionExitSummaryRenderer
+from interaction.exit_banner import SessionInteractionSummary, SessionExitSummaryRenderer
 
 
 class _TtyStringIO(io.StringIO):
@@ -38,7 +38,7 @@ class SessionExitSummaryRendererTests(unittest.TestCase):
     def test_render_wraps_summary_in_single_rounded_box(self) -> None:
         stream = io.StringIO()
         renderer = SessionExitSummaryRenderer(top_padding=0)
-        summary = SessionExitSummary(
+        summary = SessionInteractionSummary(
             session_id='session-001',
             tool_calls=3,
             tool_successes=2,
@@ -70,7 +70,7 @@ class SessionExitSummaryRendererTests(unittest.TestCase):
     def test_render_uses_soft_white_frame_on_ansi_stream(self) -> None:
         stream = _TtyStringIO()
         renderer = SessionExitSummaryRenderer(top_padding=0)
-        summary = SessionExitSummary(session_id='session-001', wall_time_seconds=1)
+        summary = SessionInteractionSummary(session_id='session-001', wall_time_seconds=1)
 
         with patch.dict(os.environ, {'WT_SESSION': '1'}, clear=False):
             renderer.render(summary, stream=stream)
@@ -82,7 +82,7 @@ class SessionExitSummaryRendererTests(unittest.TestCase):
     def test_render_supports_gradient_frame_style(self) -> None:
         stream = _TtyStringIO()
         renderer = SessionExitSummaryRenderer(top_padding=0, frame_style='gradient')
-        summary = SessionExitSummary(session_id='session-001', wall_time_seconds=1)
+        summary = SessionInteractionSummary(session_id='session-001', wall_time_seconds=1)
 
         with patch.dict(os.environ, {'WT_SESSION': '1'}, clear=False):
             renderer.render(summary, stream=stream)

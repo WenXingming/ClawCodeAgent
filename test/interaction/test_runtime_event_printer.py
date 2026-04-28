@@ -6,7 +6,7 @@ import io
 import time
 import unittest
 
-from interface.runtime_event_printer import RuntimeEventPrinter
+from interaction.runtime_event_printer import RuntimeEventPrinter
 
 
 class _TtyStringIO(io.StringIO):

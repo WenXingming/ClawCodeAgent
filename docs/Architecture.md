@@ -12,9 +12,9 @@
 ```text
 src/
 |- main.py
-|- interface/
-|  |- command_line_interface.py
-|  '- slash_commands_interface.py
+|- interaction/
+|  |- command_line_interaction.py
+|  '- slash_commands_interaction.py
 |- orchestration/
 |  |- agent_manager.py
 |  |- budget_context_orchestrator.py
@@ -65,10 +65,10 @@ graph TB
 
     main(["🧭 main.py"])
 
-    subgraph ControlPlane[interface package / CLI 与本地控制面]
+    subgraph ControlPlane[interaction package / CLI 与本地交互面]
         direction TB
-        n_cli(["🧭 interface/command_line_interface.py"])
-        n_slash(["⌨️ interface/slash_commands_interface.py"])
+        n_cli(["🧭 interaction/command_line_interaction.py"])
+        n_slash(["⌨️ interaction/slash_commands_interaction.py"])
         style ControlPlane fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -250,7 +250,7 @@ graph TB
 - `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextBudgetEvaluator`（含 `ContextBudgetSnapshot`）提供预算投影，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
 - `extensions/` 负责工作区扩展入口：插件、策略、搜索 provider、worktree runtime、MCP server 都从工作区 `.claw/` manifest、git 状态或环境变量发现并对外提供独立 API。
-- `interface/` 负责 CLI 和 slash 命令；`slash_commands_interface.py` 依赖预算投影和工具注册表，但不会触发模型调用。
+- `interaction/` 负责 CLI 和 slash 命令；`slash_commands_interaction.py` 依赖预算投影和工具注册表，但不会触发模型调用。
 - `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
 
 这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：`runtime` 被拆成 `orchestration`、`planning`、`extensions`；token 估算与预算投影（`ContextTokenEstimator`、`ContextBudgetEvaluator`）归入 `context`，`budget` 只保留执行闸门 `BudgetGuard`，形成 `context` → `budget` → `orchestration` 的单向树状依赖。
@@ -262,7 +262,7 @@ test/
 |- test_main.py
 |- test_main_chat.py
 |- test_all.py
-|- interface/
+|- interaction/
 |- orchestration/
 |- planning/
 |- extensions/
@@ -288,4 +288,4 @@ test/
 2. 再看 `openai_client/openai_client.py` 与 `tools/local_tools.py`，理解模型侧和工具侧的外部交互面。
 3. 再看 `context/`（含 token 估算与预算投影）和 `budget/`（执行闸门），理解预算预检、上下文剪裁和摘要压缩的职责切分。
 4. 再看 `planning/` 与 `extensions/`，理解工作区本地状态和外部扩展能力各自如何发现、持久化和暴露 API。
-5. 最后看 `orchestration/local_agent.py`、`interface/command_line_interface.py` 和 `main.py`，理解这些能力如何被装配成完整入口。
+5. 最后看 `orchestration/local_agent.py`、`interaction/command_line_interaction.py` 和 `main.py`，理解这些能力如何被装配成完整入口。

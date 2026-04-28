@@ -12,7 +12,7 @@
 
 1. docs 目录原有四份中文架构文档。
 2. 原项目 README、PARITY_CHECKLIST、TESTING_GUIDE。
-3. 当前核心源码主干：main、interface、orchestration、planning、extensions、budget、context、session、tools。
+3. 当前核心源码主干：main、interaction、orchestration、planning、extensions、budget、context、session、tools。
 4. 当前关键扩展与状态机：plugin、hook_policy、task、plan、workflow、search、mcp。
 5. 当前关键测试：test/orchestration/test_local_agent.py、test/extensions/*、test/planning/*、test/test_main.py、test/test_main_chat.py。
 
@@ -48,7 +48,7 @@
 
 ### 4.1 分层视图
 
-1. 入口层：`src/main.py` + `src/interface/command_line_interface.py`
+1. 入口层：`src/main.py` + `src/interaction/command_line_interaction.py`
 2. 核心编排层：`src/orchestration/local_agent.py` 的 `LocalAgent`
 3. 扩展能力层：`src/extensions/`（plugin / hook_policy / search / mcp）
 4. 计划状态机层：`src/planning/`（task / plan / workflow）
@@ -715,13 +715,13 @@
 
 实现落地决策（2026-04-24）：
 
-- 当前稳定入口为 `src/interface/slash_commands_interface.py`，集中承载 slash parse、命令规格注册和高频本地命令。
+- 当前稳定入口为 `src/interaction/slash_commands_interaction.py`，集中承载 slash parse、命令规格注册和高频本地命令。
 - slash 分流发生在 `LocalAgent.run/resume` 把 prompt 写入 `AgentSessionState` 之前，从根上保证本地命令不污染 `messages` 与 `transcript`。
 - 本地 slash 命令统一返回 `stop_reason='slash_command'`，并写入 `slash_command` event；只记录 event，不写入 transcript。
 - `/context` 复用 `ContextBudgetEvaluator.evaluate(messages, tools, max_input_tokens)` 做本地上下文投影，展示当前 messages、transcript、tool_calls 与 projected tokens。
 - `/clear` 采用 fork 语义：不覆盖旧 session 文件，而是生成新的 cleared `session_id` 并保存空会话快照；输出中同时提示旧 session_id 与新 session_id。
 - 首版不改 `src/main.py` 参数面；slash 命令仍通过现有 `prompt` 入口传入，ISSUE-013 再处理 CLI 子命令扩展。
-- 测试面拆为 `test/interface/test_slash_commands.py` 单测与 `test/orchestration/test_local_agent.py` 集成测试，覆盖 `/help`、`/status`、`/clear` 的 no-model-call 路径。
+- 测试面拆为 `test/interaction/test_slash_commands.py` 单测与 `test/orchestration/test_local_agent.py` 集成测试，覆盖 `/help`、`/status`、`/clear` 的 no-model-call 路径。
 
 #### ISSUE-013 CLI 命令面（agent/chat/resume）
 
@@ -753,7 +753,7 @@
 
 实现落地决策（2026-04-24）：
 
-- 新建 `src/interface/` 包，把 CLI 与本地 slash 控制面放入同一组织边界；`main.py` 保留为极薄入口包装层，后续不再依赖旧 slash shim。
+- 新建 `src/interaction/` 包，把 CLI 与本地 slash 控制面放入同一组织边界；`main.py` 保留为极薄入口包装层，后续不再依赖旧 slash shim。
 - CLI 采用强制子命令，固定为 `agent`、`agent-chat`、`agent-resume`，不再保留旧的顶层裸 prompt 用法；无子命令直接走 argparse 错误并返回非 0。
 - `agent-resume` 与 `agent-chat --session-id` 采用“先加载存档，再按显式 CLI 参数覆盖”的策略，覆盖实现使用 dataclass `replace()`，避免 dict merge 打破契约边界。
 - 参数面尽量对齐现有根仓库契约：模型、pricing、runtime、budget、permissions 都支持 CLI 覆盖；`output_schema` 与复杂系统提示拼装仍不纳入本期命令面。

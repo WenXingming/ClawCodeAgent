@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import unittest
 
-from interface.startup_banner import StartupBannerRenderer
+from interaction.startup_banner import StartupBannerRenderer
 
 
 class StartupBannerRendererTests(unittest.TestCase):
