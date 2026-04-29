@@ -15,7 +15,7 @@ from interaction.slash_commands import (
     SlashCommandDispatcher,
 )
 from session.session_state import AgentSessionState
-from tools.tool_gateway import ToolGateway
+from tools.tools_gateway import ToolsGateway
 
 
 class SlashCommandModuleTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class SlashCommandModuleTests(unittest.TestCase):
     def setUp(self) -> None:
         """为每个测试用例创建独立的 slash 分发器实例。"""
         self.dispatcher = SlashCommandDispatcher()
-        self.tool_gateway = ToolGateway()
+        self.tool_gateway = ToolsGateway()
 
     def _make_context(self) -> SlashCommandContext:
         session_state = AgentSessionState()

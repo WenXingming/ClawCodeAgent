@@ -8,10 +8,11 @@ from pathlib import Path
 
 from app.chat_loop import ChatLoop
 from app.runtime_builder import RuntimeBuilder
+from core_contracts.openai_contracts import ModelGatewayError
 from core_contracts.run_result import AgentRunResult
-from interaction import ExitRenderer, SlashCommandRenderer, StartupRenderer
-from openai_client import OpenAIClient, OpenAIClientError
-from session import AgentSessionSnapshot, SessionManager
+from interaction.interaction_gateway import ExitRenderer, SlashCommandRenderer, StartupRenderer
+from openai_client.openai_client_gateway import OpenAIClientGateway
+from session.session_gateway import AgentSessionSnapshot, SessionGateway
 
 
 class AppCLI:
@@ -22,9 +23,9 @@ class AppCLI:
     def __init__(
         self,
         *,
-        openai_client_cls: type[OpenAIClient] = OpenAIClient,
+        openai_client_cls: type[OpenAIClientGateway] = OpenAIClientGateway,
         agent_cls,
-        session_manager_cls: type[SessionManager] = SessionManager,
+        session_manager_cls: type[SessionGateway] = SessionGateway,
         startup_renderer: StartupRenderer | None = None,
         exit_renderer: ExitRenderer | None = None,
         slash_renderer: SlashCommandRenderer | None = None,
@@ -62,7 +63,7 @@ class AppCLI:
                 return self._run_agent_chat_command(args)
 
             raise ValueError(f'Unknown command: {args.command}')
-        except (ValueError, OpenAIClientError) as exc:
+        except (ValueError, ModelGatewayError) as exc:
             print(f'[main] {exc}', file=sys.stderr)
             return 2
 

@@ -11,14 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Callable, Literal, Mapping
 
-from context import ContextManager
+from context.context_gateway import ContextGateway
 from core_contracts.budget import BudgetConfig
 from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from session import AgentSessionState
-from tools.registry import LocalTool, render_openai_tools
+from session.session_gateway import AgentSessionState
+from core_contracts.tools_contracts import ToolDescriptor
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class SlashCommandContext:
     permissions: ToolPermissionPolicy  # ToolPermissionPolicy: 当前工具权限策略。
     budget_config: BudgetConfig  # BudgetConfig: 当前预算配置。
     model_config: ModelConfig  # ModelConfig: 当前模型元数据，供 /status 展示模型名。
-    tool_registry: Mapping[str, LocalTool]  # Mapping[str, LocalTool]: 当前已注册工具集合。
+    tool_registry: Mapping[str, ToolDescriptor]  # Mapping[str, ToolDescriptor]: 当前已注册工具集合。
     plugin_summary: str = ''  # str: 插件运行时生成的摘要文本，供 /tools 追加展示。
 
 
@@ -103,16 +103,16 @@ class SlashCommandDispatcher:
     可在构造时显式传入。
     """
 
-    def __init__(self, context_manager: ContextManager | None = None) -> None:
+    def __init__(self, context_manager: ContextGateway | None = None) -> None:
         """初始化 slash 命令分发器。
 
         Args:
-            context_manager (ContextManager | None): 可选的 context 领域门面；未提供时创建默认实例。
+            context_manager (ContextGateway | None): 可选的 context 领域网关；未提供时创建默认实例。
         Returns:
             None: 该构造函数只负责建立分发器内部状态。
         """
-        self._context_manager = context_manager or ContextManager()
-        # ContextManager: /context 命令使用的 context 领域统一入口。
+        self._context_manager = context_manager or ContextGateway()
+        # ContextGateway: /context 命令使用的 context 领域统一入口。
 
         self._specs = self._build_specs()
         # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，保持帮助展示顺序。
@@ -367,15 +367,15 @@ class SlashCommandDispatcher:
             output='\n'.join(lines),
         )
 
-    def _build_openai_tools(self, tool_registry: Mapping[str, LocalTool]) -> list[JSONDict]:
+    def _build_openai_tools(self, tool_registry: Mapping[str, ToolDescriptor]) -> list[JSONDict]:
         """把本地工具注册表投影为 OpenAI 工具 schema 列表。
 
         Args:
-            tool_registry (Mapping[str, LocalTool]): 当前会话可见的本地工具注册表。
+            tool_registry (Mapping[str, ToolDescriptor]): 当前会话可见的本地工具注册表。
         Returns:
             list[JSONDict]: 供预算评估器计算 token 占用的工具 schema 列表。
         """
-        return render_openai_tools(tool_registry)
+        return [tool.to_openai_tool() for tool in tool_registry.values()]
 
     def _render_optional_int(self, value: int | None) -> str:
         """把可选整数格式化为展示文本。

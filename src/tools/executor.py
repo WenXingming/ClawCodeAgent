@@ -2,44 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Iterator, Mapping
 
+from core_contracts.gateway_errors import GatewayError, GatewayPermissionError, GatewayRuntimeError
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict, ToolExecutionResult
 from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
-from tools.registry import LocalTool
+from core_contracts.tools_contracts import ToolDescriptor, ToolExecutionContext, ToolStreamUpdate, build_execution_context
 
 
-class ToolPermissionError(RuntimeError):
+class ToolPermissionError(GatewayPermissionError):
     """表示工具调用被权限策略拒绝。"""
 
 
-class ToolExecutionError(RuntimeError):
+class ToolExecutionError(GatewayRuntimeError):
     """表示工具参数非法或执行过程失败。"""
-
-
-@dataclass(frozen=True)
-class ToolExecutionContext:
-    """描述一次工具调用共享的不可变执行上下文。"""
-
-    root: Path
-    command_timeout_seconds: float
-    max_output_chars: int
-    permissions: ToolPermissionPolicy
-    safe_env: dict[str, str] = field(default_factory=dict)
-    tool_registry: Mapping[str, LocalTool] | None = None
-
-
-@dataclass(frozen=True)
-class ToolStreamUpdate:
-    """表示流式工具调用过程中产出的单个更新事件。"""
-
-    kind: str
-    chunk: str = ''
-    result: ToolExecutionResult | None = None
-    metadata: JSONDict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -52,22 +30,21 @@ class ToolExecutor:
         execution_policy: ExecutionPolicy,
         permissions: ToolPermissionPolicy,
         *,
-        tool_registry: Mapping[str, LocalTool] | None = None,
+        tool_registry: Mapping[str, ToolDescriptor] | None = None,
         safe_env: dict[str, str] | None = None,
     ) -> ToolExecutionContext:
         """根据运行时配置构造工具执行上下文。"""
-        return ToolExecutionContext(
-            root=workspace_scope.cwd.resolve(),
-            command_timeout_seconds=execution_policy.command_timeout_seconds,
-            max_output_chars=execution_policy.max_output_chars,
-            permissions=permissions,
-            safe_env=dict(safe_env or {}),
+        return build_execution_context(
+            workspace_scope,
+            execution_policy,
+            permissions,
             tool_registry=tool_registry,
+            safe_env=safe_env,
         )
 
     def execute(
         self,
-        tool_registry: Mapping[str, LocalTool],
+        tool_registry: Mapping[str, ToolDescriptor],
         name: str,
         arguments: JSONDict,
         context: ToolExecutionContext,
@@ -79,16 +56,16 @@ class ToolExecutor:
 
         try:
             payload = tool.handler(arguments, context)
-        except ToolPermissionError as exc:
+        except (ToolPermissionError, GatewayPermissionError) as exc:
             return self._failure_result(name, exc, error_kind='permission_denied')
-        except (ToolExecutionError, OSError, UnicodeError) as exc:
+        except (ToolExecutionError, GatewayRuntimeError, GatewayError, OSError, UnicodeError) as exc:
             return self._failure_result(name, exc, error_kind='tool_execution_error')
 
         return self._success_result(name, payload)
 
     def execute_streaming(
         self,
-        tool_registry: Mapping[str, LocalTool],
+        tool_registry: Mapping[str, ToolDescriptor],
         name: str,
         arguments: JSONDict,
         context: ToolExecutionContext,
@@ -105,12 +82,12 @@ class ToolExecutor:
 
         try:
             yield from tool.stream_handler(arguments, context)
-        except ToolPermissionError as exc:
+        except (ToolPermissionError, GatewayPermissionError) as exc:
             yield ToolStreamUpdate(
                 kind='result',
                 result=self._failure_result(name, exc, error_kind='permission_denied'),
             )
-        except (ToolExecutionError, OSError, UnicodeError) as exc:
+        except (ToolExecutionError, GatewayRuntimeError, GatewayError, OSError, UnicodeError) as exc:
             yield ToolStreamUpdate(
                 kind='result',
                 result=self._failure_result(name, exc, error_kind='tool_execution_error'),

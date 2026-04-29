@@ -9,7 +9,7 @@ from pathlib import Path
 
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
-from tools.tool_gateway import ToolGateway
+from tools.tools_gateway import ToolsGateway
 from workspace import PluginCatalog
 
 
@@ -17,7 +17,7 @@ class PluginCatalogTests(unittest.TestCase):
     """验证 manifest 发现、alias/virtual 注册与冲突处理。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolGateway()
+        self.tool_gateway = ToolsGateway()
 
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
         manifest_dir = workspace / '.claw' / 'plugins'

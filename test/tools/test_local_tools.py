@@ -14,14 +14,14 @@ from pathlib import Path
 
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
-from tools.tool_gateway import ToolGateway
+from tools.tools_gateway import ToolsGateway
 
 
 class LocalToolsTests(unittest.TestCase):
     """验证 ISSUE-004 工具层最小闭环。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolGateway()
+        self.tool_gateway = ToolsGateway()
 
     def _build_context(
         self,

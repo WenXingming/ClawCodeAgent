@@ -13,8 +13,8 @@ from core_contracts.model import ModelConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from openai_client import OpenAIClient
-from session import AgentSessionSnapshot, SessionManager
+from openai_client.openai_client_gateway import OpenAIClientGateway
+from session.session_gateway import AgentSessionSnapshot, SessionGateway
 
 
 @dataclass(frozen=True)
@@ -39,9 +39,9 @@ class AgentLaunchSpec:
 class RuntimeBuilder:
     """封装 CLI 对 runtime 依赖的构建逻辑。"""
 
-    openai_client_cls: type[OpenAIClient] = OpenAIClient
+    openai_client_cls: type[OpenAIClientGateway] = OpenAIClientGateway
     agent_cls: type[Agent] = Agent
-    session_manager_cls: type[SessionManager] = SessionManager
+    session_manager_cls: type[SessionGateway] = SessionGateway
 
     def build_agent_from_args(self, args: argparse.Namespace) -> tuple[Agent, SessionPaths]:
         """根据命令行参数构造新会话代理实例。"""

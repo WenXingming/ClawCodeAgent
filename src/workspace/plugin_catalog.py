@@ -11,8 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from core_contracts.protocol import JSONDict
-from tools.executor import ToolExecutionContext
-from tools.registry import LocalTool
+from core_contracts.tools_contracts import ToolDescriptor, ToolExecutionContext
 
 
 _PLUGIN_MANIFEST_FILE = Path('.claw') / 'plugins.json'
@@ -237,7 +236,7 @@ class PluginCatalog:
     """
 
     manifests: tuple[PluginManifest, ...] = ()  # tuple[PluginManifest, ...]：已成功加载的插件清单集合。
-    plugin_registry: dict[str, LocalTool] = field(default_factory=dict)  # dict[str, LocalTool]：插件新增工具的注册表。
+    plugin_registry: dict[str, ToolDescriptor] = field(default_factory=dict)  # dict[str, ToolDescriptor]：插件新增工具的注册表。
     registrations: tuple[PluginRegistration, ...] = ()  # tuple[PluginRegistration, ...]：成功注册的插件工具记录。
     conflicts: tuple[PluginConflict, ...] = ()  # tuple[PluginConflict, ...]：注册阶段检测到的名称冲突记录。
     load_errors: tuple[PluginLoadError, ...] = ()  # tuple[PluginLoadError, ...]：加载或注册阶段收集到的错误信息。
@@ -246,13 +245,13 @@ class PluginCatalog:
     def from_workspace(
         cls,
         workspace: Path,
-        base_tool_registry: Mapping[str, LocalTool],
+        base_tool_registry: Mapping[str, ToolDescriptor],
     ) -> 'PluginCatalog':
         """从工作区加载插件清单并构建插件运行时。
 
         Args:
             workspace (Path): 工作区根目录。
-            base_tool_registry (Mapping[str, LocalTool]): 基础工具注册表。
+            base_tool_registry (Mapping[str, ToolDescriptor]): 基础工具注册表。
 
         Returns:
             PluginCatalog: 含注册结果、冲突与错误信息的工作区插件目录对象。
@@ -272,7 +271,7 @@ class PluginCatalog:
                 )
 
         occupied_registry = dict(base_tool_registry)
-        plugin_registry: dict[str, LocalTool] = {}
+        plugin_registry: dict[str, ToolDescriptor] = {}
         registrations: list[PluginRegistration] = []
         conflicts: list[PluginConflict] = []
 
@@ -343,13 +342,13 @@ class PluginCatalog:
             load_errors=tuple(load_errors),
         )
 
-    def merge_tool_registry(self, base_tool_registry: Mapping[str, LocalTool]) -> dict[str, LocalTool]:
+    def merge_tool_registry(self, base_tool_registry: Mapping[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
         """把插件工具注册表合并到基础工具注册表中。
 
         Args:
-            base_tool_registry (Mapping[str, LocalTool]): 当前基础工具注册表。
+            base_tool_registry (Mapping[str, ToolDescriptor]): 当前基础工具注册表。
         Returns:
-            dict[str, LocalTool]: 合并后的完整工具注册表副本。
+            dict[str, ToolDescriptor]: 合并后的完整工具注册表副本。
         """
         merged = dict(base_tool_registry)
         merged.update(self.plugin_registry)
@@ -564,15 +563,15 @@ def _validate_declared_tool_names(
         seen.add(tool_name)
 
 
-def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_tool: LocalTool) -> LocalTool:
-    """根据 alias 定义构造一个代理目标工具的 LocalTool。
+def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_tool: ToolDescriptor) -> ToolDescriptor:
+    """根据 alias 定义构造一个代理目标工具的 ToolDescriptor。
 
     Args:
         manifest (PluginManifest): 当前插件清单。
         alias (AliasToolSpec): 需要构造的 alias 工具定义。
-        target_tool (LocalTool): alias 最终转发到的目标工具。
+        target_tool (ToolDescriptor): alias 最终转发到的目标工具。
     Returns:
-        LocalTool: 构造完成的 alias 工具对象。
+        ToolDescriptor: 构造完成的 alias 工具对象。
     """
     def _handler(arguments: JSONDict, context: ToolExecutionContext):
         """在 alias 工具被调用时转发到目标工具。
@@ -601,7 +600,7 @@ def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_too
         )
         return content, rendered_metadata
 
-    return LocalTool(
+    return ToolDescriptor(
         name=alias.name,
         description=alias.description or f'Alias for {alias.target} from plugin {manifest.name}.',
         parameters=alias.parameters or _derive_alias_parameters(target_tool.parameters, alias.arguments),
@@ -609,14 +608,14 @@ def _build_alias_tool(manifest: PluginManifest, alias: AliasToolSpec, target_too
     )
 
 
-def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec) -> LocalTool:
-    """根据 virtual 工具定义构造一个固定响应的 LocalTool。
+def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec) -> ToolDescriptor:
+    """根据 virtual 工具定义构造一个固定响应的 ToolDescriptor。
 
     Args:
         manifest (PluginManifest): 当前插件清单。
         virtual_tool (VirtualToolSpec): 需要构造的 virtual 工具定义。
     Returns:
-        LocalTool: 构造完成的 virtual 工具对象。
+        ToolDescriptor: 构造完成的 virtual 工具对象。
     """
     def _handler(arguments: JSONDict, context: ToolExecutionContext):
         """在 virtual 工具被调用时返回固定内容与插件元数据。
@@ -637,7 +636,7 @@ def _build_virtual_tool(manifest: PluginManifest, virtual_tool: VirtualToolSpec)
         )
         return virtual_tool.content, metadata
 
-    return LocalTool(
+    return ToolDescriptor(
         name=virtual_tool.name,
         description=virtual_tool.description,
         parameters=virtual_tool.parameters or dict(_EMPTY_OBJECT_SCHEMA),
@@ -679,15 +678,15 @@ def _derive_alias_parameters(target_parameters: JSONDict, forced_arguments: JSON
 
 def _describe_tool_source(
     tool_name: str,
-    base_tool_registry: Mapping[str, LocalTool],
-    plugin_registry: Mapping[str, LocalTool],
+    base_tool_registry: Mapping[str, ToolDescriptor],
+    plugin_registry: Mapping[str, ToolDescriptor],
 ) -> str:
     """生成人类可读的工具来源说明文本。
 
     Args:
         tool_name (str): 需要描述来源的工具名称。
-        base_tool_registry (Mapping[str, LocalTool]): 基础工具注册表。
-        plugin_registry (Mapping[str, LocalTool]): 当前插件工具注册表。
+        base_tool_registry (Mapping[str, ToolDescriptor]): 基础工具注册表。
+        plugin_registry (Mapping[str, ToolDescriptor]): 当前插件工具注册表。
     Returns:
         str: 面向冲突诊断的人类可读来源说明。
     """
@@ -696,3 +695,4 @@ def _describe_tool_source(
     if tool_name in plugin_registry:
         return f'plugin tool {tool_name}'
     return f'existing tool {tool_name}'
+

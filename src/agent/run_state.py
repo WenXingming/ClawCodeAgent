@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from context.budget_projection import BudgetProjection
+from core_contracts.context_contracts import BudgetProjection
 from core_contracts.protocol import JSONDict, ToolCall, ToolExecutionResult
 from core_contracts.token_usage import TokenUsage
-from session import AgentSessionState
-from tools.registry import LocalTool
+from session.session_gateway import AgentSessionState
+from core_contracts.tools_contracts import ToolDescriptor
 
 
 @dataclass
@@ -36,7 +36,7 @@ class AgentRunState:
     usage_delta: TokenUsage = field(default_factory=TokenUsage)
     events: list[JSONDict] = field(default_factory=list)
     token_budget_snapshot: BudgetProjection | None = None
-    effective_tool_registry: dict[str, LocalTool] = field(default_factory=dict)
+    effective_tool_registry: dict[str, ToolDescriptor] = field(default_factory=dict)
 
     @classmethod
     def for_new_session(
@@ -99,7 +99,7 @@ class AgentRunState:
         """返回历史基线与本次增量叠加后的总 usage。"""
         return self.usage_baseline + self.usage_delta
 
-    def set_effective_tool_registry(self, tool_registry: dict[str, LocalTool]) -> None:
+    def set_effective_tool_registry(self, tool_registry: dict[str, ToolDescriptor]) -> None:
         """更新当前 turn 的有效工具表。"""
         self.effective_tool_registry = dict(tool_registry)
 

@@ -8,7 +8,7 @@ from typing import Mapping
 
 from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict
-from tools.registry import LocalTool
+from core_contracts.tools_contracts import ToolDescriptor
 from workspace.plugin_catalog import PluginCatalog
 from workspace.policy_catalog import PolicyCatalog
 from workspace.search_service import SearchResponse, SearchService
@@ -37,7 +37,7 @@ class WorkspaceGateway:
             worktree_service=_load_worktree_service(resolved_workspace),
         )
 
-    def prepare_tool_registry(self, base_tool_registry: Mapping[str, LocalTool]) -> dict[str, LocalTool]:
+    def prepare_tool_registry(self, base_tool_registry: Mapping[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
         """基于当前工作区插件与策略准备有效工具注册表。"""
         self.plugin_catalog = PluginCatalog.from_workspace(self.workspace, base_tool_registry)
         merged_registry = self.plugin_catalog.merge_tool_registry(base_tool_registry)

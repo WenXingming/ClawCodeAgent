@@ -7,9 +7,9 @@ import re
 from dataclasses import dataclass, field
 
 from context.context_token_estimator import ContextTokenEstimator
+from core_contracts.openai_contracts import ModelClient
 from core_contracts.protocol import JSONDict
 from core_contracts.token_usage import TokenUsage
-from openai_client import OpenAIClient, OpenAIClientError, OpenAIResponseError
 
 _COMPACT_BOUNDARY_PREFIX = '<system-reminder>\nEarlier conversation history was compacted to save context.'
 _COMPACT_SUMMARY_PREFIX = '<system-reminder>\nCompact summary of earlier conversation:'
@@ -40,7 +40,7 @@ class CompactionResult:
 class Compactor:
     """负责主动 compact 与 reactive compact 的上下文压缩器。"""
 
-    client: OpenAIClient
+    client: ModelClient
     token_estimator: ContextTokenEstimator = field(default_factory=ContextTokenEstimator)
 
     def compact(
@@ -56,7 +56,7 @@ class Compactor:
 
         try:
             response = self.client.complete(messages=request_messages, tools=[])
-        except OpenAIClientError as exc:
+        except Exception as exc:
             return CompactionResult(compacted=False, error=str(exc))
 
         if response.tool_calls:
@@ -97,14 +97,14 @@ class Compactor:
             return False
         return projected_input_tokens >= max(0, auto_compact_threshold_tokens)
 
-    def is_context_length_error(self, exc: OpenAIClientError) -> bool:
+    def is_context_length_error(self, exc: Exception) -> bool:
         """判断异常是否属于 prompt/context length 类错误。"""
-        if isinstance(exc, OpenAIResponseError):
-            detail = f'{exc.detail} {exc}'.lower()
-            if exc.status_code == 413:
-                return True
-        else:
-            detail = str(exc).lower()
+        status_code = getattr(exc, 'status_code', None)
+        detail_text = str(getattr(exc, 'detail', ''))
+        if status_code == 413:
+            return True
+
+        detail = f'{detail_text} {exc}'.lower()
 
         keywords = (
             'context length',

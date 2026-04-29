@@ -14,8 +14,8 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from interaction import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
-from tools.registry import LocalTool
+from interaction.interaction_gateway import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
+from core_contracts.tools_contracts import ToolDescriptor
 from workspace import WorkspaceGateway
 
 
@@ -30,7 +30,7 @@ class PromptProcessor:
     budget_config: BudgetConfig
     model_config: ModelConfig
     workspace_gateway: WorkspaceGateway
-    tool_registry_getter: Callable[[], dict[str, LocalTool]]
+    tool_registry_getter: Callable[[], dict[str, ToolDescriptor]]
     result_factory: ResultFactory
 
     def prepare(

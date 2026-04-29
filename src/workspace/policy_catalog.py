@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict
-from tools.registry import LocalTool
+from core_contracts.tools_contracts import ToolDescriptor
 
 
 _POLICY_MANIFEST_FILE = Path('.claw') / 'policies.json'
@@ -198,14 +198,14 @@ class PolicyCatalog:
 
     def filter_tool_registry(
         self,
-        tool_registry: dict[str, LocalTool],
-    ) -> dict[str, LocalTool]:
+        tool_registry: dict[str, ToolDescriptor],
+    ) -> dict[str, ToolDescriptor]:
         """从工具注册表中过滤掉被策略阻断的工具。
 
         Args:
-            tool_registry (dict[str, LocalTool]): 当前可用工具注册表。
+            tool_registry (dict[str, ToolDescriptor]): 当前可用工具注册表。
         Returns:
-            dict[str, LocalTool]: 过滤后的工具注册表副本。
+            dict[str, ToolDescriptor]: 过滤后的工具注册表副本。
         """
         return {
             name: tool
