@@ -1,4 +1,4 @@
-"""ISSUE-020 Search Runtime 单元测试。"""
+"""ISSUE-020 WorkspaceGateway 搜索能力单元测试。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib import error
 
-from workspace import SearchQueryError, SearchService
+from workspace import WorkspaceGateway
 
 
 class _FakeHTTPResponse:
@@ -26,7 +26,7 @@ class _FakeHTTPResponse:
         return None
 
 
-class SearchServiceTests(unittest.TestCase):
+class WorkspaceSearchGatewayTests(unittest.TestCase):
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
         manifest_dir = workspace / '.claw' / 'search'
         manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -50,13 +50,12 @@ class SearchServiceTests(unittest.TestCase):
             )
 
             with patch.dict('os.environ', {'SEARXNG_BASE_URL': 'http://127.0.0.1:9090'}, clear=False):
-                runtime = SearchService.from_workspace(workspace)
+                gateway = WorkspaceGateway.from_workspace(workspace)
 
-            providers = runtime.list_providers()
+            providers = gateway.list_search_providers()
 
-        self.assertEqual([item.provider_id for item in providers], ['workspace-search', 'env-searxng'])
-        self.assertEqual(runtime.get_provider('workspace-search').title, 'Workspace Search')
-        self.assertEqual(runtime.get_provider('env-searxng').base_url, 'http://127.0.0.1:9090')
+        self.assertEqual([item['provider_id'] for item in providers], ['workspace-search', 'env-searxng'])
+        self.assertEqual(gateway.search_provider_count, 2)
 
     def test_activate_provider_persists_active_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -82,15 +81,17 @@ class SearchServiceTests(unittest.TestCase):
                 },
             )
 
-            runtime = SearchService.from_workspace(workspace)
-            runtime.activate_provider('secondary-search')
-            reloaded = SearchService.from_workspace(workspace)
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            activated = gateway.activate_search_provider('secondary-search')
+            reloaded = WorkspaceGateway.from_workspace(workspace)
             persisted = json.loads((workspace / '.claw' / 'search_state.json').read_text(encoding='utf-8'))
+            provider_ids = [item['provider_id'] for item in reloaded.list_search_providers()]
 
-        self.assertEqual(reloaded.current_provider().provider_id, 'secondary-search')
+        self.assertEqual(activated['provider_id'], 'secondary-search')
+        self.assertIn('secondary-search', provider_ids)
         self.assertEqual(persisted['active_provider_id'], 'secondary-search')
 
-    @patch('workspace.search_service.request.urlopen')
+    @patch('urllib.request.urlopen')
     def test_search_returns_structured_results(self, mocked_urlopen) -> None:
         mocked_urlopen.return_value = _FakeHTTPResponse(
             {
@@ -123,18 +124,18 @@ class SearchServiceTests(unittest.TestCase):
                 },
             )
 
-            runtime = SearchService.from_workspace(workspace)
-            response = runtime.search('claw code agent')
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            response = gateway.search('claw code agent')
 
-        self.assertEqual(response.provider.provider_id, 'workspace-search')
-        self.assertEqual(response.query, 'claw code agent')
-        self.assertEqual(response.attempts, 1)
-        self.assertEqual(len(response.results), 2)
-        self.assertEqual(response.results[0].title, 'Alpha Result')
-        self.assertEqual(response.results[0].provider_id, 'workspace-search')
-        self.assertEqual(response.results[1].rank, 2)
+        self.assertEqual(response['provider']['provider_id'], 'workspace-search')
+        self.assertEqual(response['query'], 'claw code agent')
+        self.assertEqual(response['attempts'], 1)
+        self.assertEqual(len(response['results']), 2)
+        self.assertEqual(response['results'][0]['title'], 'Alpha Result')
+        self.assertEqual(response['results'][0]['provider_id'], 'workspace-search')
+        self.assertEqual(response['results'][1]['rank'], 2)
 
-    @patch('workspace.search_service.request.urlopen')
+    @patch('urllib.request.urlopen')
     def test_search_duckduckgo_returns_structured_results(self, mocked_urlopen) -> None:
         mocked_urlopen.return_value = _FakeHTTPResponse(
             {
@@ -170,16 +171,16 @@ class SearchServiceTests(unittest.TestCase):
                 },
             )
 
-            runtime = SearchService.from_workspace(workspace)
-            response = runtime.search('claw code agent', max_results=2)
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            response = gateway.search('claw code agent', max_results=2)
 
-        self.assertEqual(response.provider.provider_id, 'web-search')
-        self.assertEqual(response.results[0].title, 'ClawCodeAgent')
-        self.assertEqual(response.results[0].snippet, 'overview snippet')
-        self.assertEqual(response.results[1].title, 'Topic 1')
-        self.assertEqual(response.results[1].url, 'https://example.com/topic-1')
+        self.assertEqual(response['provider']['provider_id'], 'web-search')
+        self.assertEqual(response['results'][0]['title'], 'ClawCodeAgent')
+        self.assertEqual(response['results'][0]['snippet'], 'overview snippet')
+        self.assertEqual(response['results'][1]['title'], 'Topic 1')
+        self.assertEqual(response['results'][1]['url'], 'https://example.com/topic-1')
 
-    @patch('workspace.search_service.request.urlopen')
+    @patch('urllib.request.urlopen')
     def test_search_searxng_includes_api_key_headers_when_configured(self, mocked_urlopen) -> None:
         mocked_urlopen.return_value = _FakeHTTPResponse({'results': []})
 
@@ -198,14 +199,14 @@ class SearchServiceTests(unittest.TestCase):
             )
 
             with patch.dict('os.environ', {'SEARXNG_API_KEY': 'secret-key'}, clear=False):
-                runtime = SearchService.from_workspace(workspace)
-                runtime.search('claw code agent')
+                gateway = WorkspaceGateway.from_workspace(workspace)
+                gateway.search('claw code agent')
 
         sent_request = mocked_urlopen.call_args[0][0]
         self.assertEqual(sent_request.headers.get('Authorization'), 'Bearer secret-key')
         self.assertEqual(sent_request.headers.get('X-api-key'), 'secret-key')
 
-    @patch('workspace.search_service.request.urlopen')
+    @patch('urllib.request.urlopen')
     def test_search_duckduckgo_falls_back_to_http_when_https_fails(self, mocked_urlopen) -> None:
         def _side_effect(http_request, timeout=10):
             if str(http_request.full_url).startswith('https://'):
@@ -226,14 +227,14 @@ class SearchServiceTests(unittest.TestCase):
                     'base_url': 'https://api.duckduckgo.com',
                 },
             )
-            runtime = SearchService.from_workspace(workspace)
-            response = runtime.search('ClawCodeAgent')
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            response = gateway.search('ClawCodeAgent')
 
-        self.assertEqual(response.attempts, 1)
-        self.assertEqual(len(response.results), 0)
+        self.assertEqual(response['attempts'], 1)
+        self.assertEqual(len(response['results']), 0)
         self.assertGreaterEqual(mocked_urlopen.call_count, 2)
 
-    @patch('workspace.search_service.request.urlopen')
+    @patch('urllib.request.urlopen')
     def test_search_duckduckgo_weather_fallback_returns_weather_result(self, mocked_urlopen) -> None:
         def _side_effect(http_request, timeout=10):
             url = str(http_request.full_url)
@@ -268,14 +269,14 @@ class SearchServiceTests(unittest.TestCase):
                     'base_url': 'https://api.duckduckgo.com',
                 },
             )
-            runtime = SearchService.from_workspace(workspace)
-            response = runtime.search('北京天气怎么样')
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            response = gateway.search('北京天气怎么样')
 
-        self.assertEqual(len(response.results), 1)
-        self.assertEqual(response.results[0].title, 'Weather in 北京')
-        self.assertIn('Partly cloudy', response.results[0].snippet)
+        self.assertEqual(len(response['results']), 1)
+        self.assertEqual(response['results'][0]['title'], 'Weather in 北京')
+        self.assertIn('Partly cloudy', response['results'][0]['snippet'])
 
-    @patch('workspace.search_service.request.urlopen')
+    @patch('urllib.request.urlopen')
     def test_search_retries_failed_query_and_raises_controlled_error(self, mocked_urlopen) -> None:
         mocked_urlopen.side_effect = [
             error.URLError('temporary outage'),
@@ -295,13 +296,9 @@ class SearchServiceTests(unittest.TestCase):
                 },
             )
 
-            runtime = SearchService.from_workspace(workspace)
-            with self.assertRaises(SearchQueryError) as raised:
-                runtime.search('claw code agent', max_retries=1)
-
-        self.assertEqual(raised.exception.provider_id, 'workspace-search')
-        self.assertEqual(raised.exception.attempts, 2)
-        self.assertIn('temporary outage', raised.exception.last_error)
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            with self.assertRaisesRegex(ValueError, 'workspace-search'):
+                gateway.search('claw code agent', max_retries=1)
 
 
 if __name__ == '__main__':

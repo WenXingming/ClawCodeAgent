@@ -355,23 +355,30 @@ class TurnCoordinator:
         except (ValueError) as exc:
             raise GatewayValidationError(str(exc)) from exc
 
+        provider = response.get('provider', {}) if isinstance(response, dict) else {}
+        results = response.get('results', []) if isinstance(response, dict) else []
+        attempts = int(response.get('attempts', 0)) if isinstance(response, dict) else 0
+        normalized_query = str(response.get('query', query)) if isinstance(response, dict) else query
+
         lines = [
             '# Search Results',
             '',
-            f'- Provider: {response.provider.provider_id}',
-            f'- Query: {response.query}',
-            f'- Attempts: {response.attempts}',
+            f"- Provider: {provider.get('provider_id', '')}",
+            f'- Query: {normalized_query}',
+            f'- Attempts: {attempts}',
             '',
         ]
-        if not response.results:
+        if not isinstance(results, list) or not results:
             lines.append('No results returned.')
         else:
-            for item in response.results:
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
                 lines.extend(
                     [
-                        f'{item.rank}. {item.title}',
-                        f'URL: {item.url}',
-                        f'Snippet: {item.snippet}',
+                        f"{int(item.get('rank', 0))}. {item.get('title', '')}",
+                        f"URL: {item.get('url', '')}",
+                        f"Snippet: {item.get('snippet', '')}",
                         '',
                     ]
                 )
@@ -380,9 +387,9 @@ class TurnCoordinator:
         return (
             content,
             {
-                'provider_id': response.provider.provider_id,
-                'attempts': response.attempts,
-                'result_count': len(response.results),
+                'provider_id': str(provider.get('provider_id', '')),
+                'attempts': attempts,
+                'result_count': len(results) if isinstance(results, list) else 0,
             },
         )
 

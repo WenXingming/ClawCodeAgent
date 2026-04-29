@@ -19,7 +19,6 @@ from agent import AgentGateway as Agent
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from session import SessionGateway
 from core_contracts.session import AgentSessionSnapshot
-from workspace import SearchProviderProfile, SearchResponse, SearchResult
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
@@ -1309,44 +1308,45 @@ class AgentTests(unittest.TestCase):
             ),
         ])
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
-        
-        # Mock 搜索 runtime，让它有一个 provider 以便工具被注册
-        mock_provider = SearchProviderProfile(
-            provider_id='test_provider',
-            provider='test',
-            title='Test Provider',
-            base_url='http://test.com',
-            source_path=Path('test.json'),
-        )
-        agent.workspace_gateway.search_service.providers = [mock_provider]
-        
+
+        # Mock 网关公开方法：让搜索工具可注册并返回稳定 JSON 契约。
+        agent.workspace_gateway.has_search_providers = mock.Mock(return_value=True)
+
         # 重新注册工具以应用模拟的 provider
         agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
-        
-        # Mock 搜索方法以返回结果对象
-        mock_result = SearchResult(
-            title='test',
-            url='http://test.com',
-            snippet='test snippet',
-            provider_id='test_provider',
-            rank=1,
+
+        agent.workspace_gateway.search = mock.Mock(
+            return_value={
+                'provider': {
+                    'provider_id': 'test_provider',
+                    'provider': 'test',
+                    'title': 'Test Provider',
+                    'base_url': 'http://test.com',
+                    'description': '',
+                    'default_max_results': 5,
+                },
+                'query': 'hello',
+                'attempts': 1,
+                'results': [
+                    {
+                        'title': 'test',
+                        'url': 'http://test.com',
+                        'snippet': 'test snippet',
+                        'provider_id': 'test_provider',
+                        'rank': 1,
+                    }
+                ],
+            }
         )
-        mock_response = SearchResponse(
-            provider=mock_provider,
-            query='hello',
-            results=(mock_result,),
-            attempts=1,
-        )
-        agent.workspace_gateway.search_service.search = mock.Mock(return_value=mock_response)
-        
+
         result = agent.run('搜索一下内容')
-        
+
         # 验证：工具被调用且工作流完整
         self.assertEqual(result.turns, 2)
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.stop_reason, 'stop')
         self.assertEqual(result.final_output, '搜索完成')
-        agent.workspace_gateway.search_service.search.assert_called_once()
+        agent.workspace_gateway.search.assert_called_once()
 
     def test_run_calls_mcp_search_capabilities_from_main_loop(self) -> None:
         """验证主循环通过 mcp_search_capabilities 搜索远端能力。"""
@@ -1578,9 +1578,7 @@ class AgentTests(unittest.TestCase):
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
         
         # 配置 search provider 和 MCP 资源
-        mock_search_provider = mock.Mock()
-        mock_search_provider.provider_id = 'test_provider'
-        agent.workspace_gateway.search_service.providers = [mock_search_provider]
+        agent.workspace_gateway.has_search_providers = mock.Mock(return_value=True)
         
         agent.tool_gateway.has_mcp_resources = mock.Mock(return_value=True)
         agent.tool_gateway.has_mcp_servers = mock.Mock(return_value=True)

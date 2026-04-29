@@ -1,4 +1,4 @@
-﻿"""ISSUE-015 Hook Policy Runtime 单元测试。"""
+"""ISSUE-015 WorkspaceGateway 策略能力单元测试。"""
 
 from __future__ import annotations
 
@@ -7,13 +7,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from core_contracts.config import BudgetConfig
 from core_contracts.tools import ToolDescriptor
 from tools.tools_gateway import ToolsGateway
-from workspace import PolicyCatalog
+from workspace import WorkspaceGateway
 
 
-class PolicyCatalogTests(unittest.TestCase):
-    """验证 policy manifest 发现、合并与工具过滤。"""
+class WorkspacePolicyGatewayTests(unittest.TestCase):
+    """验证策略 manifest 发现、合并与工具过滤。"""
 
     def setUp(self) -> None:
         self.tool_gateway = ToolsGateway()
@@ -65,18 +66,18 @@ class PolicyCatalogTests(unittest.TestCase):
                 },
             )
 
-            runtime = PolicyCatalog.from_workspace(workspace)
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            merged = gateway.prepare_tool_registry(self.tool_gateway.default_registry())
+            applied_budget = gateway.apply_budget_config(BudgetConfig())
 
-        self.assertEqual([item.name for item in runtime.manifests], ['base-policy', 'override-policy'])
-        self.assertEqual(runtime.deny_tools, ('read_file', 'edit_file'))
-        self.assertEqual(runtime.deny_prefixes, ('workspace_',))
-        self.assertEqual(runtime.safe_env, {'POLICY_MODE': 'override', 'SAFE_TOKEN': 'alpha'})
-        self.assertEqual(runtime.budget_overrides.max_model_calls, 2)
-        self.assertEqual(runtime.budget_overrides.max_tool_calls, 1)
-        self.assertEqual(runtime.before_hooks, ({'kind': 'message', 'content': 'before base'},))
-        self.assertEqual(runtime.after_hooks, ({'kind': 'message', 'content': 'after override'},))
-        self.assertEqual(len(runtime.skipped_manifests), 1)
-        self.assertEqual(runtime.skipped_manifests[0].name, 'untrusted-policy')
+        self.assertNotIn('read_file', merged)
+        self.assertNotIn('edit_file', merged)
+        self.assertEqual(gateway.safe_env, {'POLICY_MODE': 'override', 'SAFE_TOKEN': 'alpha'})
+        self.assertEqual(applied_budget.max_model_calls, 2)
+        self.assertEqual(applied_budget.max_tool_calls, 1)
+        self.assertEqual(gateway.get_before_hooks('list_dir')[0]['content'], 'before base')
+        self.assertEqual(gateway.get_after_hooks('list_dir')[0]['content'], 'after override')
+        self.assertEqual(gateway.policy_count, 2)
 
     def test_filter_tool_registry_applies_deny_tools_and_prefixes(self) -> None:
         registry = self.tool_gateway.default_registry()
@@ -87,34 +88,47 @@ class PolicyCatalogTests(unittest.TestCase):
             handler=lambda arguments, context: 'ok',
         )
 
-        runtime = PolicyCatalog(
-            deny_tools=('read_file',),
-            deny_prefixes=('workspace_',),
-        )
-        filtered = runtime.filter_tool_registry(registry)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            self._write_manifest(
+                workspace,
+                'policy.json',
+                {
+                    'name': 'base-policy',
+                    'trusted': True,
+                    'deny_tools': ['read_file'],
+                    'deny_prefixes': ['workspace_'],
+                },
+            )
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            filtered = gateway.prepare_tool_registry(registry)
 
         self.assertNotIn('read_file', filtered)
         self.assertNotIn('workspace_banner', filtered)
         self.assertIn('list_dir', filtered)
 
-    def test_runtime_exposes_hook_and_block_helpers(self) -> None:
-        runtime = PolicyCatalog(
-            manifests=(),
-            deny_tools=('read_file',),
-            deny_prefixes=('workspace_',),
-        )
+    def test_gateway_exposes_policy_block_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir)
+            self._write_manifest(
+                workspace,
+                'policy.json',
+                {
+                    'name': 'base-policy',
+                    'trusted': True,
+                    'deny_tools': ['read_file'],
+                    'deny_prefixes': ['workspace_'],
+                    'before_hooks': [{'kind': 'message', 'content': 'policy before'}],
+                    'after_hooks': [{'kind': 'message', 'content': 'policy after'}],
+                },
+            )
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            gateway.prepare_tool_registry(self.tool_gateway.default_registry())
 
-        self.assertEqual(runtime.resolve_block('read_file')['source'], 'policy')
-        self.assertEqual(runtime.resolve_block('workspace_banner')['reason'], 'deny_prefixes')
-
-        runtime = PolicyCatalog(
-            manifests=(),
-            before_hooks=({'kind': 'message', 'content': 'policy before'},),
-            after_hooks=({'kind': 'message', 'content': 'policy after'},),
-        )
-
-        self.assertEqual(runtime.get_before_hooks('list_dir')[0]['content'], 'policy before')
-        self.assertEqual(runtime.get_after_hooks('list_dir')[0]['content'], 'policy after')
+        self.assertEqual(gateway.resolve_block('read_file')['source'], 'policy')
+        self.assertEqual(gateway.resolve_block('workspace_banner')['reason'], 'deny_prefixes')
+        self.assertEqual(gateway.get_before_hooks('list_dir')[0]['content'], 'policy before')
+        self.assertEqual(gateway.get_after_hooks('list_dir')[0]['content'], 'policy after')
 
 
 if __name__ == '__main__':
