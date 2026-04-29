@@ -14,8 +14,7 @@ from core_contracts.model_pricing import ModelPricing
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from openai_client.openai_client import OpenAIClient
-from session.session_snapshot import AgentSessionSnapshot
-from session.session_store import AgentSessionStore
+from session import AgentSessionSnapshot, SessionManager
 
 
 @dataclass(frozen=True)
@@ -42,7 +41,7 @@ class RuntimeBuilder:
 
     openai_client_cls: type[OpenAIClient] = OpenAIClient
     agent_cls: type[Agent] = Agent
-    session_store_cls: type[AgentSessionStore] = AgentSessionStore
+    session_manager_cls: type[SessionManager] = SessionManager
 
     def build_agent_from_args(self, args: argparse.Namespace) -> tuple[Agent, SessionPaths]:
         """根据命令行参数构造新会话代理实例。"""
@@ -106,13 +105,13 @@ class RuntimeBuilder:
         directory: Path | None,
     ) -> AgentSessionSnapshot:
         """按会话 ID 从持久化存储中加载快照。"""
-        session_store = self.session_store_cls(directory)
-        return session_store.load(session_id)
+        session_manager = self.session_manager_cls(directory)
+        return session_manager.load_session(session_id)
 
     def _build_agent_from_launch_spec(self, launch_spec: AgentLaunchSpec) -> Agent:
-        """根据统一启动规格实例化 client、store 与 agent。"""
+        """根据统一启动规格实例化 client、manager 与 agent。"""
         client = self.openai_client_cls(launch_spec.model_config)
-        session_store = self.session_store_cls(launch_spec.session_directory)
+        session_manager = self.session_manager_cls(launch_spec.session_directory)
         return self.agent_cls(
             client,
             launch_spec.workspace_scope,
@@ -121,7 +120,7 @@ class RuntimeBuilder:
             launch_spec.permissions,
             launch_spec.budget_config,
             launch_spec.session_paths,
-            session_store,
+            session_manager,
         )
 
     def _build_new_model_config(self, args: argparse.Namespace) -> ModelConfig:

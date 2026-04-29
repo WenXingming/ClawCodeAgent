@@ -88,15 +88,15 @@ class _FakeAgent:
         )
 
 
-def _make_session_store_cls(load_impl):
-    class _FakeSessionStore:
+def _make_session_manager_cls(load_impl):
+    class _FakeSessionManager:
         def __init__(self, directory=None) -> None:
             self.directory = directory
 
-        def load(self, session_id: str) -> AgentSessionSnapshot:
+        def load_session(self, session_id: str) -> AgentSessionSnapshot:
             return load_impl(session_id, self.directory)
 
-    return _FakeSessionStore
+    return _FakeSessionManager
 
 
 class MainEntryTests(unittest.TestCase):
@@ -248,7 +248,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['续跑问题', '/exit']),
         ):
@@ -282,7 +282,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
@@ -318,7 +318,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
@@ -343,7 +343,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['请把春江花月夜全文写入文件', '/exit']),
         ):
@@ -368,7 +368,7 @@ class MainEntryTests(unittest.TestCase):
         def _load_snapshot(session_id, directory):
             raise ValueError('Session not found: xyz')
 
-        with patch('main.AgentSessionStore', _make_session_store_cls(_load_snapshot)):
+        with patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 code = main(['agent-resume', 'xyz'])

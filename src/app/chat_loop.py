@@ -14,15 +14,14 @@ from interaction.slash_autocomplete import SlashAutocompleteEntry, SlashAutocomp
 from interaction.slash_commands import SlashCommandDispatcher
 from interaction.slash_render import SlashCommandRenderer
 from interaction.startup_render import StartupRenderer
-from session.session_snapshot import AgentSessionSnapshot
-from session.session_store import AgentSessionStore
+from session import AgentSessionSnapshot, SessionManager
 
 
 @dataclass
 class ChatLoop:
     """封装 agent / agent-chat / agent-resume 共用的交互循环。"""
 
-    session_store_cls: type[AgentSessionStore] = AgentSessionStore
+    session_manager_cls: type[SessionManager] = SessionManager
     startup_renderer: StartupRenderer = field(default_factory=StartupRenderer)
     exit_renderer: ExitRenderer = field(default_factory=ExitRenderer)
     slash_renderer: SlashCommandRenderer = field(default_factory=SlashCommandRenderer)
@@ -188,8 +187,8 @@ class ChatLoop:
         directory: Path | None,
     ) -> AgentSessionSnapshot:
         """按会话 ID 从持久化存储中加载快照。"""
-        session_store = self.session_store_cls(directory)
-        return session_store.load(session_id)
+        session_manager = self.session_manager_cls(directory)
+        return session_manager.load_session(session_id)
 
     def _render_chat_result(self, result: AgentRunResult) -> None:
         """把单轮执行结果渲染到标准输出。"""

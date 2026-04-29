@@ -177,7 +177,7 @@ class QueryService:
         """在 runtime agent 模式下执行一次 run 或 resume。"""
         if self._last_turn is None or not self._last_turn.session_id:
             return self.runtime_agent.run(prompt)
-        stored = self.runtime_agent.session_store.load(self._last_turn.session_id)
+        stored = self.runtime_agent.session_manager.load_session(self._last_turn.session_id)
         return self.runtime_agent.resume(prompt, stored)
 
     def _record_turn(self, turn: QueryTurnResult) -> None:

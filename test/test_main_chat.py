@@ -163,15 +163,15 @@ class _ChatFakeAgent:
         return result
 
 
-def _make_session_store_cls(load_impl):
-    class _FakeSessionStore:
+def _make_session_manager_cls(load_impl):
+    class _FakeSessionManager:
         def __init__(self, directory=None) -> None:
             self.directory = directory
 
-        def load(self, session_id: str) -> AgentSessionSnapshot:
+        def load_session(self, session_id: str) -> AgentSessionSnapshot:
             return load_impl(session_id, self.directory)
 
-    return _FakeSessionStore
+    return _FakeSessionManager
 
 
 class MainChatEntryTests(unittest.TestCase):
@@ -222,7 +222,7 @@ class MainChatEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['继续', '/exit']),
         ):
@@ -316,7 +316,7 @@ class MainChatEntryTests(unittest.TestCase):
         )
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['/clear', '继续处理', '/exit']),
         ):
@@ -503,7 +503,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['第一轮', '第二轮', '/exit']),
         ):
@@ -546,7 +546,7 @@ class MainChatEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['第一轮续跑', '第二轮续跑', '/quit']),
         ):
@@ -573,7 +573,7 @@ class MainChatEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.AgentSessionStore', _make_session_store_cls(_load_session)),
+            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['', '   ', '有效输入', '/exit']),
         ):

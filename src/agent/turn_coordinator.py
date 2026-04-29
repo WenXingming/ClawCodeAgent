@@ -18,7 +18,7 @@ from core_contracts.run_result import AgentRunResult
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from openai_client.openai_client import OpenAIClient
-from session.session_store import AgentSessionStore
+from session import SessionManager
 from tools.executor import ToolExecutionError, ToolPermissionError, ToolStreamUpdate
 from tools.registry import LocalTool
 from tools.tool_gateway import ToolGateway
@@ -41,7 +41,7 @@ class TurnCoordinator:
     permissions: ToolPermissionPolicy  # 工具权限配置。
     budget_config: BudgetConfig  # 预算配置。
     session_paths: SessionPaths  # 会话路径配置。
-    session_store: AgentSessionStore  # 会话持久化依赖。
+    session_manager: SessionManager  # 会话管理门面。
     workspace_gateway: WorkspaceGateway  # 工作区领域门面。
     mcp_runtime: MCPRuntime  # MCP 运行时。
     context_manager: ContextManager  # 上下文治理门面。
@@ -843,7 +843,7 @@ class TurnCoordinator:
 
                     child_agent = self._require_child_agent_factory()(child_agent_id)
                     if task.resume_session_id:
-                        session_snapshot = self.session_store.load(task.resume_session_id)
+                        session_snapshot = self.session_manager.load_session(task.resume_session_id)
                         child_result = child_agent.resume(task.prompt, session_snapshot)
                     else:
                         child_result = child_agent.run(task.prompt)
