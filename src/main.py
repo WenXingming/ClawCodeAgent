@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from app.app_gateway import AppGateway
-from agent import Agent
+from agent import AgentGateway as Agent
 from openai_client import OpenAIClientGateway
 from session.session_gateway import SessionGateway
 

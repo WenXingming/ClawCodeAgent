@@ -397,7 +397,7 @@ class AppCLI:
 
 def main(argv: list[str] | None = None) -> int:
     """模块级入口，便于外部直接调用 app CLI。"""
-    from agent import Agent
+    from agent import AgentGateway as Agent
 
     cli = AppCLI(agent_cls=Agent)
     return cli.main(argv)

@@ -17,7 +17,7 @@ from core_contracts.config import ToolPermissionPolicy
 from core_contracts.messaging import OneTurnResponse, ToolCall
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.primitives import TokenUsage
-from agent import Agent
+from agent import AgentGateway as Agent
 from openai_client.openai_client import OpenAIClient
 from session import SessionGateway
 

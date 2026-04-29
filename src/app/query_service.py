@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Generator
 
-from agent import Agent
+from agent import AgentGateway as Agent
 from core_contracts.outcomes import QueryServiceConfig, QueryTurnResult
 from core_contracts.primitives import JSONDict
 from core_contracts.outcomes import AgentRunResult

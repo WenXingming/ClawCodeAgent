@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from agent import Agent
+from agent import AgentGateway as Agent
 from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
 from core_contracts.model import ModelPricing
