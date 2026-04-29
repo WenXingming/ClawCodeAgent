@@ -31,8 +31,8 @@ from core_contracts.model_pricing import ModelPricing
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from agent import Agent
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
-from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 
@@ -85,7 +85,7 @@ class CLI:
         self,
         *,
         openai_client_cls: type[OpenAIClient] = OpenAIClient,
-        agent_cls: type[LocalAgent] = LocalAgent,
+        agent_cls: type[Agent] = Agent,
         session_store_cls: type[AgentSessionStore] = AgentSessionStore,
         startup_renderer: StartupRenderer | None = None,
         exit_renderer: ExitRenderer | None = None,
@@ -97,7 +97,7 @@ class CLI:
         Args:
             openai_client_cls (type[OpenAIClient]): 模型客户端构造类型，
                 用于按 ModelConfig 创建请求客户端实例。
-            agent_cls (type[LocalAgent]): 代理构造类型，
+            agent_cls (type[Agent]): 代理构造类型，
                 用于创建新会话或恢复态代理。
             session_store_cls (type[AgentSessionStore]): 会话存储构造类型，
                 用于加载与定位持久化会话快照。
@@ -116,7 +116,7 @@ class CLI:
         # type[OpenAIClient]: 模型客户端构造类型，负责根据 ModelConfig 创建 HTTP 请求客户端。
 
         self._agent_cls = agent_cls
-        # type[LocalAgent]: 代理构造类型，承载 run 与 resume 两条执行路径。
+        # type[Agent]: 代理构造类型，承载 run 与 resume 两条执行路径。
 
         self._session_store_cls = session_store_cls
         # type[AgentSessionStore]: 会话存储构造类型，负责读取持久化的会话快照文件。
@@ -370,13 +370,13 @@ class CLI:
             show_progress=self._resolve_show_progress(args),
         )
 
-    def _build_agent_from_args(self, args: argparse.Namespace) -> tuple[LocalAgent, SessionPaths]:
+    def _build_agent_from_args(self, args: argparse.Namespace) -> tuple[Agent, SessionPaths]:
         """根据命令行参数构造新会话代理实例。
 
         Args:
             args (argparse.Namespace): 已解析的命令行参数。
         Returns:
-            tuple[LocalAgent, SessionPaths]: 新建的代理实例与其会话路径配置。
+            tuple[Agent, SessionPaths]: 新建的代理实例与其会话路径配置。
         Raises:
             ValueError: 当必填配置字段缺失或运行时配置约束非法时抛出。
             OpenAIClientError: 当模型客户端初始化失败时透传。
@@ -415,7 +415,7 @@ class CLI:
         self._validate_static_contracts(launch_spec.permissions)
         return launch_spec
 
-    def _build_agent_from_launch_spec(self, launch_spec: AgentLaunchSpec) -> LocalAgent:
+    def _build_agent_from_launch_spec(self, launch_spec: AgentLaunchSpec) -> Agent:
         """根据统一启动规格实例化 client、store 与 agent。"""
         client = self._openai_client_cls(launch_spec.model_config)
         session_store = self._session_store_cls(launch_spec.session_directory)
@@ -724,7 +724,7 @@ class CLI:
 
     def _run_interactive_loop(
         self,
-        agent: LocalAgent,
+        agent: Agent,
         *,
         current_session_id: str | None,
         current_session_directory: Path | None,
@@ -737,7 +737,7 @@ class CLI:
         会话状态；遇到退出命令、EOF 或 KeyboardInterrupt 时正常终止。
 
         Args:
-            agent (LocalAgent): 当前命令对应的代理实例。
+            agent (Agent): 当前命令对应的代理实例。
             current_session_id (str | None): 当前活动会话 ID；新会话场景下为 None。
             current_session_directory (Path | None): 当前会话快照所在目录；可为 None。
             pending_session_snapshot (AgentSessionSnapshot | None): 已预加载但尚未消费的快照。
@@ -896,7 +896,7 @@ class CLI:
 
     def _execute_chat_turn(
         self,
-        agent: LocalAgent,
+        agent: Agent,
         *,
         prompt: str,
         current_session_id: str | None,
@@ -909,7 +909,7 @@ class CLI:
         否则走 run 路径发起全新对话。
 
         Args:
-            agent (LocalAgent): 当前代理实例。
+            agent (Agent): 当前代理实例。
             prompt (str): 用户本轮输入文本。
             current_session_id (str | None): 当前活动会话 ID。
             current_session_directory (Path | None): 当前会话快照所在目录。
@@ -931,7 +931,7 @@ class CLI:
         return agent.run(prompt)
 
     @staticmethod
-    def _build_slash_autocomplete_prompt(agent: LocalAgent) -> SlashAutocompletePrompt:
+    def _build_slash_autocomplete_prompt(agent: Agent) -> SlashAutocompletePrompt:
         """根据 agent 的 slash 命令表构造自动补全输入读取器。"""
         slash_dispatcher = getattr(agent, 'slash_dispatcher', None)
         if slash_dispatcher is None:
@@ -1111,7 +1111,7 @@ class CLI:
         args: argparse.Namespace,
         *,
         session_id: str,
-    ) -> tuple[LocalAgent, AgentSessionSnapshot, Path | None]:
+    ) -> tuple[Agent, AgentSessionSnapshot, Path | None]:
         """根据持久化会话快照构造恢复态代理。
 
         从存储中加载快照后，以命令行参数对快照中的模型配置与静态契约做覆盖，
@@ -1121,7 +1121,7 @@ class CLI:
             args (argparse.Namespace): 已解析的命令行参数（用于覆盖快照内配置）。
             session_id (str): 待恢复的会话 ID。
         Returns:
-            tuple[LocalAgent, AgentSessionSnapshot, Path | None]:
+            tuple[Agent, AgentSessionSnapshot, Path | None]:
                 恢复态代理实例、已加载快照、当前会话目录（可为 None）。
         Raises:
             ValueError: 当会话不存在或运行时配置约束非法时抛出。

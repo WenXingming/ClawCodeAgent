@@ -2,7 +2,7 @@
 
 本模块提供主循环中的 delegate_agent 编排底座，聚焦三类职责：为父代理维护 child agent、group 与 lineage 记录；根据委派任务依赖关系生成稳定批次；汇总子代理 stop_reason、失败数与 dependency skip 统计，供上层事件与结果摘要复用。
 
-该模块不直接执行模型调用；真正的 child run/resume 仍由 LocalAgent 触发。
+该模块不直接执行模型调用；真正的 child run/resume 仍由 agent facade 触发。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ class ManagedAgentStatus(StrEnum):
 class DelegatedTaskSpec:
     """描述一条 delegate_agent 子任务规格。
 
-    该对象由 tool 参数解析而来，随后会被 AgentManager 用于生成依赖批次，
+    该对象由 tool 参数解析而来，随后会被 DelegationService 用于生成依赖批次，
     并在执行完成后与 child agent record 关联。
     """
 
@@ -119,7 +119,7 @@ class ManagedAgentGroup:
 
 
 @dataclass
-class AgentManager:
+class DelegationService:
     """维护 delegate_agent 运行期间的 child 代理与 group 元数据。
 
     典型工作流如下：

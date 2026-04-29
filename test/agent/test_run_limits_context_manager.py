@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from agent.run_state import AgentRunState
-from budget.budget_guard import BudgetGuard
+from agent.run_limits import RunLimits
 from context import ContextManager
 from context.budget_projection import BudgetProjector
 from context.compactor import Compactor
@@ -97,7 +97,7 @@ class ContextManagerTests(unittest.TestCase):
             snipper=Snipper(),
             compactor=Compactor(_FakeOpenAIClient([])),
         )
-        guard = BudgetGuard(
+        guard = RunLimits(
             budget=runtime_policies.budget_config,
             pricing=ModelConfig(model='fake').pricing,
             cost_baseline=0.0,
@@ -150,7 +150,7 @@ class ContextManagerTests(unittest.TestCase):
                 ])
             ),
         )
-        guard = BudgetGuard(
+        guard = RunLimits(
             budget=runtime_policies.budget_config,
             pricing=ModelConfig(model='fake').pricing,
             cost_baseline=0.0,

@@ -5,38 +5,41 @@
 - 本文档只描述根目录 `src/` 下当前生效的代码结构。
 - 已排除工作区内嵌的 `claw-code-agent/` 目录。
 - 根目录 `src/` 是源码根，不作为 `src` 包名参与导入；跨目录依赖统一使用顶层绝对导入。
-- 本轮重构后，旧 `runtime/` 与预算相关旧 `context` 入口不再作为稳定导入路径保留。
 
 ## 当前结构
 
 ```text
 src/
 |- main.py
+|- agent/
+|  |- agent.py
+|  |- prompt_processor.py
+|  |- turn_coordinator.py
+|  |- run_limits.py
+|  |- delegation_service.py
+|  |- result_factory.py
+|  '- run_state.py
 |- interaction/
 |  |- command_line_interaction.py
 |  '- slash_commands.py
 |- orchestration/
-|  |- agent_manager.py
-|  |- query_engine.py
-|  '- local_agent.py
+|  '- query_engine.py
 |- workspace/
 |  |- workspace_gateway.py
 |  |- plugin_catalog.py
 |  |- policy_catalog.py
 |  |- search_service.py
 |  '- worktree_service.py
-|- planning/
-|  |- task_runtime.py
-|  |- plan_runtime.py
-|  '- workflow_runtime.py
-|- budget/
-|  '- budget_guard.py
 |- context/
 |  |- context_manager.py
 |  |- budget_projection.py
 |  |- snipper.py
 |  |- compactor.py
-|  |- context_token_estimator.py
+|  '- context_token_estimator.py
+|- planning/
+|  |- task_runtime.py
+|  |- plan_runtime.py
+|  '- workflow_runtime.py
 |- session/
 |- tools/
 |  |- tool_gateway.py
@@ -51,250 +54,140 @@ src/
 ## 主视图
 
 ```mermaid
-%%{init: {
-    "theme": "default",
-    "themeVariables": {
-        "fontFamily": "Times New Roman",
-        "fontSize": "20px"
-    },
-    "flowchart": {
-        "curve": "basis",
-        "nodeSpacing": 50,
-        "rankSpacing": 70
-    }
-}}%%
-
 graph TB
-    accTitle: ClawCodeAgent Module Architecture and Dependencies
-    accDescr: Clean layered architecture with package boundaries for control plane, orchestration, workspace, planning, budget and context.
+    main(["main.py"])
 
-    main(["🧭 main.py"])
-
-    subgraph ControlPlane[interaction package / CLI 与本地交互面]
-        direction TB
-        n_cli(["🧭 interaction/command_line_interaction.py"])
-        n_slash(["⌨️ interaction/slash_commands.py"])
-        style ControlPlane fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph AgentPkg[agent / 运行时门面与主循环]
+        a_agent(["agent/agent.py"])
+        a_prompt(["agent/prompt_processor.py"])
+        a_turn(["agent/turn_coordinator.py"])
+        a_limits(["agent/run_limits.py"])
+        a_delegate(["agent/delegation_service.py"])
+        a_result(["agent/result_factory.py"])
+        a_state(["agent/run_state.py"])
     end
 
-    subgraph Orchestration[orchestration package / 主循环编排]
-        direction TB
-        n_agent_manager(["🧬 orchestration/agent_manager.py"])
-        n_agent(["⚙️ orchestration/local_agent.py"])
-        n_query_engine(["🧾 orchestration/query_engine.py"])
-        style Orchestration fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph ControlPlane[interaction / CLI 与本地命令]
+        c_cli(["interaction/command_line_interaction.py"])
+        c_slash(["interaction/slash_commands.py"])
     end
 
-    subgraph Workspace[workspace package / 工作区能力与策略]
-        direction TB
-        n_workspace_gateway(["🏠 workspace/workspace_gateway.py"])
-        n_hook_policy(["🛡️ workspace/policy_catalog.py"])
-        n_plugin(["🧩 workspace/plugin_catalog.py"])
-        n_search(["🔎 workspace/search_service.py"])
-        n_worktree(["🌿 workspace/worktree_service.py"])
-        style Workspace fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph Orchestration[orchestration / 上层运行门面]
+        o_query(["orchestration/query_engine.py"])
     end
 
-    subgraph Planning[planning package / 任务与计划状态机]
-        direction TB
-        n_task(["📋 planning/task_runtime.py"])
-        n_plan(["🗺️ planning/plan_runtime.py"])
-        n_workflow(["🧭 planning/workflow_runtime.py"])
-        style Planning fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph ContextPkg[context / 上下文治理]
+        x_manager(["context/context_manager.py"])
+        x_budget(["context/budget_projection.py"])
+        x_snip(["context/snipper.py"])
+        x_compact(["context/compactor.py"])
+        x_tokens(["context/context_token_estimator.py"])
     end
 
-    subgraph BudgetPkg[budget package / 执行预算闸门]
-        direction TB
-        n_budget_guard(["🛡️ budget/budget_guard.py"])
-        style BudgetPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph WorkspacePkg[workspace / 工作区能力]
+        w_gateway(["workspace/workspace_gateway.py"])
     end
 
-    subgraph ContextPkg[context package / 上下文治理与预算]
-        direction TB
-        n_context_manager(["🧠 context/context_manager.py"])
-        n_token_estimator(["🔢 context/context_token_estimator.py"])
-        n_budget_evaluator(["📏 context/budget_projection.py"])
-        n_snip(["✂️ context/snipper.py"])
-        n_compact(["🗜️ context/compactor.py"])
-        style ContextPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph Tooling[tools / 工具执行与MCP]
+        t_gateway(["tools/tool_gateway.py"])
+        t_registry(["tools/registry.py"])
+        t_mcp(["tools/mcp/runtime.py"])
     end
 
-    subgraph Tooling[tools package / 工具执行与安全]
-        direction TB
-        n_tools(["🛠️ tools/tool_gateway.py"])
-        n_mcp_runtime(["🛰️ tools/mcp/runtime.py"])
-        n_mcp_adapter(["🔌 tools/registry.py"])
-        n_bash_security(["🛡️ tools/bash_security.py"])
-        style Tooling fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph SessionPkg[session / 会话持久化]
+        s_store(["session/session_store.py"])
+        s_state(["session/session_state.py"])
+        s_snapshot(["session/session_snapshot.py"])
     end
 
-    subgraph SessionPkg[session package / 会话状态与持久化]
-        direction TB
-        n_session_state(["🧠 session/session_state.py"])
-        n_session_store(["💽 session/session_store.py"])
-        n_session_snapshot(["🧾 session/session_snapshot.py"])
-        style SessionPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
+    subgraph Contracts[core_contracts / 共享契约]
+        core(["config/protocol/result/usage"])
     end
 
-    subgraph External[模型接入]
-        direction TB
-        n_openai_client(["☁️ openai_client/openai_client.py"])
-        style External fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
-    end
+    main --> c_cli
+    c_cli --> a_agent
+    c_cli --> o_query
 
-    subgraph Contracts[共享契约层]
-        direction TB
-        n_core_contracts(["📄 core_contracts/<br/>(config / protocol / usage / result)"])
-        style Contracts fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
-    end
+    o_query --> a_agent
 
-    main --> n_cli
+    a_agent --> a_prompt
+    a_agent --> a_turn
+    a_agent --> a_result
+    a_agent --> a_delegate
+    a_agent --> a_limits
+    a_agent --> a_state
 
-    n_cli --> n_agent
-    n_cli --> n_query_engine
-    n_cli --> n_session_store
+    a_turn --> x_manager
+    a_turn --> w_gateway
+    a_turn --> t_gateway
+    a_turn --> t_registry
+    a_turn --> t_mcp
+    a_turn --> s_state
+    a_turn --> s_store
 
-    n_agent --> n_agent_manager
-    n_query_engine --> n_agent
-    n_query_engine --> n_session_store
+    c_slash --> x_manager
 
-    n_agent --> n_slash
-    n_agent --> n_workspace_gateway
-    n_agent --> n_openai_client
-    n_agent --> n_tools
-    n_agent --> n_mcp_runtime
-    n_agent --> n_mcp_adapter
-    n_agent --> n_session_state
-    n_agent --> n_session_store
-    n_agent --> n_context_manager
+    x_manager --> x_budget
+    x_manager --> x_snip
+    x_manager --> x_compact
+    x_manager --> a_limits
+    x_budget --> x_tokens
+    x_snip --> x_tokens
+    x_compact --> x_tokens
 
-    n_slash --> n_session_state
-    n_slash --> n_tools
-    n_slash --> n_context_manager
+    s_store --> s_snapshot
 
-    n_plan --> n_task
-    n_workflow --> n_task
-    n_context_manager --> n_budget_guard
-    n_context_manager --> n_budget_evaluator
-    n_context_manager --> n_snip
-    n_context_manager --> n_compact
-    n_workspace_gateway --> n_hook_policy
-    n_workspace_gateway --> n_plugin
-    n_workspace_gateway --> n_search
-    n_workspace_gateway --> n_worktree
-    n_hook_policy --> n_tools
-    n_plugin --> n_tools
-    n_mcp_adapter --> n_tools
-    n_mcp_adapter --> n_mcp_runtime
-    n_tools --> n_bash_security
-
-    n_session_store --> n_session_snapshot
-
-    n_budget_evaluator --> n_token_estimator
-    n_snip --> n_token_estimator
-    n_compact --> n_token_estimator
-    n_compact --> n_openai_client
-
-    main -.-> n_core_contracts
-    n_cli -.-> n_core_contracts
-    n_slash -.-> n_core_contracts
-    n_agent_manager -.-> n_core_contracts
-    n_query_engine -.-> n_core_contracts
-    n_agent -.-> n_core_contracts
-    n_context_manager -.-> n_core_contracts
-    n_workspace_gateway -.-> n_core_contracts
-    n_hook_policy -.-> n_core_contracts
-    n_plugin -.-> n_core_contracts
-    n_search -.-> n_core_contracts
-    n_worktree -.-> n_core_contracts
-    n_task -.-> n_core_contracts
-    n_plan -.-> n_core_contracts
-    n_workflow -.-> n_core_contracts
-    n_budget_guard -.-> n_core_contracts
-    n_session_state -.-> n_core_contracts
-    n_session_snapshot -.-> n_core_contracts
-    n_tools -.-> n_core_contracts
-    n_mcp_runtime -.-> n_core_contracts
-    n_mcp_adapter -.-> n_core_contracts
-    n_openai_client -.-> n_core_contracts
-
-    style main fill:#343a40,color:#fff,stroke:#1d2124
-    style n_cli fill:#6610f2,color:#fff,stroke:#520dc2
-    style n_slash fill:#8a5cf6,color:#fff,stroke:#6f42c1
-    style n_agent_manager fill:#0b7285,color:#fff,stroke:#095c69
-    style n_query_engine fill:#495057,color:#fff,stroke:#343a40
-    style n_agent fill:#007bff,color:#fff,stroke:#0056b3
-    style n_context_manager fill:#228be6,color:#fff,stroke:#1864ab
-    style n_workspace_gateway fill:#5f3dc4,color:#fff,stroke:#4c2fb1
-    style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
-    style n_plugin fill:#0d6efd,color:#fff,stroke:#0a58ca
-    style n_search fill:#f76707,color:#fff,stroke:#d9480f
-    style n_worktree fill:#2b8a3e,color:#fff,stroke:#1f6f2d
-    style n_task fill:#20c997,color:#fff,stroke:#0f8f6b
-    style n_plan fill:#ff922b,color:#fff,stroke:#d97706
-    style n_workflow fill:#e8590c,color:#fff,stroke:#c2410c
-    style n_budget_guard fill:#28a745,color:#fff,stroke:#1e7e34
-    style n_budget_evaluator fill:#37b24d,color:#fff,stroke:#2b8a3e
-    style n_token_estimator fill:#74b816,color:#fff,stroke:#5c940d
-    style n_snip fill:#2f9e44,color:#fff,stroke:#1b5e20
-    style n_compact fill:#1c7ed6,color:#fff,stroke:#1864ab
-    style n_tools fill:#fd7e14,color:#fff,stroke:#d9480f
-    style n_mcp_runtime fill:#1098ad,color:#fff,stroke:#0c8599
-    style n_mcp_adapter fill:#15aabf,color:#fff,stroke:#0b7285
-    style n_bash_security fill:#ffc107,color:#000,stroke:#d39e00
-    style n_session_state fill:#17a2b8,color:#fff,stroke:#117a8b
-    style n_session_snapshot fill:#17a2b8,color:#fff,stroke:#117a8b
-    style n_session_store fill:#17a2b8,color:#fff,stroke:#117a8b
-    style n_openai_client fill:#17a2b8,color:#fff,stroke:#117a8b
-    style n_core_contracts fill:#6c757d,color:#fff,stroke:#495057
+    a_agent -.-> core
+    a_prompt -.-> core
+    a_turn -.-> core
+    a_limits -.-> core
+    a_delegate -.-> core
+    a_result -.-> core
+    c_cli -.-> core
+    c_slash -.-> core
+    o_query -.-> core
 ```
 
 ## 当前边界
 
-- `orchestration/agent_manager.py` (`AgentManager`) 负责 delegate_agent 子代理的 lineage、group、dependency batch 与 stop_reason 汇总，是 orchestration 层的子任务编排状态容器。
-- `orchestration/query_engine.py` (`QueryEngine`) 负责把 `LocalAgent` 封装成统一的 submit / stream_submit / persist 门面，并累计 runtime events、mutation、orchestration 与 lineage 统计。
-- `orchestration/local_agent.py` (`LocalAgent`) 负责主循环编排职责：模型调用、工具回填、预算闸门、会话保存，通过 `ContextManager` 调用上下文治理，并在 tool pipeline 中接入 delegate_agent 子代理执行。
-- `budget/` 只保留执行预算闸门 `BudgetGuard`，负责在主循环中统一裁决 turns / model_calls / token / cost / tool_calls 等运行时限制。
-- `context/` 现在是单一领域入口：`ContextManager` 统一收口预算投影、snip、auto compact 与 reactive compact；其内部组合 `BudgetProjector`、`Snipper`、`Compactor` 与 `ContextTokenEstimator`。
-- `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
-- `workspace/` 负责工作区领域能力：`WorkspaceGateway` 统一收口插件目录、策略目录、搜索服务和 worktree 服务，agent 只通过它获取 hook、block 决策、搜索能力和工作区安全环境。
-- `tools/mcp/` 保持 MCP transport、runtime 与 schema 适配；MCP 不再并入工作区目录，而是继续作为工具子系统的一部分。
-- `interaction/` 负责 CLI 和 slash 命令；`slash_commands.py` 通过 `ContextManager` 提供 `/context` 预算投影视图，但不会触发模型调用。
-- `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
-
-这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：工作区本地能力被收口为 `workspace` 领域门面，上下文治理被收口为 `ContextManager` 领域门面，`LocalAgent` 不再直接认识 snip/compact/预算投影细节；`budget` 只保留执行闸门 `BudgetGuard`，由 context 与 agent 在明确边界上协作。
+- `agent/agent.py` (`Agent`) 是唯一对外运行门面，只暴露 `run()` 与 `resume()`。
+- `agent/turn_coordinator.py` 只负责 turn loop 编排，不再承载 slash 构造与结果落盘细节。
+- `agent/prompt_processor.py` 收口 slash 分流和 prompt 写入前决策。
+- `agent/result_factory.py` 收口会话快照落盘与 `AgentRunResult` 构造。
+- `agent/run_limits.py` 收口模型前/工具后的预算闸门逻辑。
+- `agent/delegation_service.py` 收口 child/group lineage、依赖批处理和汇总。
+- `context/context_manager.py` 仍是上下文治理唯一入口，内部组合投影、snip、compact。
+- `orchestration/query_engine.py` 保持上层 submit/stream/persist 门面，面向 `Agent`。
+- `main.py` 仍是薄装配入口。
 
 ## 测试镜像
 
 ```text
 test/
-|- test_main.py
-|- test_main_chat.py
-|- test_all.py
+|- agent/
+|- context/
 |- interaction/
 |- orchestration/
 |- planning/
 |- extensions/
-|- budget/
-|- context/
 |- session/
 |- tools/
 |- openai_client/
-'- core_contracts/
+|- core_contracts/
+|- test_main.py
+|- test_main_chat.py
+|- test_all.py
+'- test_release_gate_docs.py
 ```
 
-- `test/orchestration/` 对应主循环集成测试。
-- `test/planning/` 对应 task/plan/workflow 状态机测试。
-- `test/extensions/` 当前仍承接 plugin/policy/search/worktree/mcp 测试，这是测试目录名的历史遗留；生产代码对应实现已迁移到 `workspace/` 与 `tools/mcp/`。
-- `test/budget/` 对应预算闸门测试。
-- `test/budget/` 现在只包含 `test_budget_guard.py`（五维闸门测试）。
-- `test/context/` 包含 `test_context_token_estimator.py`、`test_budget_projection.py`、`test_snipper.py`、`test_compactor.py` 与 `test_context_manager.py`。
-- `test/orchestration/` 包含 `test_agent_manager.py`、`test_local_agent.py` 与 `test_query_engine.py`。
+- `test/agent/` 覆盖 `Agent` 主循环、`RunLimits`、`DelegationService`、`AgentRunState` 与 context-manager 编排切面。
+- `test/orchestration/` 当前只保留 `test_query_engine.py`。
+- `test/context/` 覆盖上下文治理组件单测。
 
 ## 推荐阅读顺序
 
 1. 先看 `core_contracts/`，建立共享契约层边界。
-2. 再看 `openai_client/openai_client.py` 与 `tools/tool_gateway.py`，理解模型侧和工具侧的外部交互面。
-3. 再看 `context/`（含 token 估算与预算投影）和 `budget/`（执行闸门），理解预算预检、上下文剪裁和摘要压缩的职责切分。
-4. 再看 `planning/` 与 `workspace/`，理解工作区本地状态、策略和搜索/worktree 能力如何发现、持久化并通过门面暴露 API。
-5. 最后看 `orchestration/local_agent.py`、`interaction/command_line_interaction.py` 和 `main.py`，理解这些能力如何被装配成完整入口。
+2. 再看 `agent/`，理解新运行门面的职责拆分。
+3. 再看 `context/`，理解 pre-model 与 reactive compact 治理链路。
+4. 再看 `tools/` 与 `workspace/`，理解工具与工作区能力如何接入主循环。
+5. 最后看 `interaction/command_line_interaction.py`、`orchestration/query_engine.py` 与 `main.py`，理解控制面装配。

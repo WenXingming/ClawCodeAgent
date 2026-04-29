@@ -16,7 +16,7 @@ class AgentRunState:
     """统一承载 agent 主流程中的动态运行状态。
 
     该对象把 turn 计数、usage 增量、事件、预算快照、临时工具表、
-    工具调用计数和 MCP capability window 从 `LocalAgent` 的局部变量中
+    工具调用计数和 MCP capability window 从 `Agent` 的局部变量中
     收口到一个可变对象里，让主循环和编排器围绕同一个运行态推进。
     """
 

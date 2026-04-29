@@ -1,4 +1,4 @@
-"""LocalAgent 最小闭环测试。"""
+"""Agent 最小闭环测试。"""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
+from agent import Agent
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
-from orchestration.local_agent import LocalAgent
 from session.session_snapshot import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 from tools.mcp import MCPCapability, MCPTool, MCPToolCallResult
@@ -75,7 +75,7 @@ class _FakeOpenAIClient(OpenAIClient):
         return current
 
 
-class LocalAgentTests(unittest.TestCase):
+class AgentTests(unittest.TestCase):
     """验证 ISSUE-006 主循环最小闭环。"""
 
     def _build_runtime_config(
@@ -103,8 +103,8 @@ class LocalAgentTests(unittest.TestCase):
     def _load_session_snapshot(self, workspace: Path, session_id: str) -> AgentSessionSnapshot:
         return AgentSessionStore(workspace / 'sessions').load(session_id)
 
-    def _build_agent(self, fake_client: OpenAIClient, config: _RuntimeContracts) -> LocalAgent:
-        return LocalAgent(
+    def _build_agent(self, fake_client: OpenAIClient, config: _RuntimeContracts) -> Agent:
+        return Agent(
             fake_client,
             config.workspace_scope,
             config.execution_policy,

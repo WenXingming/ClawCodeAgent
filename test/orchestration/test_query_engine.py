@@ -15,8 +15,8 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
+from agent import Agent
 from openai_client.openai_client import OpenAIClient
-from orchestration.local_agent import LocalAgent
 from orchestration.query_engine import QueryEngine
 from session.session_store import AgentSessionStore
 
@@ -77,7 +77,7 @@ class QueryEngineTests(unittest.TestCase):
     def _build_engine(self, workspace: Path, responses: list[OneTurnResponse | Exception], *, budget: BudgetConfig | None = None) -> tuple[QueryEngine, _FakeOpenAIClient]:
         fake_client = _FakeOpenAIClient(responses)
         contracts = self._build_runtime_contracts(workspace, budget=budget)
-        agent = LocalAgent(
+        agent = Agent(
             fake_client,
             contracts.workspace_scope,
             contracts.execution_policy,
