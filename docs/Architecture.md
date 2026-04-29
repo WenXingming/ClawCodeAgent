@@ -11,6 +11,11 @@
 ```text
 src/
 |- main.py
+|- app/
+|  |- cli.py
+|  |- chat_loop.py
+|  |- runtime_builder.py
+|  '- query_service.py
 |- agent/
 |  |- agent.py
 |  |- prompt_processor.py
@@ -20,10 +25,7 @@ src/
 |  |- result_factory.py
 |  '- run_state.py
 |- interaction/
-|  |- command_line_interaction.py
 |  '- slash_commands.py
-|- orchestration/
-|  '- query_engine.py
 |- workspace/
 |  |- workspace_gateway.py
 |  |- plugin_catalog.py
@@ -67,13 +69,15 @@ graph TB
         a_state(["agent/run_state.py"])
     end
 
-    subgraph ControlPlane[interaction / CLI 与本地命令]
-        c_cli(["interaction/command_line_interaction.py"])
+    subgraph ControlPlane[app / CLI 与交互循环]
+        c_cli(["app/cli.py"])
+        c_loop(["app/chat_loop.py"])
+        c_build(["app/runtime_builder.py"])
         c_slash(["interaction/slash_commands.py"])
     end
 
-    subgraph Orchestration[orchestration / 上层运行门面]
-        o_query(["orchestration/query_engine.py"])
+    subgraph QueryFacade[app / 上层查询门面]
+        q_service(["app/query_service.py"])
     end
 
     subgraph ContextPkg[context / 上下文治理]
@@ -106,9 +110,10 @@ graph TB
 
     main --> c_cli
     c_cli --> a_agent
-    c_cli --> o_query
+    c_cli --> c_loop
+    c_cli --> c_build
 
-    o_query --> a_agent
+    q_service --> a_agent
 
     a_agent --> a_prompt
     a_agent --> a_turn
@@ -145,7 +150,7 @@ graph TB
     a_result -.-> core
     c_cli -.-> core
     c_slash -.-> core
-    o_query -.-> core
+    q_service -.-> core
 ```
 
 ## 当前边界
@@ -157,17 +162,17 @@ graph TB
 - `agent/run_limits.py` 收口模型前/工具后的预算闸门逻辑。
 - `agent/delegation_service.py` 收口 child/group lineage、依赖批处理和汇总。
 - `context/context_manager.py` 仍是上下文治理唯一入口，内部组合投影、snip、compact。
-- `orchestration/query_engine.py` 保持上层 submit/stream/persist 门面，面向 `Agent`。
+- `app/query_service.py` 保持上层 submit/stream/persist 门面，面向 `Agent`。
 - `main.py` 仍是薄装配入口。
 
 ## 测试镜像
 
 ```text
 test/
+|- app/
 |- agent/
 |- context/
 |- interaction/
-|- orchestration/
 |- planning/
 |- extensions/
 |- session/
@@ -181,7 +186,7 @@ test/
 ```
 
 - `test/agent/` 覆盖 `Agent` 主循环、`RunLimits`、`DelegationService`、`AgentRunState` 与 context-manager 编排切面。
-- `test/orchestration/` 当前只保留 `test_query_engine.py`。
+- `test/app/` 当前覆盖 `QueryService` 上层门面行为与统计语义。
 - `test/context/` 覆盖上下文治理组件单测。
 
 ## 推荐阅读顺序
@@ -190,4 +195,4 @@ test/
 2. 再看 `agent/`，理解新运行门面的职责拆分。
 3. 再看 `context/`，理解 pre-model 与 reactive compact 治理链路。
 4. 再看 `tools/` 与 `workspace/`，理解工具与工作区能力如何接入主循环。
-5. 最后看 `interaction/command_line_interaction.py`、`orchestration/query_engine.py` 与 `main.py`，理解控制面装配。
+5. 最后看 `app/cli.py`、`app/query_service.py` 与 `main.py`，理解控制面装配。

@@ -25,7 +25,7 @@
 | 权限拒绝链路 | `test/tools/test_local_tools_shell.py` + `test/agent/test_agent.py` | 覆盖写文件权限、shell 权限与危险命令限制 |
 | resume 累计预算链路 | `test/agent/test_agent.py` + `test/test_main_chat.py` | 覆盖 session 连续性、usage/tool_calls/turns 累计 |
 | plugin / policy 冲突链路 | `test/extensions/test_plugin_runtime.py` + `test/extensions/test_hook_policy_runtime.py` + `test/agent/test_agent.py` | 覆盖 deny、hook、block 优先级 |
-| delegate_agent 失败/跳过/预算终止 | `test/agent/test_delegation_service.py` + `test/agent/test_agent.py` + `test/orchestration/test_query_engine.py` | 覆盖 child failure、dependency_skipped、delegated_task_limit 和统计汇总 |
+| delegate_agent 失败/跳过/预算终止 | `test/agent/test_delegation_service.py` + `test/agent/test_agent.py` + `test/app/test_query_service.py` | 覆盖 child failure、dependency_skipped、delegated_task_limit 和统计汇总 |
 
 ## 4. 推荐执行顺序
 

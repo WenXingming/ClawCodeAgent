@@ -1,4 +1,4 @@
-"""ISSUE-025 QueryEngine 单元测试。"""
+"""Step 8 QueryService 单元测试。"""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
+from app.query_service import QueryService
 from core_contracts.budget import BudgetConfig
 from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
@@ -17,7 +18,6 @@ from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, Sessio
 from core_contracts.token_usage import TokenUsage
 from agent import Agent
 from openai_client.openai_client import OpenAIClient
-from orchestration.query_engine import QueryEngine
 from session.session_store import AgentSessionStore
 
 
@@ -54,9 +54,9 @@ class _FakeOpenAIClient(OpenAIClient):
         return current
 
 
-class QueryEngineTests(unittest.TestCase):
+class QueryServiceTests(unittest.TestCase):
     def _make_test_dir(self) -> Path:
-        workspace = Path(tempfile.mkdtemp(prefix=f'claw-query-engine-{uuid4().hex}-'))
+        workspace = Path(tempfile.mkdtemp(prefix=f'claw-query-service-{uuid4().hex}-'))
         self.addCleanup(shutil.rmtree, workspace, ignore_errors=True)
         return workspace
 
@@ -74,7 +74,7 @@ class QueryEngineTests(unittest.TestCase):
             session_paths=SessionPaths(session_directory=workspace / 'sessions'),
         )
 
-    def _build_engine(self, workspace: Path, responses: list[OneTurnResponse | Exception], *, budget: BudgetConfig | None = None) -> tuple[QueryEngine, _FakeOpenAIClient]:
+    def _build_service(self, workspace: Path, responses: list[OneTurnResponse | Exception], *, budget: BudgetConfig | None = None) -> tuple[QueryService, _FakeOpenAIClient]:
         fake_client = _FakeOpenAIClient(responses)
         contracts = self._build_runtime_contracts(workspace, budget=budget)
         agent = Agent(
@@ -87,11 +87,11 @@ class QueryEngineTests(unittest.TestCase):
             contracts.session_paths,
             AgentSessionStore(contracts.session_paths.session_directory),
         )
-        return QueryEngine.from_runtime_agent(agent), fake_client
+        return QueryService.from_runtime_agent(agent), fake_client
 
     def test_submit_uses_run_then_resume_and_can_return_persisted_session_path(self) -> None:
         workspace = self._make_test_dir()
-        engine, fake_client = self._build_engine(
+        service, fake_client = self._build_service(
             workspace,
             [
                 OneTurnResponse(
@@ -109,19 +109,19 @@ class QueryEngineTests(unittest.TestCase):
             ],
         )
 
-        first = engine.submit('问题一')
-        second = engine.submit('问题二')
+        first = service.submit('问题一')
+        second = service.submit('问题二')
 
         self.assertEqual(len(fake_client.calls), 2)
         self.assertEqual(first.session_id, second.session_id)
         self.assertEqual(second.output, '第二轮回答')
         self.assertEqual(second.usage.input_tokens, 4)
         self.assertEqual(second.usage.output_tokens, 2)
-        self.assertEqual(engine.persist_session(), second.session_path)
+        self.assertEqual(service.persist_session(), second.session_path)
 
     def test_stream_submit_emits_runtime_summary_and_message_stop(self) -> None:
         workspace = self._make_test_dir()
-        engine, _ = self._build_engine(
+        service, _ = self._build_service(
             workspace,
             [
                 OneTurnResponse(
@@ -133,7 +133,7 @@ class QueryEngineTests(unittest.TestCase):
             ],
         )
 
-        events = list(engine.stream_submit('流式问题'))
+        events = list(service.stream_submit('流式问题'))
 
         self.assertEqual(events[0]['type'], 'message_start')
         self.assertTrue(any(item.get('type') == 'runtime_summary' for item in events))
@@ -141,9 +141,9 @@ class QueryEngineTests(unittest.TestCase):
         self.assertEqual(events[-1]['stop_reason'], 'stop')
         self.assertEqual(events[-1]['usage']['input_tokens'], 2)
 
-    def test_query_engine_tracks_delegate_events_and_lineage_stats(self) -> None:
+    def test_query_service_tracks_delegate_events_and_lineage_stats(self) -> None:
         workspace = self._make_test_dir()
-        engine, _ = self._build_engine(
+        service, _ = self._build_service(
             workspace,
             [
                 OneTurnResponse(
@@ -189,23 +189,23 @@ class QueryEngineTests(unittest.TestCase):
             ],
         )
 
-        turn = engine.submit('执行委托任务')
-        summary = engine.render_summary()
+        turn = service.submit('执行委托任务')
+        summary = service.render_summary()
 
         self.assertEqual(turn.stop_reason, 'stop')
-        self.assertEqual(engine.runtime_event_counts.get('delegate_group_start'), 1)
-        self.assertEqual(engine.runtime_event_counts.get('delegate_child_complete'), 2)
-        self.assertEqual(engine.runtime_group_status_counts.get('completed'), 1)
-        self.assertEqual(engine.runtime_child_stop_reason_counts.get('stop'), 2)
-        self.assertEqual(engine.runtime_lineage_stats.get('unique_groups'), 1)
-        self.assertEqual(engine.runtime_lineage_stats.get('unique_parent_agents'), 1)
-        self.assertEqual(engine.runtime_lineage_stats.get('unique_child_agents'), 2)
+        self.assertEqual(service.runtime_event_counts.get('delegate_group_start'), 1)
+        self.assertEqual(service.runtime_event_counts.get('delegate_child_complete'), 2)
+        self.assertEqual(service.runtime_group_status_counts.get('completed'), 1)
+        self.assertEqual(service.runtime_child_stop_reason_counts.get('stop'), 2)
+        self.assertEqual(service.runtime_lineage_stats.get('unique_groups'), 1)
+        self.assertEqual(service.runtime_lineage_stats.get('unique_parent_agents'), 1)
+        self.assertEqual(service.runtime_lineage_stats.get('unique_child_agents'), 2)
         self.assertIn('delegate_child_complete=2', summary)
         self.assertIn('unique_child_agents=2', summary)
 
-    def test_query_engine_tracks_file_mutation_counts_from_tool_results(self) -> None:
+    def test_query_service_tracks_file_mutation_counts_from_tool_results(self) -> None:
         workspace = self._make_test_dir()
-        engine, _ = self._build_engine(
+        service, _ = self._build_service(
             workspace,
             [
                 OneTurnResponse(
@@ -229,11 +229,11 @@ class QueryEngineTests(unittest.TestCase):
             ],
         )
 
-        turn = engine.submit('写入 note.txt')
+        turn = service.submit('写入 note.txt')
 
         self.assertEqual(turn.stop_reason, 'stop')
         self.assertTrue((workspace / 'note.txt').is_file())
-        self.assertEqual(engine.runtime_mutation_counts.get('write_file'), 1)
+        self.assertEqual(service.runtime_mutation_counts.get('write_file'), 1)
 
 
 if __name__ == '__main__':

@@ -30,12 +30,12 @@ class ReleaseGateDocsTests(unittest.TestCase):
         self.assertIn('scripts/run_release_gate.ps1', checklist)
         self.assertIn('test_release_gate_docs.py', checklist)
 
-    def test_demo_script_covers_cli_and_query_engine_flows(self) -> None:
+    def test_demo_script_covers_cli_and_query_service_flows(self) -> None:
         demo_script = (_ROOT / 'docs' / 'DEMO_SCRIPT.md').read_text(encoding='utf-8')
 
         self.assertIn('agent-chat', demo_script)
         self.assertIn('agent-resume', demo_script)
-        self.assertIn('QueryEngine', demo_script)
+        self.assertIn('QueryService', demo_script)
 
     def test_release_gate_script_runs_required_steps(self) -> None:
         script = (_ROOT / 'scripts' / 'run_release_gate.ps1').read_text(encoding='utf-8')

@@ -569,9 +569,9 @@ print(tool_result.content)
 
 说明：当前版本把 MCP 运行时平铺在 `src/tools/mcp_*` 模块下，不做远端 MCP 网关和长连接复用。`stdio` transport 仍按单次请求拉起 child process，HTTP/SSE transport 也按一次请求完成 `initialize` 和目标方法调用。失败会抛出带 `server_name`、`method`、`stderr` 和 `exit_code` 的 `MCPTransportError`，便于上层追踪。
 
-## 17. QueryEngine 门面与运行统计（ISSUE-025）
+## 17. QueryService 门面与运行统计（ISSUE-025 / Step-08）
 
-当前版本支持通过 `orchestration.query_engine.QueryEngine` 为上层交互提供统一的：
+当前版本支持通过 `app.query_service.QueryService` 为上层交互提供统一的：
 
 - `submit`：同步提交一轮输入
 - `stream_submit`：流式输出 runtime events + runtime summary + message_stop
@@ -582,14 +582,14 @@ print(tool_result.content)
 
 - 只实现 runtime agent 模式，不引入旧兼容端口。
 - `submit` 与 `stream_submit` 共用同一条 run/resume 路径，首轮 `run`，后续自动 `load + resume`。
-- `TurnResult.usage` 是相对上一轮的增量 usage，`usage_total` 是当前会话累计 usage。
+- `QueryTurnResult.usage` 是相对上一轮的增量 usage，`usage_total` 是当前会话累计 usage。
 
 代码示例：
 
 ```python
-from orchestration.query_engine import QueryEngine
+from app.query_service import QueryService
 
-engine = QueryEngine.from_runtime_agent(agent)
+engine = QueryService.from_runtime_agent(agent)
 first = engine.submit('先读取 README')
 second = engine.submit('基于上一轮继续总结')
 
