@@ -10,35 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter
 
+from core_contracts.interaction_contracts import SessionSummary
 from core_contracts.run_result import AgentRunResult
-
-
-@dataclass
-class SessionSummary:
-    """表示一次 CLI 交互结束时的只读汇总快照。
-
-    外部通常不直接手工构造该对象，而是通过 SessionInteractionTracker.to_summary()
-    从累计态生成，再传给结束提示框渲染器输出到终端。
-    """
-
-    session_id: str | None = None  # str | None: 最后一个已知会话 ID；无会话时为 None。
-    tool_calls: int = 0  # int: 本次交互期间累计发生的工具调用总数。
-    tool_successes: int = 0  # int: 工具调用成功次数。
-    tool_failures: int = 0  # int: 工具调用失败次数。
-    wall_time_seconds: float = 0.0  # float: 本次交互累计墙钟耗时，单位为秒。
-
-    @property
-    def success_rate(self) -> float:
-        """返回工具调用成功率。
-
-        Args:
-            None: 该属性直接基于当前对象字段计算。
-        Returns:
-            float: 成功调用数除以总调用数后的比例；当总调用数为 0 时返回 0.0。
-        """
-        if self.tool_calls <= 0:
-            return 0.0
-        return self.tool_successes / self.tool_calls
 
 
 @dataclass
@@ -126,3 +99,6 @@ class SessionInteractionTracker:
             tool_failures=self.tool_failures,
             wall_time_seconds=max(perf_counter() - self.started_time, 0.0),
         )
+
+
+__all__ = ['SessionSummary', 'SessionInteractionTracker']

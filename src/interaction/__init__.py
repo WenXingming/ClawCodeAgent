@@ -1,30 +1,8 @@
-"""Interaction 模块公开 API。
+"""interaction 包公开入口。
 
-该模块整合了所有 UI 交互和渲染相关的功能。
-外层只通过本模块的导出来访问交互类。
+对外只暴露 InteractionGateway，禁止依赖子模块路径。
 """
 
-from .environment_summary import EnvironmentLoadSummary
-from .quit_render import ExitRenderer
-from .runtime_event_printer import RuntimeEventPrinter
-from .session_summary import SessionInteractionTracker
-from .slash_autocomplete import SlashAutocompleteEntry, SlashAutocompletePrompt
-from .slash_commands import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
-from .slash_render import SlashCommandRenderer
-from .startup_render import StartupRenderer
-from .terminal_render import TerminalRenderer
+from .interaction_gateway import InteractionGateway
 
-__all__ = [
-    'EnvironmentLoadSummary',
-    'ExitRenderer',
-    'RuntimeEventPrinter',
-    'SessionInteractionTracker',
-    'SlashAutocompleteEntry',
-    'SlashAutocompletePrompt',
-    'SlashCommandContext',
-    'SlashCommandDispatcher',
-    'SlashCommandResult',
-    'SlashCommandRenderer',
-    'StartupRenderer',
-    'TerminalRenderer',
-]
+__all__ = ['InteractionGateway']

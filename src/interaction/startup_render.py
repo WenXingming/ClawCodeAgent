@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from .environment_summary import EnvironmentLoadSummary
+from core_contracts.interaction_contracts import EnvironmentLoadSummary
 from .terminal_render import TerminalRenderer
 
 

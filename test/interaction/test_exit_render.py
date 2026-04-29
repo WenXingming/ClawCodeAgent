@@ -7,8 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from interaction.quit_render import ExitRenderer
-from interaction.session_summary import SessionSummary
+from interaction.interaction_gateway import ExitRenderer, SessionSummary
 
 
 class _TtyStringIO(io.StringIO):

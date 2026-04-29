@@ -10,7 +10,7 @@ from core_contracts.budget import BudgetConfig
 from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from interaction.slash_commands import (
+from interaction.interaction_gateway import (
     SlashCommandContext,
     SlashCommandDispatcher,
 )

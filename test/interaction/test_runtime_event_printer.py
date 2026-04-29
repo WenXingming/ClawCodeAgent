@@ -6,7 +6,7 @@ import io
 import time
 import unittest
 
-from interaction.runtime_event_printer import RuntimeEventPrinter
+from interaction.interaction_gateway import RuntimeEventPrinter
 
 
 class _TtyStringIO(io.StringIO):

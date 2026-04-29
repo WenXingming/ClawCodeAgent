@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal, TextIO
 
-from .session_summary import SessionSummary
+from core_contracts.interaction_contracts import SessionSummary
 from .terminal_render import TerminalRenderer
 
 
