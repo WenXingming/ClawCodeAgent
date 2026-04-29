@@ -19,7 +19,7 @@ from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, Sessio
 from core_contracts.token_usage import TokenUsage
 from agent import Agent
 from openai_client.openai_client import OpenAIClient
-from session import SessionManager
+from session import SessionGateway
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,7 @@ class QueryServiceTests(unittest.TestCase):
             contracts.permissions,
             contracts.budget_config,
             contracts.session_paths,
-            SessionManager(contracts.session_paths.session_directory),
+            SessionGateway(contracts.session_paths.session_directory),
         )
         return AppGateway.create_query_service(agent), fake_client
 

@@ -7,7 +7,7 @@ import unittest
 from agent.run_state import AgentRunState
 from core_contracts.protocol import ToolCall, ToolExecutionResult
 from core_contracts.token_usage import TokenUsage
-from session.session_state import AgentSessionState
+from core_contracts.session_contracts import AgentSessionState
 
 
 class AgentRunStateTests(unittest.TestCase):

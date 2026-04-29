@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 
 from core_contracts.context_contracts import BudgetProjection
 from core_contracts.protocol import JSONDict, ToolCall, ToolExecutionResult
+from core_contracts.session_contracts import AgentSessionState
 from core_contracts.token_usage import TokenUsage
-from session.session_gateway import AgentSessionState
 from core_contracts.tools_contracts import ToolDescriptor
 
 

@@ -11,15 +11,12 @@ from agent import Agent
 from openai_client.openai_client_gateway import OpenAIClientGateway
 from session.session_gateway import SessionGateway
 
-# 兼容测试与旧注入点命名，统一绑定到 SessionGateway。
-SessionManager = SessionGateway
-
 
 def main(argv: list[str] | None = None) -> int:
     """执行主 CLI 入口并返回进程退出码。
 
     通过 AppGateway.run_cli() 把依赖注入点与控制面实现完全解耦。
-    测试可 patch OpenAIClientGateway、Agent 或 SessionManager 来替换实际实现。
+    测试可 patch OpenAIClientGateway、Agent 或 SessionGateway 来替换实际实现。
 
     Args:
         argv (list[str] | None): 命令行参数列表；None 时由 argparse 回退到 sys.argv。
@@ -32,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
         argv,
         openai_client_cls=OpenAIClientGateway,
         agent_cls=Agent,
-        session_manager_cls=SessionManager,
+        session_manager_cls=SessionGateway,
     )
 
 

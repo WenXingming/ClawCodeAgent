@@ -17,7 +17,7 @@ from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, Sessio
 from core_contracts.run_result import AgentRunResult
 from core_contracts.token_usage import TokenUsage
 from main import main
-from session.session_snapshot import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot
 
 
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
@@ -248,7 +248,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['续跑问题', '/exit']),
         ):
@@ -282,7 +282,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
@@ -318,7 +318,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
@@ -343,7 +343,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['请把春江花月夜全文写入文件', '/exit']),
         ):
@@ -368,7 +368,7 @@ class MainEntryTests(unittest.TestCase):
         def _load_snapshot(session_id, directory):
             raise ValueError('Session not found: xyz')
 
-        with patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)):
+        with patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 code = main(['agent-resume', 'xyz'])

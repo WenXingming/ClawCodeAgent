@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core_contracts.run_result import AgentRunResult
+from core_contracts.session_contracts import AgentSessionSnapshot
 from interaction.interaction_gateway import (
     EnvironmentLoadSummary,
     ExitRenderer,
@@ -22,7 +23,7 @@ from interaction.interaction_gateway import (
     SlashCommandRenderer,
     StartupRenderer,
 )
-from session.session_gateway import AgentSessionSnapshot, SessionGateway
+from session.session_gateway import SessionGateway
 
 
 @dataclass

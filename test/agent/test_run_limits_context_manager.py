@@ -19,7 +19,7 @@ from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.runtime_policy import ContextPolicy
 from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient
-from session.session_state import AgentSessionState
+from core_contracts.session_contracts import AgentSessionState
 
 
 @dataclass(frozen=True)

@@ -18,8 +18,9 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.session_contracts import AgentSessionSnapshot, AgentSessionState
 from interaction.interaction_gateway import SlashCommandDispatcher
-from session.session_gateway import AgentSessionSnapshot, AgentSessionState, SessionGateway
+from session.session_gateway import SessionGateway
 from core_contracts.tools_contracts import ToolDescriptor
 from tools.tools_gateway import ToolsGateway
 from workspace import WorkspaceGateway

@@ -17,7 +17,7 @@ from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from session.session_gateway import AgentSessionState
+from core_contracts.session_contracts import AgentSessionState
 from core_contracts.tools_contracts import ToolDescriptor
 
 

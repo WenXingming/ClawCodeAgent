@@ -18,8 +18,9 @@ from core_contracts.model import ModelConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.session_contracts import AgentSessionSnapshot
 from openai_client.openai_client_gateway import OpenAIClientGateway
-from session.session_gateway import AgentSessionSnapshot, SessionGateway
+from session.session_gateway import SessionGateway
 
 
 @dataclass(frozen=True)

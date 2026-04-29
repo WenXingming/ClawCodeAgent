@@ -14,7 +14,7 @@ from interaction.slash_commands import (
     SlashCommandContext,
     SlashCommandDispatcher,
 )
-from session.session_state import AgentSessionState
+from core_contracts.session_contracts import AgentSessionState
 from tools.tools_gateway import ToolsGateway
 
 

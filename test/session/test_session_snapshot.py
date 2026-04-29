@@ -11,7 +11,7 @@ from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
-from session.session_snapshot import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()
