@@ -54,6 +54,19 @@ from core_contracts.interaction import (
     SlashCommandContext,
     SlashCommandResult,
 )
+from core_contracts.planning import (
+    PlanStep,
+    PlanStepStatus,
+    TaskRecord,
+    TaskStatus,
+    WorkflowAction,
+    WorkflowLoadError,
+    WorkflowManifest,
+    WorkflowRunRecord,
+    WorkflowRunStatus,
+    WorkflowStepResult,
+    WorkflowStepSpec,
+)
 
 __all__ = [
     # ── primitives ──
@@ -116,4 +129,16 @@ __all__ = [
     'SlashAutocompleteEntry',
     'SlashCommandContext',
     'SlashCommandResult',
+    # ── planning ──
+    'PlanStep',
+    'PlanStepStatus',
+    'TaskRecord',
+    'TaskStatus',
+    'WorkflowAction',
+    'WorkflowLoadError',
+    'WorkflowManifest',
+    'WorkflowRunRecord',
+    'WorkflowRunStatus',
+    'WorkflowStepResult',
+    'WorkflowStepSpec',
 ]

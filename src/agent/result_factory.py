@@ -25,7 +25,7 @@ class ResultFactory:
     permissions: ToolPermissionPolicy
     budget_config: BudgetConfig
     session_paths: SessionPaths
-    session_manager: SessionGateway
+    session_gateway: SessionGateway
 
     def build(self, run_state: AgentRunState) -> AgentRunResult:
         """基于当前运行态落盘并返回标准结果对象。"""
@@ -54,7 +54,7 @@ class ResultFactory:
             mcp_capability_shortlist=run_state.mcp_capability_candidates(),
             materialized_mcp_capability_handles=run_state.materialized_mcp_capabilities(),
         )
-        session_path = self.session_manager.save_session(session_snapshot)
+        session_path = self.session_gateway.save_session(session_snapshot)
         return AgentRunResult(
             final_output=run_state.final_output,
             turns=run_state.turns_total,

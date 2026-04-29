@@ -218,7 +218,7 @@ class AgentGateway:
             permissions=self.permissions,
             budget_config=self.budget_config,
             session_paths=self.session_paths,
-            session_manager=self.session_manager,
+            session_gateway=self.session_manager,
         )
         self._turn_coordinator = TurnCoordinator(
             client=self.client,

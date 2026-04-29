@@ -1,127 +1,79 @@
-﻿"""管理工作区本地计划的存储、渲染与任务同步。
+"""管理工作区计划状态与计划到任务的投影。
 
-本模块负责维护 `.claw/plan.json` 中的计划步骤状态，并在需要时把计划步骤投影为任务记录，同步到 `TaskRuntime`。它聚焦于计划视图本身，不负责执行模型或工具调用。
+本模块只负责 planning 域内部的计划持久化、状态校验和计划到任务的同步映射。
+外部调用方必须通过 PlanningGateway 访问这些能力，而不是直接依赖本文件中的 runtime 实现。
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, replace
-from enum import StrEnum
+from dataclasses import replace
 from pathlib import Path
 
-from core_contracts.primitives import JSONDict
-from planning.task_runtime import TaskRecord, TaskRuntime, TaskStatus
+from core_contracts.planning import PlanStep, PlanStepStatus, TaskRecord, TaskStatus
+from planning.task_runtime import TaskRuntime
 
 
 _PLAN_STATE_FILE = Path('.claw') / 'plan.json'
 _SCHEMA_VERSION = 1
 
 
-class PlanStepStatus(StrEnum):
-    """计划步骤的稳定状态集合。"""
-
-    PENDING = 'pending'
-    IN_PROGRESS = 'in_progress'
-    COMPLETED = 'completed'
-    BLOCKED = 'blocked'
-    CANCELLED = 'cancelled'
-
-
-@dataclass(frozen=True)
-class PlanStep:
-    """表示单个计划步骤的稳定记录。
-
-    该对象描述计划中的一个步骤，包括标题、描述、依赖关系与当前状态，可在内存与 JSON 持久化格式之间稳定转换。
-    """
-
-    step_id: str  # str：计划步骤的稳定唯一标识。
-    title: str  # str：计划步骤的展示标题。
-    description: str = ''  # str：计划步骤的补充说明。
-    dependencies: tuple[str, ...] = ()  # tuple[str, ...]：当前步骤依赖的前置步骤 ID 列表。
-    status: PlanStepStatus = PlanStepStatus.PENDING  # PlanStepStatus：当前步骤状态。
-
-    def to_dict(self) -> JSONDict:
-        """把计划步骤转换成可持久化的 JSON 字典。
-
-        Args:
-            None: 该方法不接收额外参数。
-        Returns:
-            JSONDict: 当前计划步骤的可序列化字典表示。
-        """
-        return {
-            'step_id': self.step_id,
-            'title': self.title,
-            'description': self.description,
-            'dependencies': list(self.dependencies),
-            'status': self.status.value,
-        }
-
-    @classmethod
-    def from_dict(cls, payload: JSONDict | None) -> 'PlanStep':
-        """从 JSON 字典恢复单个计划步骤。
-
-        Args:
-            payload (JSONDict | None): 待反序列化的原始字典。
-        Returns:
-            PlanStep: 恢复后的计划步骤对象。
-        Raises:
-            ValueError: 当步骤 ID、标题、依赖或状态非法时抛出。
-        """
-        data = dict(payload or {})
-        step_id = _normalize_step_id(data.get('step_id', data.get('stepId', '')))
-        title = str(data.get('title', '')).strip()
-        if not title:
-            raise ValueError(f'Plan step {step_id!r} requires non-empty title')
-        return cls(
-            step_id=step_id,
-            title=title,
-            description=str(data.get('description', '')).strip(),
-            dependencies=_normalize_dependencies(data.get('dependencies', []), step_id=step_id),
-            status=PlanStepStatus(str(data.get('status', PlanStepStatus.PENDING.value)).strip()),
-        )
-
-
-@dataclass
 class PlanRuntime:
-    """管理工作区本地计划状态的运行时对象。
+    """管理工作区本地计划状态。
 
-    典型工作流如下：
-    1. 调用 `from_workspace()` 从 `.claw/plan.json` 加载计划步骤。
-    2. 通过 `update_plan()` 或 `clear_plan()` 更新计划内容。
-    3. 需要与任务视图保持一致时调用 `sync_tasks()` 把计划步骤同步到 `TaskRuntime`。
+    核心工作流：
+    1. `from_workspace` 读取 `.claw/plan.json` 并恢复步骤顺序。
+    2. `update_plan` 或 `clear_plan` 更新计划状态并落盘。
+    3. `sync_tasks` 把计划投影到任务视图，并使用任务状态回写步骤状态。
     """
 
-    workspace: Path  # Path：当前计划运行时所属的工作区根目录。
-    steps_by_id: dict[str, PlanStep] = field(default_factory=dict)  # dict[str, PlanStep]：按步骤 ID 建立的步骤索引。
-    step_order: tuple[str, ...] = ()  # tuple[str, ...]：计划步骤的稳定展示顺序。
-    schema_version: int = _SCHEMA_VERSION  # int：当前计划状态文件使用的 schema 版本。
+    def __init__(
+        self,
+        workspace: Path,
+        *,
+        steps_by_id: dict[str, PlanStep] | None = None,
+        step_order: tuple[str, ...] = (),
+        schema_version: int = _SCHEMA_VERSION,
+    ) -> None:
+        """初始化计划 runtime。
+        Args:
+            workspace (Path): 工作区根目录。
+            steps_by_id (dict[str, PlanStep] | None): 当前步骤索引。
+            step_order (tuple[str, ...]): 当前步骤顺序。
+            schema_version (int): 当前状态文件版本。
+        Returns:
+            None: 该方法仅负责保存状态。
+        Raises:
+            ValueError: 当工作区路径不存在时抛出。
+        """
+        resolved_workspace = workspace.resolve()
+        if not resolved_workspace.is_dir():
+            raise ValueError(f'Workspace directory does not exist: {resolved_workspace}')
+        self.workspace = resolved_workspace  # Path：当前计划 runtime 绑定的工作区根目录。
+        self.steps_by_id = dict(steps_by_id or {})  # dict[str, PlanStep]：按步骤 ID 建立的步骤索引。
+        self.step_order = tuple(step_order)  # tuple[str, ...]：计划步骤的稳定展示顺序。
+        self.schema_version = schema_version  # int：当前计划状态文件版本号。
 
     @classmethod
     def from_workspace(cls, workspace: Path) -> 'PlanRuntime':
-        """从工作区加载计划运行时状态。
-
+        """从工作区加载计划状态。
         Args:
             workspace (Path): 工作区根目录。
-
         Returns:
-            PlanRuntime: 解析并校验后的计划运行时对象。
+            PlanRuntime: 初始化完成的计划 runtime。
         Raises:
-            ValueError: 当计划文件结构非法、字段类型错误或存在重复步骤 ID 时抛出。
+            ValueError: 当计划文件结构非法时抛出。
         """
         resolved_workspace = workspace.resolve()
         path = resolved_workspace / _PLAN_STATE_FILE
         if not path.is_file():
-            return cls(workspace=resolved_workspace)
-
+            return cls(resolved_workspace)
         payload = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(payload, dict):
             raise ValueError(f'Plan runtime file {path} must contain a JSON object')
-
         steps_raw = payload.get('steps', [])
         if not isinstance(steps_raw, list):
             raise ValueError(f'Plan runtime file {path} field "steps" must be a JSON array')
-
         steps_by_id: dict[str, PlanStep] = {}
         step_order: list[str] = []
         for item in steps_raw:
@@ -132,9 +84,8 @@ class PlanRuntime:
                 raise ValueError(f'Duplicate plan step id in plan file: {step.step_id!r}')
             steps_by_id[step.step_id] = step
             step_order.append(step.step_id)
-
         runtime = cls(
-            workspace=resolved_workspace,
+            resolved_workspace,
             steps_by_id=steps_by_id,
             step_order=tuple(step_order),
             schema_version=_as_int(payload.get('schema_version'), _SCHEMA_VERSION),
@@ -142,13 +93,14 @@ class PlanRuntime:
         runtime._validate_dependencies(runtime.list_steps())
         return runtime
 
-    def save(self) -> Path:
-        """把当前计划状态保存到工作区文件。
-
+    def save(self) -> None:
+        """把当前计划状态写回工作区文件。
         Args:
             None: 该方法不接收额外参数。
         Returns:
-            Path: 实际写入的计划状态文件路径。
+            None: 该方法原地落盘保存状态。
+        Raises:
+            OSError: 当文件写入失败时抛出。
         """
         path = self.workspace / _PLAN_STATE_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,40 +108,35 @@ class PlanRuntime:
             json.dumps(
                 {
                     'schema_version': self.schema_version,
-                    'steps': [item.to_dict() for item in self.list_steps()],
+                    'steps': [step.to_dict() for step in self.list_steps()],
                 },
                 indent=2,
                 ensure_ascii=False,
             ),
             encoding='utf-8',
         )
-        return path
 
     def list_steps(self) -> tuple[PlanStep, ...]:
         """按稳定顺序返回全部计划步骤。
-
         Args:
             None: 该方法不接收额外参数。
         Returns:
-            tuple[PlanStep, ...]: 当前计划步骤列表的只读视图。
+            tuple[PlanStep, ...]: 当前计划步骤集合。
+        Raises:
+            无。
         """
-        return tuple(
-            self.steps_by_id[step_id]
-            for step_id in self.step_order
-            if step_id in self.steps_by_id
-        )
+        return tuple(self.steps_by_id[step_id] for step_id in self.step_order if step_id in self.steps_by_id)
 
     def get_step(self, step_id: str) -> PlanStep:
-        """按步骤 ID 获取单个计划步骤。
-
+        """按步骤 ID 返回单个计划步骤。
         Args:
-            step_id (str): 需要读取的计划步骤 ID。
+            step_id (str): 目标步骤 ID。
         Returns:
-            PlanStep: 找到的计划步骤对象。
+            PlanStep: 对应的计划步骤契约。
         Raises:
-            ValueError: 当步骤不存在或步骤 ID 非法时抛出。
+            ValueError: 当步骤不存在或 ID 非法时抛出。
         """
-        normalized_id = _normalize_step_id(step_id)
+        normalized_id = _normalize_identifier(step_id, label='step_id')
         step = self.steps_by_id.get(normalized_id)
         if step is None:
             raise ValueError(f'Unknown plan step: {normalized_id!r}')
@@ -201,31 +148,31 @@ class PlanRuntime:
         *,
         sync_tasks: bool = False,
     ) -> tuple[PlanStep, ...]:
-        """整体更新当前计划步骤集合。
-
+        """整体替换当前计划步骤集合。
         Args:
-            steps (tuple[PlanStep, ...] | list[PlanStep]): 作为新计划内容的步骤集合。
-            sync_tasks (bool): 更新后是否立即同步任务视图。
+            steps (tuple[PlanStep, ...] | list[PlanStep]): 新的计划步骤集合。
+            sync_tasks (bool): 更新后是否同步任务视图。
         Returns:
-            tuple[PlanStep, ...]: 更新完成后的计划步骤列表。
+            tuple[PlanStep, ...]: 更新后的计划步骤集合。
         Raises:
-            ValueError: 当步骤集合包含非法项、重复 ID 或引用未知依赖时抛出。
+            ValueError: 当步骤集合非法时抛出。
         """
         normalized_steps = self._normalize_steps(steps)
-        self.steps_by_id = {item.step_id: item for item in normalized_steps}
-        self.step_order = tuple(item.step_id for item in normalized_steps)
+        self.steps_by_id = {step.step_id: step for step in normalized_steps}
+        self.step_order = tuple(step.step_id for step in normalized_steps)
         self.save()
         if sync_tasks:
             return self.sync_tasks()
         return self.list_steps()
 
     def clear_plan(self, *, sync_tasks: bool = False) -> None:
-        """清空当前计划，并按需同步清空任务视图。
-
+        """清空当前计划。
         Args:
-            sync_tasks (bool): 清空后是否同时把任务运行时也替换为空集合。
+            sync_tasks (bool): 是否同时清空任务视图。
         Returns:
-            None: 该方法原地更新状态并落盘保存。
+            None: 该方法原地更新并持久化状态。
+        Raises:
+            无。
         """
         self.steps_by_id = {}
         self.step_order = ()
@@ -234,47 +181,43 @@ class PlanRuntime:
             TaskRuntime.from_workspace(self.workspace).replace_tasks(())
 
     def sync_tasks(self) -> tuple[PlanStep, ...]:
-        """把当前计划步骤同步映射为任务记录。
-
+        """把当前计划投影到任务视图，并回写计划状态。
         Args:
             None: 该方法不接收额外参数。
         Returns:
-            tuple[PlanStep, ...]: 根据同步结果回写状态后的计划步骤列表。
+            tuple[PlanStep, ...]: 同步后的计划步骤集合。
+        Raises:
+            ValueError: 当任务替换或状态回写失败时抛出。
         """
         task_runtime = TaskRuntime.from_workspace(self.workspace)
-        existing_tasks = {item.task_id: item for item in task_runtime.list_tasks()}
+        existing_tasks = {task.task_id: task for task in task_runtime.list_tasks()}
         synced_tasks = task_runtime.replace_tasks(
-            [self._step_to_task_record(step, existing_tasks.get(step.step_id)) for step in self.list_steps()]
+            tuple(self._step_to_task_record(step, existing_tasks.get(step.step_id)) for step in self.list_steps())
         )
-        task_index = {item.task_id: item for item in synced_tasks}
-
+        task_index = {task.task_id: task for task in synced_tasks}
         updated_steps: dict[str, PlanStep] = {}
         for step in self.list_steps():
             synced_task = task_index.get(step.step_id)
             if synced_task is None:
                 continue
-            updated_steps[step.step_id] = replace(
-                step,
-                status=PlanStepStatus(synced_task.status.value),
-            )
-
+            updated_steps[step.step_id] = replace(step, status=PlanStepStatus(synced_task.status.value))
         self.steps_by_id = updated_steps
-        self.step_order = tuple(item.step_id for item in self.list_steps())
+        self.step_order = tuple(step.step_id for step in self.list_steps())
         self.save()
         return self.list_steps()
 
     def render_plan(self) -> str:
-        """把当前计划渲染为便于终端显示的纯文本。
-
+        """渲染当前计划的终端文本视图。
         Args:
             None: 该方法不接收额外参数。
         Returns:
-            str: 当前计划的文本表示；无步骤时返回 `(none)` 视图。
+            str: 当前计划的纯文本表示。
+        Raises:
+            无。
         """
         steps = self.list_steps()
         if not steps:
             return 'Plan Steps\n==========\n(none)'
-
         lines = ['Plan Steps', '==========']
         for index, step in enumerate(steps, start=1):
             lines.append(f'{index}. [{step.status.value}] {step.step_id} - {step.title}')
@@ -282,13 +225,12 @@ class PlanRuntime:
 
     def _normalize_steps(self, steps: tuple[PlanStep, ...] | list[PlanStep]) -> tuple[PlanStep, ...]:
         """规范化新的计划步骤集合并保留已有状态。
-
         Args:
             steps (tuple[PlanStep, ...] | list[PlanStep]): 待写入的新步骤集合。
         Returns:
-            tuple[PlanStep, ...]: 经过校验、去歧义并继承旧状态后的步骤元组。
+            tuple[PlanStep, ...]: 规范化后的步骤元组。
         Raises:
-            ValueError: 当输入中存在非法项、重复步骤 ID 或引用未知依赖时抛出。
+            ValueError: 当步骤集合非法时抛出。
         """
         normalized_steps: list[PlanStep] = []
         seen_ids: set[str] = set()
@@ -298,42 +240,39 @@ class PlanRuntime:
             if step.step_id in seen_ids:
                 raise ValueError(f'Duplicate plan step id: {step.step_id!r}')
             seen_ids.add(step.step_id)
-
             existing_step = self.steps_by_id.get(step.step_id)
             effective_status = existing_step.status if existing_step is not None else step.status
             normalized_steps.append(replace(step, status=effective_status))
+        normalized_tuple = tuple(normalized_steps)
+        self._validate_dependencies(normalized_tuple)
+        return normalized_tuple
 
-        self._validate_dependencies(tuple(normalized_steps))
-        return tuple(normalized_steps)
-
-    @staticmethod
-    def _validate_dependencies(steps: tuple[PlanStep, ...]) -> None:
+    def _validate_dependencies(self, steps: tuple[PlanStep, ...]) -> None:
         """校验计划步骤依赖是否都指向已知步骤。
-
         Args:
-            steps (tuple[PlanStep, ...]): 需要校验依赖关系的步骤集合。
+            steps (tuple[PlanStep, ...]): 待校验的步骤集合。
         Returns:
             None: 校验通过时不返回值。
         Raises:
-            ValueError: 当任一步骤引用了不存在的依赖步骤时抛出。
+            ValueError: 当存在未知依赖时抛出。
         """
-        known_step_ids = {item.step_id for item in steps}
+        known_step_ids = {step.step_id for step in steps}
         for step in steps:
-            missing_dependencies = [item for item in step.dependencies if item not in known_step_ids]
+            missing_dependencies = [dependency for dependency in step.dependencies if dependency not in known_step_ids]
             if missing_dependencies:
                 raise ValueError(
                     f'Plan step {step.step_id!r} references unknown dependencies: {", ".join(missing_dependencies)}'
                 )
 
-    @staticmethod
-    def _step_to_task_record(step: PlanStep, existing_task: TaskRecord | None) -> TaskRecord:
-        """把计划步骤投影为任务记录。
-
+    def _step_to_task_record(self, step: PlanStep, existing_task: TaskRecord | None) -> TaskRecord:
+        """把单个计划步骤映射为任务记录。
         Args:
-            step (PlanStep): 需要映射的计划步骤。
-            existing_task (TaskRecord | None): 同 ID 的现有任务记录；存在时用于保留状态信息。
+            step (PlanStep): 需要投影的计划步骤。
+            existing_task (TaskRecord | None): 同 ID 的现有任务记录。
         Returns:
-            TaskRecord: 由计划步骤映射得到的任务记录。
+            TaskRecord: 投影后的任务记录契约。
+        Raises:
+            无。
         """
         status = existing_task.status if existing_task is not None else TaskStatus.PENDING
         manual_block_reason = existing_task.manual_block_reason if existing_task is not None else None
@@ -347,60 +286,35 @@ class PlanRuntime:
         )
 
 
-def _normalize_step_id(value: object) -> str:
-    """规范化并校验步骤 ID。
-
+def _normalize_identifier(value: object, *, label: str) -> str:
+    """规范化并校验标识符。
     Args:
-        value (object): 待校验的原始步骤 ID。
+        value (object): 待校验的原始值。
+        label (str): 字段名。
     Returns:
-        str: 去除首尾空白后的合法步骤 ID。
+        str: 去空白后的合法标识符。
     Raises:
-        ValueError: 当步骤 ID 不是字符串、为空或包含非法路径成分时抛出。
+        ValueError: 当值不是合法非空字符串时抛出。
     """
     if not isinstance(value, str):
-        raise ValueError('step_id must be a string')
+        raise ValueError(f'{label} must be a string')
     normalized = value.strip()
     if not normalized:
-        raise ValueError('step_id must not be empty')
+        raise ValueError(f'{label} must not be empty')
     if normalized in {'.', '..'} or any(separator in normalized for separator in ('/', '\\')):
-        raise ValueError(f'Invalid step_id: {value!r}')
+        raise ValueError(f'Invalid {label}: {value!r}')
     return normalized
-
-
-def _normalize_dependencies(value: object, *, step_id: str) -> tuple[str, ...]:
-    """规范化计划步骤依赖列表。
-
-    Args:
-        value (object): 待校验的依赖列表原始值。
-        step_id (str): 当前步骤 ID，用于阻止步骤依赖自身。
-    Returns:
-        tuple[str, ...]: 去重并规范化后的依赖步骤 ID 元组。
-    Raises:
-        ValueError: 当依赖列表类型非法、依赖 ID 非法或步骤依赖自身时抛出。
-    """
-    if value is None:
-        return ()
-    if not isinstance(value, (list, tuple)):
-        raise ValueError('dependencies must be a list or tuple of step ids')
-
-    normalized_dependencies: list[str] = []
-    for item in value:
-        dependency_id = _normalize_step_id(item)
-        if dependency_id == step_id:
-            raise ValueError(f'Plan step {step_id!r} cannot depend on itself')
-        if dependency_id not in normalized_dependencies:
-            normalized_dependencies.append(dependency_id)
-    return tuple(normalized_dependencies)
 
 
 def _as_int(value: object, default: int) -> int:
     """把输入值安全转换为整数。
-
     Args:
         value (object): 待转换的原始值。
-        default (int): 转换失败或输入无效时返回的默认值。
+        default (int): 转换失败时的默认值。
     Returns:
-        int: 转换后的整数；失败时返回默认值。
+        int: 转换后的整数或默认值。
+    Raises:
+        无。
     """
     if isinstance(value, bool) or value is None:
         return default

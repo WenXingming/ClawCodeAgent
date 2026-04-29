@@ -1,4 +1,4 @@
-"""ISSUE-019 Workflow Runtime 单元测试。"""
+"""ISSUE-019 PlanningGateway 工作流视图单元测试。"""
 
 from __future__ import annotations
 
@@ -7,20 +7,27 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from planning.task_runtime import TaskRuntime, TaskStatus
-from planning.workflow_runtime import WorkflowRuntime, WorkflowRunStatus
+from core_contracts import TaskStatus, WorkflowRunStatus
+from planning import PlanningGateway
 
 
 class WorkflowRuntimeTests(unittest.TestCase):
     """验证 workflow manifest 发现、运行与历史记录。"""
 
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
+        """把测试工作流清单写入临时工作区。
+        Args:
+            workspace (Path): 临时工作区目录。
+            filename (str): 目标文件名。
+            payload (dict[str, object]): 需要写入的 JSON 对象。
+        Returns:
+            None: 该方法仅负责写文件。
+        Raises:
+            OSError: 当文件写入失败时抛出。
+        """
         manifest_dir = workspace / '.claw' / 'workflows'
         manifest_dir.mkdir(parents=True, exist_ok=True)
-        (manifest_dir / filename).write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding='utf-8',
-        )
+        (manifest_dir / filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
 
     def test_from_workspace_discovers_workflow_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -37,11 +44,11 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 },
             )
 
-            runtime = WorkflowRuntime.from_workspace(workspace)
+            gateway = PlanningGateway.from_workspace(str(workspace))
 
-        self.assertEqual([item.workflow_id for item in runtime.list_workflows()], ['demo-workflow'])
-        self.assertEqual(runtime.get_workflow('demo-workflow').title, 'Demo Workflow')
-        self.assertEqual(runtime.get_workflow('demo-workflow').steps[0].action.value, 'create')
+        self.assertEqual([item.workflow_id for item in gateway.list_workflows()], ['demo-workflow'])
+        self.assertEqual(gateway.get_workflow('demo-workflow').title, 'Demo Workflow')
+        self.assertEqual(gateway.get_workflow('demo-workflow').steps[0].action.value, 'create')
 
     def test_run_workflow_records_success_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -68,18 +75,17 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 },
             )
 
-            runtime = WorkflowRuntime.from_workspace(workspace)
-            run_record = runtime.run_workflow('success-workflow')
-            task_runtime = TaskRuntime.from_workspace(workspace)
-            reloaded = WorkflowRuntime.from_workspace(workspace)
+            gateway = PlanningGateway.from_workspace(str(workspace))
+            run_record = gateway.run_workflow('success-workflow')
+            reloaded_gateway = PlanningGateway.from_workspace(str(workspace))
             persisted = json.loads((workspace / '.claw' / 'workflow_runs.json').read_text(encoding='utf-8'))
 
         self.assertEqual(run_record.status, WorkflowRunStatus.SUCCEEDED)
         self.assertEqual(len(run_record.step_results), 6)
-        self.assertEqual(task_runtime.get_task('task-001').status, TaskStatus.COMPLETED)
-        self.assertEqual(task_runtime.get_task('task-002').status, TaskStatus.COMPLETED)
-        self.assertEqual(len(reloaded.history('success-workflow')), 1)
-        self.assertEqual(reloaded.history('success-workflow')[0].run_id, run_record.run_id)
+        self.assertEqual(reloaded_gateway.get_task('task-001').status, TaskStatus.COMPLETED)
+        self.assertEqual(reloaded_gateway.get_task('task-002').status, TaskStatus.COMPLETED)
+        self.assertEqual(len(reloaded_gateway.workflow_history('success-workflow')), 1)
+        self.assertEqual(reloaded_gateway.workflow_history('success-workflow')[0].run_id, run_record.run_id)
         self.assertEqual(persisted['runs'][0]['workflow_id'], 'success-workflow')
         self.assertEqual(persisted['runs'][0]['status'], 'succeeded')
 
@@ -99,10 +105,9 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 },
             )
 
-            runtime = WorkflowRuntime.from_workspace(workspace)
-            run_record = runtime.run_workflow('failure-workflow')
-            task_runtime = TaskRuntime.from_workspace(workspace)
-            reloaded = WorkflowRuntime.from_workspace(workspace)
+            gateway = PlanningGateway.from_workspace(str(workspace))
+            run_record = gateway.run_workflow('failure-workflow')
+            reloaded_gateway = PlanningGateway.from_workspace(str(workspace))
 
         self.assertEqual(run_record.status, WorkflowRunStatus.FAILED)
         self.assertIn('cannot complete from status', run_record.error_message or '')
@@ -110,8 +115,8 @@ class WorkflowRuntimeTests(unittest.TestCase):
         self.assertTrue(run_record.step_results[0].ok)
         self.assertFalse(run_record.step_results[1].ok)
         self.assertIn('cannot complete from status', run_record.step_results[1].error or '')
-        self.assertEqual(task_runtime.get_task('task-001').status, TaskStatus.PENDING)
-        self.assertEqual(reloaded.history('failure-workflow')[0].status, WorkflowRunStatus.FAILED)
+        self.assertEqual(reloaded_gateway.get_task('task-001').status, TaskStatus.PENDING)
+        self.assertEqual(reloaded_gateway.workflow_history('failure-workflow')[0].status, WorkflowRunStatus.FAILED)
 
 
 if __name__ == '__main__':
