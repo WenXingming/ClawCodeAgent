@@ -17,7 +17,7 @@ from core_contracts.openai_contracts import ModelGatewayError
 from core_contracts.run_result import AgentRunResult
 from core_contracts.session_contracts import AgentSessionSnapshot
 from interaction.interaction_gateway import ExitRenderer, SlashCommandRenderer, StartupRenderer
-from openai_client.openai_client_gateway import OpenAIClientGateway
+from openai_client import OpenAIClientGateway
 from session.session_gateway import SessionGateway
 
 

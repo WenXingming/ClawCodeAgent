@@ -16,7 +16,7 @@ from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 from agent import Agent
-from openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from session import SessionGateway
 from core_contracts.session_contracts import AgentSessionSnapshot
 from tools.mcp import MCPCapability, MCPTool, MCPToolCallResult
