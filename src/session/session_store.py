@@ -1,8 +1,8 @@
-"""提供代理会话快照的基础持久化与恢复能力。
+﻿"""提供会话快照的基础持久化与恢复能力。
 
 本模块只承担最小的会话存取职责：
-1. 把 `AgentSessionSnapshot` 写入 UTF-8 JSON 文件。
-2. 按 `session_id` 从磁盘恢复已保存的会话快照。
+1. 把 AgentSessionSnapshot 写入 UTF-8 JSON 文件。
+2. 按 session_id 从磁盘恢复已保存的会话快照。
 3. 对会话文件名做基础校验，避免路径逃逸与损坏数据污染。
 
 模块内部按公开入口到私有辅助函数的顺序组织，便于顺着存取链路阅读。
@@ -14,13 +14,13 @@ import json
 from json import JSONDecodeError
 from pathlib import Path
 
-from .session_snapshot import AgentSessionSnapshot
+from core_contracts.session import AgentSessionSnapshot
 
 
 class AgentSessionStore:
     """负责代理会话快照的文件持久化与恢复。
 
-    该类被运行时用作最薄的一层文件存储适配器：外部只需传入快照对象或 `session_id`，即可完成保存与恢复。类内私有方法专门负责路径计算与 `session_id` 规范化，避免调用方重复处理文件系统细节。
+    该类被运行时用作最薄的一层文件存储适配器：外部只需传入快照对象或 session_id，即可完成保存与恢复。类内私有方法专门负责路径计算与 session_id 规范化，避免调用方重复处理文件系统细节。
     """
 
     DEFAULT_AGENT_SESSION_DIR = (Path('.port_sessions') / 'agent').resolve()  # Path：默认的会话快照目录绝对路径。
@@ -44,7 +44,7 @@ class AgentSessionStore:
         Returns:
             Path: 实际写入的 JSON 文件绝对路径。
         Raises:
-            ValueError: 当 `session_snapshot.session_id` 非法时，由路径辅助函数抛出。
+            ValueError: 当 session_snapshot.session_id 非法时，由路径辅助函数抛出。
         """
         path = self._session_file_path(session_snapshot.session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +89,7 @@ class AgentSessionStore:
         Returns:
             Path: 目标会话文件路径。
         Raises:
-            ValueError: 当 `session_id` 无法通过规范化校验时抛出。
+            ValueError: 当 session_id 无法通过规范化校验时抛出。
         """
         normalized_id = self._normalize_session_id(session_id)
         return self.directory / f'{normalized_id}.json'

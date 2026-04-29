@@ -5,7 +5,11 @@ from __future__ import annotations
 import io
 import unittest
 
-from interaction.slash_autocomplete import SlashAutocompleteCatalog, SlashAutocompleteEntry, SlashAutocompletePrompt
+from interaction.interaction_gateway import (
+    SlashAutocompleteCatalog,
+    SlashAutocompleteEntry,
+    SlashAutocompletePrompt,
+)
 
 
 class SlashAutocompletePromptTests(unittest.TestCase):

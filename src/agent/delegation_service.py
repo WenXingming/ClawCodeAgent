@@ -1,4 +1,4 @@
-"""负责子代理记录、分组与依赖批处理。
+﻿"""负责子代理记录、分组与依赖批处理。
 
 本模块提供主循环中的 delegate_agent 编排底座，聚焦三类职责：为父代理维护 child agent、group 与 lineage 记录；根据委派任务依赖关系生成稳定批次；汇总子代理 stop_reason、失败数与 dependency skip 统计，供上层事件与结果摘要复用。
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
-from core_contracts.protocol import JSONDict
+from core_contracts.primitives import JSONDict
 
 
 class ManagedAgentStatus(StrEnum):

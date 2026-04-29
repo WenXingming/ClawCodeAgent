@@ -1,14 +1,14 @@
-"""ISSUE-009/Step-07 RunLimits 直接单元测试。"""
+﻿"""ISSUE-009/Step-07 RunLimits 直接单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
 from agent.run_limits import RunLimits
-from context.budget_projection import BudgetProjection
-from core_contracts.budget import BudgetConfig
-from core_contracts.model_pricing import ModelPricing
-from core_contracts.token_usage import TokenUsage
+from context.context_gateway import BudgetProjection
+from core_contracts.config import BudgetConfig
+from core_contracts.model import ModelPricing
+from core_contracts.primitives import TokenUsage
 
 
 def _guard(budget: BudgetConfig, *, cost_baseline: float = 0.0) -> RunLimits:

@@ -1,4 +1,4 @@
-"""ISSUE-014 Plugin Runtime 单元测试。"""
+"""ISSUE-014 WorkspaceGateway 插件能力单元测试。"""
 
 from __future__ import annotations
 
@@ -7,14 +7,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
+from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
 from tools.tools_gateway import ToolsGateway
-from workspace import PluginCatalog
+from workspace import WorkspaceGateway
 
 
-class PluginCatalogTests(unittest.TestCase):
-    """验证 manifest 发现、alias/virtual 注册与冲突处理。"""
+class WorkspacePluginGatewayTests(unittest.TestCase):
+    """验证网关上的插件注册、摘要与 hook/block 能力。"""
 
     def setUp(self) -> None:
         self.tool_gateway = ToolsGateway()
@@ -39,7 +38,7 @@ class PluginCatalogTests(unittest.TestCase):
             tool_registry=registry,
         )
 
-    def test_from_workspace_registers_alias_and_virtual_tools(self) -> None:
+    def test_prepare_tool_registry_registers_alias_and_virtual_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
             (workspace / 'README.md').write_text('plugin hello', encoding='utf-8')
@@ -67,9 +66,9 @@ class PluginCatalogTests(unittest.TestCase):
                 },
             )
 
+            gateway = WorkspaceGateway.from_workspace(workspace)
             base_registry = self.tool_gateway.default_registry()
-            plugin_catalog = PluginCatalog.from_workspace(workspace, base_registry)
-            merged_registry = plugin_catalog.merge_tool_registry(base_registry)
+            merged_registry = gateway.prepare_tool_registry(base_registry)
             context = self._build_context(workspace, merged_registry)
 
             alias_result = self.tool_gateway.execute(merged_registry, 'read_readme', {}, context)
@@ -85,14 +84,15 @@ class PluginCatalogTests(unittest.TestCase):
         self.assertEqual(virtual_result.content, 'Workspace banner from plugin runtime.')
         self.assertEqual(virtual_result.metadata.get('plugin_name'), 'demo-plugin')
         self.assertEqual(virtual_result.metadata.get('plugin_tool_kind'), 'virtual')
+        self.assertEqual(gateway.plugin_count, 1)
 
-        summary = plugin_catalog.render_summary()
+        summary = gateway.render_plugin_summary()
         self.assertIn('demo-plugin', summary)
         self.assertIn('Expose README alias and workspace banner.', summary)
         self.assertIn('read_readme', summary)
         self.assertIn('workspace_banner', summary)
 
-    def test_from_workspace_skips_conflicting_tool_names(self) -> None:
+    def test_prepare_tool_registry_skips_conflicting_tool_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
             self._write_manifest(
@@ -112,21 +112,18 @@ class PluginCatalogTests(unittest.TestCase):
                 },
             )
 
+            gateway = WorkspaceGateway.from_workspace(workspace)
             base_registry = self.tool_gateway.default_registry()
-            plugin_catalog = PluginCatalog.from_workspace(workspace, base_registry)
-            merged_registry = plugin_catalog.merge_tool_registry(base_registry)
+            merged_registry = gateway.prepare_tool_registry(base_registry)
 
         self.assertEqual(merged_registry['read_file'].description, base_registry['read_file'].description)
-        self.assertEqual(len(plugin_catalog.conflicts), 1)
-        self.assertEqual(plugin_catalog.conflicts[0].tool_name, 'read_file')
-        self.assertEqual(plugin_catalog.conflicts[0].plugin_name, 'conflict-plugin')
 
-        summary = plugin_catalog.render_summary()
+        summary = gateway.render_plugin_summary()
         self.assertIn('conflict-plugin', summary)
         self.assertIn('read_file', summary)
         self.assertIn('skipped', summary)
 
-    def test_from_workspace_exposes_hook_and_block_helpers(self) -> None:
+    def test_gateway_exposes_plugin_hook_and_block_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
             self._write_manifest(
@@ -141,12 +138,13 @@ class PluginCatalogTests(unittest.TestCase):
                 },
             )
 
-            plugin_catalog = PluginCatalog.from_workspace(workspace, self.tool_gateway.default_registry())
+            gateway = WorkspaceGateway.from_workspace(workspace)
+            gateway.prepare_tool_registry(self.tool_gateway.default_registry())
 
-        self.assertEqual(plugin_catalog.get_before_hooks('bash_exec')[0]['content'], 'plugin before')
-        self.assertEqual(plugin_catalog.get_after_hooks('bash_exec')[0]['content'], 'plugin after')
-        self.assertEqual(plugin_catalog.resolve_block('bash_exec')['source'], 'plugin')
-        self.assertEqual(plugin_catalog.resolve_block('bash_exec')['reason'], 'deny_prefixes')
+        self.assertEqual(gateway.get_before_hooks('bash_exec')[0]['content'], 'plugin before')
+        self.assertEqual(gateway.get_after_hooks('bash_exec')[0]['content'], 'plugin after')
+        self.assertEqual(gateway.resolve_block('bash_exec')['source'], 'plugin')
+        self.assertEqual(gateway.resolve_block('bash_exec')['reason'], 'deny_prefixes')
 
 
 if __name__ == '__main__':

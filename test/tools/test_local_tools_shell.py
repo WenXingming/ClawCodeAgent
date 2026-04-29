@@ -1,4 +1,4 @@
-"""ISSUE-005 Shell 工具集成测试。"""
+﻿"""ISSUE-005 Shell 工具集成测试。"""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
 from tools.tools_gateway import ToolsGateway
 
 

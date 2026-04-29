@@ -1,4 +1,4 @@
-"""ISSUE-013 交互式 chat CLI 测试。"""
+﻿"""ISSUE-013 交互式 chat CLI 测试。"""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.run_result import AgentRunResult
-from core_contracts.token_usage import TokenUsage
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.primitives import TokenUsage
 from main import main
-from session.session_snapshot import AgentSessionSnapshot
+from core_contracts.session import AgentSessionSnapshot
 
 
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
@@ -222,7 +222,7 @@ class MainChatEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['继续', '/exit']),
         ):
@@ -316,7 +316,7 @@ class MainChatEntryTests(unittest.TestCase):
         )
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['/clear', '继续处理', '/exit']),
         ):
@@ -503,7 +503,7 @@ class MainChatEntryTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': 'demo-key'}, clear=False),
-            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['第一轮', '第二轮', '/exit']),
         ):
@@ -546,7 +546,7 @@ class MainChatEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['第一轮续跑', '第二轮续跑', '/quit']),
         ):
@@ -573,7 +573,7 @@ class MainChatEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_session)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_session)),
             patch('main.Agent', _ChatFakeAgent),
             patch('builtins.input', side_effect=['', '   ', '有效输入', '/exit']),
         ):

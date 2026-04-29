@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import unittest
 
-from context.budget_projection import (
+from context.context_gateway import (
     BudgetProjector,
     OUTPUT_RESERVE_TOKENS,
     SOFT_BUFFER_TOKENS,
 )
-from context.budget_projection import BudgetProjection
-from context.context_token_estimator import ContextTokenEstimator
+from context.context_gateway import BudgetProjection
+from context.context_gateway import TokenEstimator
 
 
-ESTIMATOR = ContextTokenEstimator()
+ESTIMATOR = TokenEstimator()
 PROJECTOR = BudgetProjector(token_estimator=ESTIMATOR)
 
 

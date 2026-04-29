@@ -1,4 +1,4 @@
-"""ISSUE-007 会话持久化与基础恢复测试。"""
+﻿"""ISSUE-007 会话持久化与基础恢复测试。"""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.token_usage import TokenUsage
-from session.session_snapshot import AgentSessionSnapshot
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.primitives import TokenUsage
+from core_contracts.session import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 
 

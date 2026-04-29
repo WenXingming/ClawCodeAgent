@@ -11,15 +11,16 @@ from agent.prompt_processor import PromptProcessor
 from agent.result_factory import ResultFactory
 from agent.run_limits import RunLimits
 from agent.run_state import AgentRunState
+from core_contracts.config import BudgetConfig
+from core_contracts.errors import GatewayError, GatewayPermissionError, GatewayValidationError
+from core_contracts.model import ModelClient
+from core_contracts.messaging import OneTurnResponse, ToolCall, ToolExecutionResult
+from core_contracts.primitives import JSONDict
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.tools import ToolDescriptor, ToolStreamUpdate
 from context.context_gateway import ContextGateway
-from core_contracts.budget import BudgetConfig
-from core_contracts.gateway_errors import GatewayError, GatewayPermissionError, GatewayValidationError
-from core_contracts.openai_contracts import ModelClient
-from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
-from core_contracts.run_result import AgentRunResult
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.tools_contracts import ToolDescriptor, ToolStreamUpdate
 from session.session_gateway import SessionGateway
 from tools.tools_gateway import ToolsGateway
 from workspace.workspace_gateway import WorkspaceGateway
@@ -143,13 +144,44 @@ class TurnCoordinator:
         Returns:
             None: 该方法原地补全实例的运行时依赖。
         """
-        self.tool_registry = self.tool_gateway.default_registry()
-        self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
-        self.tool_registry = self.workspace_gateway.prepare_tool_registry(self.tool_registry)
+        self.refresh_tool_registry()
 
     def tool_registry_view(self) -> dict[str, ToolDescriptor]:
-        """返回当前基础工具注册表的浅拷贝。"""
+        """返回当前基础工具注册表的浅拷贝。
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            dict[str, ToolDescriptor]: 当前工具注册表副本。
+        Raises:
+            无。
+        """
         return dict(self.tool_registry)
+
+    def replace_tool_registry(self, tool_registry: dict[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
+        """用给定注册表替换当前基础工具注册表。
+        Args:
+            tool_registry (dict[str, ToolDescriptor]): 新的工具注册表。
+        Returns:
+            dict[str, ToolDescriptor]: 替换后的工具注册表副本。
+        Raises:
+            无。
+        """
+        self.tool_registry = dict(tool_registry)
+        return self.tool_registry_view()
+
+    def refresh_tool_registry(self) -> dict[str, ToolDescriptor]:
+        """基于当前 workspace 与 tools runtime 重新构建工具注册表。
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            dict[str, ToolDescriptor]: 重建后的工具注册表副本。
+        Raises:
+            Exception: 动态工具构建失败时向上透传。
+        """
+        tool_registry = self.tool_gateway.default_registry()
+        tool_registry = self._extend_with_runtime_tools(tool_registry)
+        self.tool_registry = self.workspace_gateway.prepare_tool_registry(tool_registry)
+        return self.tool_registry_view()
 
     def _require_prompt_processor(self) -> PromptProcessor:
         """返回当前绑定的 prompt processor。"""
@@ -190,139 +222,20 @@ class TurnCoordinator:
         for event in new_events:
             self._record_event(run_state, event)
 
-    def _register_workspace_runtime_tools(
+    def _extend_with_runtime_tools(
         self,
         tool_registry: dict[str, ToolDescriptor],
     ) -> dict[str, ToolDescriptor]:
-        """把工作区相关的动态工具注册到当前工具表中。
-
-        Args:
-            tool_registry (dict[str, ToolDescriptor]): 当前已有的工具注册表。
-        Returns:
-            dict[str, ToolDescriptor]: 追加 workspace_search、MCP 与 delegate_agent 等动态工具后的注册表副本。
-        """
-        merged_registry = dict(tool_registry)
-
-        merged_registry['delegate_agent'] = ToolDescriptor(
-            name='delegate_agent',
-            description='Delegate a batch of child tasks to managed sub-agents and return an aggregated summary.',
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'label': {'type': 'string'},
-                    'tasks': {
-                        'type': 'array',
-                        'minItems': 1,
-                        'items': {
-                            'type': 'object',
-                            'properties': {
-                                'task_id': {'type': 'string'},
-                                'prompt': {'type': 'string'},
-                                'label': {'type': 'string'},
-                                'dependencies': {'type': 'array', 'items': {'type': 'string'}},
-                                'resume_session_id': {'type': 'string'},
-                            },
-                            'required': ['prompt'],
-                        },
-                    },
-                },
-                'required': ['tasks'],
-            },
-            handler=self._run_delegate_agent,
+        """把动态工具描述符构建下沉到 ToolsGateway。"""
+        return self.tool_gateway.extend_runtime_registry(
+            tool_registry,
+            delegate_agent_handler=self._run_delegate_agent,
+            workspace_search_handler=self._run_workspace_search,
+            mcp_list_resources_handler=self._run_mcp_list_resources,
+            mcp_read_resource_handler=self._run_mcp_read_resource,
+            mcp_search_capabilities_handler=self._run_mcp_search_capabilities,
+            mcp_call_tool_handler=self._run_mcp_call_tool,
         )
-
-        if self.workspace_gateway.has_search_providers():
-            merged_registry['workspace_search'] = ToolDescriptor(
-                name='workspace_search',
-                description='Search the configured workspace search provider and return structured web results.',
-                parameters={
-                    'type': 'object',
-                    'properties': {
-                        'query': {'type': 'string'},
-                        'provider_id': {'type': 'string'},
-                        'max_results': {'type': 'integer', 'minimum': 1, 'maximum': 20},
-                        'max_retries': {'type': 'integer', 'minimum': 0, 'maximum': 3},
-                    },
-                    'required': ['query'],
-                },
-                handler=self._run_workspace_search,
-            )
-
-        if self.tool_gateway.has_mcp_resources() or self.tool_gateway.has_mcp_servers():
-            merged_registry.update(
-                {
-                    'mcp_list_resources': ToolDescriptor(
-                        name='mcp_list_resources',
-                        description='List MCP resources discovered from local manifests and configured MCP servers.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'query': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
-                            },
-                        },
-                        handler=self._run_mcp_list_resources,
-                    ),
-                    'mcp_read_resource': ToolDescriptor(
-                        name='mcp_read_resource',
-                        description='Read a specific MCP resource by URI.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'uri': {'type': 'string'},
-                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
-                            },
-                            'required': ['uri'],
-                        },
-                        handler=self._run_mcp_read_resource,
-                    ),
-                }
-            )
-
-        # 仅向模型暴露精简的 MCP 能力搜索与统一调用门面，避免把整份工具目录直接转成上下文噪音。
-        if self.tool_gateway.has_mcp_servers():
-            merged_registry.update(
-                {
-                    'mcp_search_capabilities': ToolDescriptor(
-                        name='mcp_search_capabilities',
-                        description='Search concise MCP capability candidates from configured MCP servers.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'query': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
-                            },
-                        },
-                        handler=self._run_mcp_search_capabilities,
-                    ),
-                    'mcp_call_tool': ToolDescriptor(
-                        name='mcp_call_tool',
-                        description='Call a remote MCP tool by capability_handle or tool_name, optionally scoped to a specific server.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'capability_handle': {'type': 'string'},
-                                'tool_name': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'arguments': {
-                                    'type': 'object',
-                                    'additionalProperties': True,
-                                },
-                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
-                            },
-                            'anyOf': [
-                                {'required': ['capability_handle']},
-                                {'required': ['tool_name']},
-                            ],
-                        },
-                        handler=self._run_mcp_call_tool,
-                    ),
-                }
-            )
-
-        return merged_registry
 
     def _run_workspace_search(
         self,
@@ -345,7 +258,7 @@ class TurnCoordinator:
         max_retries = self._optional_tool_int(arguments, 'max_retries', min_value=0, max_value=3) or 0
 
         try:
-            response = self.workspace_gateway.search(
+            response = self.tool_gateway.search_workspace(
                 query,
                 provider_id=provider_id,
                 max_results=max_results,
@@ -354,23 +267,30 @@ class TurnCoordinator:
         except (ValueError) as exc:
             raise GatewayValidationError(str(exc)) from exc
 
+        provider = response.get('provider', {}) if isinstance(response, dict) else {}
+        results = response.get('results', []) if isinstance(response, dict) else []
+        attempts = int(response.get('attempts', 0)) if isinstance(response, dict) else 0
+        normalized_query = str(response.get('query', query)) if isinstance(response, dict) else query
+
         lines = [
             '# Search Results',
             '',
-            f'- Provider: {response.provider.provider_id}',
-            f'- Query: {response.query}',
-            f'- Attempts: {response.attempts}',
+            f"- Provider: {provider.get('provider_id', '')}",
+            f'- Query: {normalized_query}',
+            f'- Attempts: {attempts}',
             '',
         ]
-        if not response.results:
+        if not isinstance(results, list) or not results:
             lines.append('No results returned.')
         else:
-            for item in response.results:
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
                 lines.extend(
                     [
-                        f'{item.rank}. {item.title}',
-                        f'URL: {item.url}',
-                        f'Snippet: {item.snippet}',
+                        f"{int(item.get('rank', 0))}. {item.get('title', '')}",
+                        f"URL: {item.get('url', '')}",
+                        f"Snippet: {item.get('snippet', '')}",
                         '',
                     ]
                 )
@@ -379,9 +299,9 @@ class TurnCoordinator:
         return (
             content,
             {
-                'provider_id': response.provider.provider_id,
-                'attempts': response.attempts,
-                'result_count': len(response.results),
+                'provider_id': str(provider.get('provider_id', '')),
+                'attempts': attempts,
+                'result_count': len(results) if isinstance(results, list) else 0,
             },
         )
 
@@ -405,12 +325,12 @@ class TurnCoordinator:
         limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 20
 
         try:
-            resources = self.tool_gateway.mcp_runtime.list_resources(query=query, server_name=server_name, limit=limit)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            resources = self.tool_gateway.mcp_list_resources(query=query, server_name=server_name, limit=limit)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.tool_gateway.mcp_runtime.render_resource_index(query=query, server_name=server_name, limit=limit),
+            self.tool_gateway.mcp_render_resource_index(query=query, server_name=server_name, limit=limit),
             context.max_output_chars,
         )
         return content, {'resource_count': len(resources), 'server_name': server_name or ''}
@@ -434,8 +354,8 @@ class TurnCoordinator:
         max_chars = self._resolve_tool_output_limit(arguments, context, key='max_chars')
 
         try:
-            content = self.tool_gateway.mcp_runtime.render_resource(uri, max_chars=max_chars)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            content = self.tool_gateway.mcp_render_resource(uri, max_chars=max_chars)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
         return content, {'uri': uri}
 
@@ -459,24 +379,25 @@ class TurnCoordinator:
         limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 20
 
         try:
-            capabilities = self.tool_gateway.mcp_runtime.search_capabilities(query=query, server_name=server_name, limit=limit)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            capabilities = self.tool_gateway.mcp_search_capabilities(query=query, server_name=server_name, limit=limit)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.tool_gateway.mcp_runtime.render_capability_index(query=query, server_name=server_name, limit=limit),
+            self.tool_gateway.mcp_render_capability_index(query=query, server_name=server_name, limit=limit),
             context.max_output_chars,
         )
         materialized_handles = [
-            capability.handle
+            capability['handle']
             for capability in capabilities[:_MCP_MATERIALIZED_TOOL_LIMIT]
+            if isinstance(capability.get('handle'), str)
         ]
         return (
             content,
             {
                 'capability_count': len(capabilities),
                 'server_name': server_name or '',
-                'capabilities': [capability.to_dict() for capability in capabilities],
+                'capabilities': [dict(capability) for capability in capabilities],
                 'materialized_handles': materialized_handles,
             },
         )
@@ -531,12 +452,17 @@ class TurnCoordinator:
                 raise GatewayValidationError('tool_name or capability_handle must be a non-empty string')
             return tool_name, server_name, None
 
-        capability = self.tool_gateway.mcp_runtime.resolve_capability(capability_handle)
-        if tool_name is not None and tool_name != capability.tool_name:
+        capability = self.tool_gateway.mcp_resolve_capability(capability_handle)
+        resolved_tool_name = capability.get('tool_name')
+        resolved_server_name = capability.get('server_name')
+        resolved_handle = capability.get('handle')
+        if not isinstance(resolved_tool_name, str) or not isinstance(resolved_server_name, str) or not isinstance(resolved_handle, str):
+            raise GatewayValidationError('Resolved MCP capability payload is invalid')
+        if tool_name is not None and tool_name != resolved_tool_name:
             raise GatewayValidationError('tool_name does not match capability_handle')
-        if server_name is not None and server_name != capability.server_name:
+        if server_name is not None and server_name != resolved_server_name:
             raise GatewayValidationError('server_name does not match capability_handle')
-        return capability.tool_name, capability.server_name, capability.handle
+        return resolved_tool_name, resolved_server_name, resolved_handle
 
     def _execute_mcp_tool_call(
         self,
@@ -550,9 +476,9 @@ class TurnCoordinator:
     ) -> str | tuple[str, JSONDict]:
         """执行一次远端 MCP 工具调用并统一渲染结果。"""
         try:
-            remote_tool = self.tool_gateway.mcp_runtime.resolve_tool(tool_name, server_name=server_name)
+            remote_tool = self.tool_gateway.mcp_resolve_tool(tool_name, server_name=server_name)
             self._ensure_mcp_tool_allowed(remote_tool, context)
-            result = self.tool_gateway.mcp_runtime.call_tool(
+            result = self.tool_gateway.mcp_call_tool(
                 tool_name,
                 arguments=dict(raw_tool_arguments),
                 server_name=server_name,
@@ -560,17 +486,20 @@ class TurnCoordinator:
             )
         except GatewayPermissionError:
             raise
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.tool_gateway.mcp_runtime.render_tool_result(result),
+            self.tool_gateway.mcp_render_tool_result(result),
             context.max_output_chars,
         )
+        metadata_server_name = result.get('server_name') if isinstance(result.get('server_name'), str) else ''
+        metadata_tool_name = result.get('tool_name') if isinstance(result.get('tool_name'), str) else tool_name
+        metadata_is_error = bool(result.get('is_error'))
         metadata = {
-            'server_name': result.server_name,
-            'tool_name': result.tool_name,
-            'is_error': result.is_error,
+            'server_name': metadata_server_name,
+            'tool_name': metadata_tool_name,
+            'is_error': metadata_is_error,
         }
         if capability_handle is not None:
             metadata['capability_handle'] = capability_handle
@@ -587,13 +516,18 @@ class TurnCoordinator:
             raise GatewayValidationError('materialized MCP tool arguments must be a JSON object')
 
         try:
-            capability = self.tool_gateway.mcp_runtime.resolve_capability(capability_handle)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            capability = self.tool_gateway.mcp_resolve_capability(capability_handle)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
+        resolved_tool_name = capability.get('tool_name')
+        resolved_server_name = capability.get('server_name')
+        resolved_handle = capability.get('handle')
+        if not isinstance(resolved_tool_name, str) or not isinstance(resolved_server_name, str) or not isinstance(resolved_handle, str):
+            raise GatewayValidationError('Resolved MCP capability payload is invalid')
         return self._execute_mcp_tool_call(
-            tool_name=capability.tool_name,
-            server_name=capability.server_name,
-            capability_handle=capability.handle,
+            tool_name=resolved_tool_name,
+            server_name=resolved_server_name,
+            capability_handle=resolved_handle,
             raw_tool_arguments=arguments,
             context=context,
             max_chars=context.max_output_chars,
@@ -625,20 +559,30 @@ class TurnCoordinator:
     def _build_materialized_mcp_tool(self, capability_handle: str) -> ToolDescriptor | None:
         """把单个 capability handle 物化为当前轮次可调用的临时工具。"""
         try:
-            capability = self.tool_gateway.mcp_runtime.resolve_capability(capability_handle)
-            remote_tool = self.tool_gateway.mcp_runtime.resolve_tool(
-                capability.tool_name,
-                server_name=capability.server_name,
+            capability = self.tool_gateway.mcp_resolve_capability(capability_handle)
+            tool_name = capability.get('tool_name')
+            server_name = capability.get('server_name')
+            handle = capability.get('handle')
+            description = capability.get('description')
+            if not isinstance(tool_name, str) or not isinstance(server_name, str) or not isinstance(handle, str):
+                return None
+            remote_tool = self.tool_gateway.mcp_resolve_tool(
+                tool_name,
+                server_name=server_name,
             )
-        except (GatewayError, ValueError, FileNotFoundError):
+        except GatewayError:
             return None
 
-        description = capability.description or f'Materialized MCP capability from server {capability.server_name}.'
+        if not isinstance(description, str) or not description:
+            description = f'Materialized MCP capability from server {server_name}.'
+        parameters = remote_tool.get('input_schema', {})
+        if not isinstance(parameters, dict):
+            parameters = {}
         return ToolDescriptor(
-            name=self._materialized_mcp_tool_name(capability.handle),
+            name=self._materialized_mcp_tool_name(handle),
             description=description,
-            parameters=dict(remote_tool.input_schema),
-            handler=partial(self._run_materialized_mcp_tool, capability.handle),
+            parameters=dict(parameters),
+            handler=partial(self._run_materialized_mcp_tool, handle),
         )
 
     @staticmethod
@@ -681,7 +625,13 @@ class TurnCoordinator:
     @staticmethod
     def _ensure_mcp_tool_allowed(remote_tool: Any, context) -> None:
         """检查远端工具是否越过当前会话权限边界。"""
-        if remote_tool.server_name == 'filesystem' and remote_tool.name in _FILESYSTEM_WRITE_TOOL_NAMES:
+        if not isinstance(remote_tool, dict):
+            raise GatewayValidationError('Resolved MCP tool payload is invalid')
+        server_name = remote_tool.get('server_name')
+        tool_name = remote_tool.get('name')
+        if not isinstance(server_name, str) or not isinstance(tool_name, str):
+            raise GatewayValidationError('Resolved MCP tool payload is invalid')
+        if server_name == 'filesystem' and tool_name in _FILESYSTEM_WRITE_TOOL_NAMES:
             if not context.permissions.allow_file_write:
                 raise GatewayPermissionError('File write permission denied: allow_file_write=false')
 

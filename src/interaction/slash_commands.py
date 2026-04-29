@@ -1,4 +1,4 @@
-"""Slash 命令交互面模块。
+﻿"""Slash 命令交互面模块。
 
 本模块负责三件事：
 1. 解析用户输入中的本地 slash 命令。
@@ -8,17 +8,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Callable, Literal, Mapping
 
 from context.context_gateway import ContextGateway
-from core_contracts.budget import BudgetConfig
-from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.protocol import JSONDict
-from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from session.session_gateway import AgentSessionState
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.interaction import SlashCommandContext, SlashCommandResult
+from core_contracts.primitives import JSONDict
+from core_contracts.session import AgentSessionState
+from core_contracts.tools import ToolDescriptor
 
 
 @dataclass(frozen=True)
@@ -32,41 +29,6 @@ class ParsedSlashCommand:
     command_name: str  # str: 规范化后的命令名，不包含前导斜杠。
     arguments: str  # str: 命令后的原始参数文本，保留空格折叠后的用户输入。
     raw_input: str  # str: 用户提交的原始输入，供日志与回显复用。
-
-
-@dataclass(frozen=True)
-class SlashCommandContext:
-    """封装 slash 命令执行期间所需的只读上下文。
-
-    该对象把 session、模型配置、运行时配置与工具注册表解耦后传入控制面，
-    使 slash 模块不需要直接依赖 LocalCodingAgent。
-    """
-
-    session_state: AgentSessionState  # AgentSessionState: 当前会话内存状态，供命令读取消息与转录历史。
-    session_id: str  # str: 当前会话标识，用于状态展示与结果关联。
-    turns_offset: int  # int: 历史已完成轮次，供 /status 与 /clear 判断是否已有历史。
-    tool_call_count: int  # int: 当前 run/resume 已累计的工具调用次数。
-    workspace_scope: WorkspaceScope  # WorkspaceScope: 当前工作目录与工作区范围配置。
-    context_policy: ContextPolicy  # ContextPolicy: 当前上下文治理与结构化输出策略。
-    permissions: ToolPermissionPolicy  # ToolPermissionPolicy: 当前工具权限策略。
-    budget_config: BudgetConfig  # BudgetConfig: 当前预算配置。
-    model_config: ModelConfig  # ModelConfig: 当前模型元数据，供 /status 展示模型名。
-    tool_registry: Mapping[str, ToolDescriptor]  # Mapping[str, ToolDescriptor]: 当前已注册工具集合。
-    plugin_summary: str = ''  # str: 插件运行时生成的摘要文本，供 /tools 追加展示。
-
-
-@dataclass(frozen=True)
-class SlashCommandResult:
-    """描述一次 slash 分流后的处理结果。"""
-
-    handled: bool  # bool: 是否已被 slash 控制面识别并处理。
-    continue_query: bool  # bool: 处理后是否还需要继续进入常规模型 query 路径。
-    command_name: str = ''  # str: 已识别的命令名；非 slash 或透传时可为空。
-    output: str = ''  # str: 本地命令输出文本，由调用方决定如何展示。
-    prompt: str | None = None  # str | None: 需要继续写入会话的 prompt，通常为原始用户输入。
-    replacement_session_state: AgentSessionState | None = None  # AgentSessionState | None: /clear 等命令返回的新会话状态。
-    fork_session: bool = False  # bool: 是否要求上层以 fork 语义生成一个新会话。
-    metadata: JSONDict = field(default_factory=dict)  # JSONDict: 额外元数据，用于标注错误码或分支上下文。
 
 
 SlashHandler = Callable[[SlashCommandContext, ParsedSlashCommand], SlashCommandResult]
@@ -575,3 +537,13 @@ class SlashCommandDispatcher:
             spec = self._spec_index[candidate]
             lines.append(f'/{candidate} - {spec.description}')
         return lines
+
+
+__all__ = [
+    'ParsedSlashCommand',
+    'SlashCommandContext',
+    'SlashCommandDispatcher',
+    'SlashCommandResolution',
+    'SlashCommandResult',
+    'SlashCommandSpec',
+]

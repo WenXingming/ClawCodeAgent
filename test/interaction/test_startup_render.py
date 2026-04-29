@@ -5,8 +5,7 @@ from __future__ import annotations
 import io
 import unittest
 
-from interaction.environment_summary import EnvironmentLoadSummary
-from interaction.startup_render import StartupRenderer
+from interaction.interaction_gateway import EnvironmentLoadSummary, StartupRenderer
 
 
 class StartupRendererTests(unittest.TestCase):

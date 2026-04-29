@@ -1,16 +1,17 @@
-"""负责构造持久化快照与最终运行结果。"""
+﻿"""负责构造持久化快照与最终运行结果。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from agent.run_state import AgentRunState
-from core_contracts.budget import BudgetConfig
-from core_contracts.openai_contracts import ModelClient
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.run_result import AgentRunResult
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from session.session_gateway import AgentSessionSnapshot, SessionGateway
+from core_contracts.config import BudgetConfig
+from core_contracts.model import ModelClient
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.session import AgentSessionSnapshot
+from session.session_gateway import SessionGateway
 
 
 @dataclass
@@ -24,7 +25,7 @@ class ResultFactory:
     permissions: ToolPermissionPolicy
     budget_config: BudgetConfig
     session_paths: SessionPaths
-    session_manager: SessionGateway
+    session_gateway: SessionGateway
 
     def build(self, run_state: AgentRunState) -> AgentRunResult:
         """基于当前运行态落盘并返回标准结果对象。"""
@@ -53,7 +54,7 @@ class ResultFactory:
             mcp_capability_shortlist=run_state.mcp_capability_candidates(),
             materialized_mcp_capability_handles=run_state.materialized_mcp_capabilities(),
         )
-        session_path = self.session_manager.save_session(session_snapshot)
+        session_path = self.session_gateway.save_session(session_snapshot)
         return AgentRunResult(
             final_output=run_state.final_output,
             turns=run_state.turns_total,

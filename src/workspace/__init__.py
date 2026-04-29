@@ -1,22 +1,9 @@
-"""workspace 领域公共导出。"""
+"""workspace 领域公共导出。
 
-from workspace.plugin_catalog import PluginCatalog
-from workspace.policy_catalog import PolicyCatalog
-from workspace.search_service import SearchLoadError, SearchProviderProfile, SearchQueryError, SearchResponse, SearchResult, SearchService
-from workspace.worktree_service import WorktreeHistoryAction, WorktreeService, WorktreeStatus
+本包仅对外暴露 `WorkspaceGateway`。
+`workspace` 目录内其余模块均视为内部实现细节，不提供跨域导入稳定性承诺。
+"""
+
 from workspace.workspace_gateway import WorkspaceGateway
 
-__all__ = [
-    'PluginCatalog',
-    'PolicyCatalog',
-    'SearchLoadError',
-    'SearchProviderProfile',
-    'SearchQueryError',
-    'SearchResponse',
-    'SearchResult',
-    'SearchService',
-    'WorkspaceGateway',
-    'WorktreeHistoryAction',
-    'WorktreeService',
-    'WorktreeStatus',
-]
+__all__ = ['WorkspaceGateway']

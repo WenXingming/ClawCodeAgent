@@ -1,4 +1,4 @@
-"""最小命令行入口测试。"""
+﻿"""最小命令行入口测试。"""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.run_result import AgentRunResult
-from core_contracts.token_usage import TokenUsage
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.primitives import TokenUsage
 from main import main
-from session.session_snapshot import AgentSessionSnapshot
+from core_contracts.session import AgentSessionSnapshot
 
 
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
@@ -49,9 +49,9 @@ class _FakeAgent:
         execution_policy,
         context_policy,
         permissions,
-        budget_config,
         session_paths,
-        session_store,
+        session_manager,
+        budget_config=None,
     ) -> None:
         _FakeAgent.last_client = client
         _FakeAgent.last_runtime = SimpleNamespace(
@@ -63,7 +63,7 @@ class _FakeAgent:
             session_paths=session_paths,
             max_turns=execution_policy.max_turns,
         )
-        _FakeAgent.last_session_store = session_store
+        _FakeAgent.last_session_store = session_manager
 
     def run(self, prompt: str) -> AgentRunResult:
         _FakeAgent.run_prompts.append(prompt)
@@ -248,7 +248,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['续跑问题', '/exit']),
         ):
@@ -282,7 +282,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
@@ -318,7 +318,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['/exit']),
         ):
@@ -343,7 +343,7 @@ class MainEntryTests(unittest.TestCase):
             return stored
 
         with (
-            patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)),
+            patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)),
             patch('main.Agent', _FakeAgent),
             patch('builtins.input', side_effect=['请把春江花月夜全文写入文件', '/exit']),
         ):
@@ -368,7 +368,7 @@ class MainEntryTests(unittest.TestCase):
         def _load_snapshot(session_id, directory):
             raise ValueError('Session not found: xyz')
 
-        with patch('main.SessionManager', _make_session_manager_cls(_load_snapshot)):
+        with patch('main.SessionGateway', _make_session_manager_cls(_load_snapshot)):
             stderr = io.StringIO()
             with redirect_stderr(stderr):
                 code = main(['agent-resume', 'xyz'])

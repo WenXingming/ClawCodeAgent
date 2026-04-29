@@ -1,4 +1,4 @@
-"""OpenAI-compatible 客户端实现。
+﻿"""OpenAI-compatible 客户端实现。
 
 本模块提供与 OpenAI API 兼容的客户端实现，支持非流式和流式两种调用方式。
 
@@ -20,8 +20,9 @@ from typing import Any, Iterator
 from urllib import error, request
 
 from core_contracts.model import ModelConfig, StructuredOutputSpec
-from core_contracts.protocol import JSONDict, OneTurnResponse, StreamEvent, ToolCall
-from core_contracts.token_usage import TokenUsage
+from core_contracts.messaging import OneTurnResponse, StreamEvent, ToolCall
+from core_contracts.primitives import JSONDict
+from core_contracts.primitives import TokenUsage
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Step 8 QueryService 单元测试。"""
+﻿"""Step 8 QueryService 单元测试。"""
 
 from __future__ import annotations
 
@@ -9,16 +9,17 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from app.query_service import QueryService
-from core_contracts.budget import BudgetConfig
+from app.app_gateway import AppGateway
+from app.query_service import QueryService  # internal import kept for isinstance checks only
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.protocol import OneTurnResponse, ToolCall
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.token_usage import TokenUsage
-from agent import Agent
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.messaging import OneTurnResponse, ToolCall
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.primitives import TokenUsage
+from agent import AgentGateway as Agent
 from openai_client.openai_client import OpenAIClient
-from session import SessionManager
+from session import SessionGateway
 
 
 @dataclass(frozen=True)
@@ -83,11 +84,11 @@ class QueryServiceTests(unittest.TestCase):
             contracts.execution_policy,
             contracts.context_policy,
             contracts.permissions,
-            contracts.budget_config,
             contracts.session_paths,
-            SessionManager(contracts.session_paths.session_directory),
+            SessionGateway(contracts.session_paths.session_directory),
+            contracts.budget_config,
         )
-        return QueryService.from_runtime_agent(agent), fake_client
+        return AppGateway.create_query_service(agent), fake_client
 
     def test_submit_uses_run_then_resume_and_can_return_persisted_session_path(self) -> None:
         workspace = self._make_test_dir()

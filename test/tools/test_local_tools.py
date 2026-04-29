@@ -1,4 +1,4 @@
-"""ISSUE-004 基础工具集与执行上下文测试。
+﻿"""ISSUE-004 基础工具集与执行上下文测试。
 
 本文件覆盖三类目标：
 1) 四个基础工具的正常行为。
@@ -12,8 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
 from tools.tools_gateway import ToolsGateway
 
 

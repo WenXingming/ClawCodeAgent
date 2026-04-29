@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from interaction.slash_render import SlashCommandRenderer
+from interaction.interaction_gateway import SlashCommandRenderer
 
 
 class _TtyStringIO(io.StringIO):

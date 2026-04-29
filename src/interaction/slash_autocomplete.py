@@ -1,4 +1,4 @@
-"""slash 自动补全输入适配模块。
+﻿"""slash 自动补全输入适配模块。
 
 本模块把交互循环的输入职责从 CLI 协调器中抽离出来：
 1. 在可用时通过 prompt_toolkit 提供 slash 命令补全；
@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import builtins
 import sys
-from dataclasses import dataclass
 from typing import Callable, TextIO
+
+from core_contracts.interaction import SlashAutocompleteEntry
 
 try:
     from prompt_toolkit import PromptSession
@@ -28,14 +29,6 @@ except ImportError:  # pragma: no cover - 依赖缺失时走 input() 回退
     Completer = object
     Completion = None
     Style = None
-
-
-@dataclass(frozen=True)
-class SlashAutocompleteEntry:
-    """描述一个可补全的 slash 命令项。"""
-
-    name: str
-    description: str
 
 
 class SlashAutocompleteCatalog:
@@ -186,3 +179,6 @@ class SlashAutocompletePrompt:
         input_is_tty = getattr(self._stdin, 'isatty', None)
         output_is_tty = getattr(self._stdout, 'isatty', None)
         return bool(callable(input_is_tty) and input_is_tty() and callable(output_is_tty) and output_is_tty())
+
+
+__all__ = ['SlashAutocompleteEntry', 'SlashAutocompletePrompt']

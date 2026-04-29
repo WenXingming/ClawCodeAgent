@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import unittest
 
-from context.context_token_estimator import ContextTokenEstimator
+from context.context_gateway import TokenEstimator
 
 
-ESTIMATOR = ContextTokenEstimator()
+ESTIMATOR = TokenEstimator()
 
 
 class EstimateMessageTokensTests(unittest.TestCase):

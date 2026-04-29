@@ -1,23 +1,12 @@
-"""context 领域公共导出。"""
+"""context 包公开入口。
 
-from __future__ import annotations
+架构约定：
+- 对外仅暴露 ContextGateway，所有外部消费者必须通过本入口访问 context 治理能力。
+- 禁止跨包直接依赖 context 子模块（budget_projection、snipper、compactor 等）。
+- 内部实现类型（Snipper、Compactor、BudgetProjector 等）仅允许通过
+  context.context_gateway 模块路径访问（用于单元测试白盒场景）。
+"""
 
-from typing import Any
+from .context_gateway import ContextGateway
 
-__all__ = ['BudgetProjection', 'ContextGateway']
-
-_EXPORTS: dict[str, str] = {
-	'ContextGateway': 'context.context_gateway',
-	'BudgetProjection': 'context.budget_projection',
-}
-
-
-def __getattr__(name: str) -> Any:
-	"""延迟导出公共门面，避免包初始化时触发循环依赖。"""
-	module_path = _EXPORTS.get(name)
-	if module_path is None:
-		raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
-
-	import importlib
-	module = importlib.import_module(module_path)
-	return getattr(module, name)
+__all__ = ['ContextGateway']

@@ -1,4 +1,4 @@
-"""ContextGateway 单元测试。"""
+﻿"""ContextGateway 单元测试。"""
 
 from __future__ import annotations
 
@@ -10,16 +10,13 @@ from uuid import uuid4
 from agent.run_state import AgentRunState
 from agent.run_limits import RunLimits
 from context.context_gateway import ContextGateway
-from context.budget_projection import BudgetProjector
-from context.compactor import Compactor
-from context.snipper import Snipper
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.protocol import OneTurnResponse, ToolCall
-from core_contracts.runtime_policy import ContextPolicy
-from core_contracts.token_usage import TokenUsage
+from core_contracts.messaging import OneTurnResponse, ToolCall
+from core_contracts.config import ContextPolicy
+from core_contracts.primitives import TokenUsage
 from openai_client.openai_client import OpenAIClient
-from session.session_state import AgentSessionState
+from core_contracts.session import AgentSessionState
 
 
 @dataclass(frozen=True)
@@ -92,11 +89,7 @@ class ContextGatewayTests(unittest.TestCase):
         )
         run_state.begin_turn(1)
 
-        context_manager = ContextGateway(
-            budget_projector=BudgetProjector(),
-            snipper=Snipper(),
-            compactor=Compactor(_FakeOpenAIClient([])),
-        )
+        context_manager = ContextGateway(client=_FakeOpenAIClient([]))
         guard = RunLimits(
             budget=runtime_policies.budget_config,
             pricing=ModelConfig(model='fake').pricing,
@@ -137,18 +130,14 @@ class ContextGatewayTests(unittest.TestCase):
 
         compact_usage = TokenUsage(input_tokens=2, output_tokens=1)
         context_manager = ContextGateway(
-            budget_projector=BudgetProjector(),
-            snipper=Snipper(),
-            compactor=Compactor(
-                _FakeOpenAIClient([
-                    OneTurnResponse(
-                        content='用户目标：继续任务\n下一步：回复最新请求',
-                        tool_calls=(),
-                        finish_reason='stop',
-                        usage=compact_usage,
-                    )
-                ])
-            ),
+            client=_FakeOpenAIClient([
+                OneTurnResponse(
+                    content='用户目标：继续任务\n下一步：回复最新请求',
+                    tool_calls=(),
+                    finish_reason='stop',
+                    usage=compact_usage,
+                )
+            ])
         )
         guard = RunLimits(
             budget=runtime_policies.budget_config,

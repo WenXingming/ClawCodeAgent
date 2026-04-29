@@ -1,4 +1,4 @@
-"""ISSUE-002 OpenAI-compatible 非流式客户端测试。
+﻿"""ISSUE-002 OpenAI-compatible 非流式客户端测试。
 
 这个测试文件专注验证三类行为：
 1) 请求构造是否符合预期。
@@ -15,7 +15,7 @@ from unittest.mock import patch
 from urllib import error
 
 from core_contracts.model import ModelConfig, StructuredOutputSpec
-from core_contracts.token_usage import TokenUsage
+from core_contracts.primitives import TokenUsage
 from openai_client.openai_client import (
     OpenAIClient,
     OpenAIConnectionError,

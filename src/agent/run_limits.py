@@ -1,4 +1,4 @@
-"""集中管理 agent 主循环预算闸门的预算检查逻辑。
+﻿"""集中管理 agent 主循环预算闸门的预算检查逻辑。
 
 本模块负责把会话运行过程中的多维预算判断收敛到单一入口，供主循环在模型调用前和工具调用后统一执行预算检查。其职责仅限于判定是否命中预算限制，并返回上层可识别的限制标识，不直接执行中断或恢复动作。
 """
@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core_contracts.budget import BudgetConfig
-from core_contracts.context_contracts import BudgetProjection
-from core_contracts.model_pricing import ModelPricing
-from core_contracts.token_usage import TokenUsage
+from core_contracts.config import BudgetConfig
+from core_contracts.context import BudgetProjection
+from core_contracts.model import ModelPricing
+from core_contracts.primitives import TokenUsage
 
 
 @dataclass

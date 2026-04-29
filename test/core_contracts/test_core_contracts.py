@@ -1,4 +1,4 @@
-"""ISSUE-001 契约模型的单元测试。"""
+﻿"""ISSUE-001 契约模型的单元测试。"""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig, StructuredOutputSpec
-from core_contracts.model_pricing import ModelPricing
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.protocol import OneTurnResponse, StreamEvent, ToolCall, ToolExecutionResult
-from core_contracts.run_result import AgentRunResult
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.token_usage import TokenUsage
+from core_contracts.model import ModelPricing
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.messaging import OneTurnResponse, StreamEvent, ToolCall, ToolExecutionResult
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.primitives import TokenUsage
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()

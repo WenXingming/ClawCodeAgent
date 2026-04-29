@@ -1,4 +1,4 @@
-"""管理工作区 hook policy 清单的发现、合并与运行时暴露。
+﻿"""管理工作区 hook policy 清单的发现、合并与运行时暴露。
 
 本模块负责从工作区发现策略清单，过滤不可信 manifest，合并工具阻断、环境变量、预算覆盖和 before/after hooks，并把合并结果暴露为运行时可直接消费的策略快照。
 """
@@ -9,9 +9,9 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core_contracts.budget import BudgetConfig
-from core_contracts.protocol import JSONDict
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.config import BudgetConfig
+from core_contracts.primitives import JSONDict
+from core_contracts.tools import ToolDescriptor
 
 
 _POLICY_MANIFEST_FILE = Path('.claw') / 'policies.json'
@@ -213,7 +213,7 @@ class PolicyCatalog:
             if not self.is_tool_denied(name)
         }
 
-    def apply_budget_config(self, budget_config: BudgetConfig) -> BudgetConfig:
+    def apply_budget_config(self, budget_config: BudgetConfig | None) -> BudgetConfig:
         """把策略中的预算覆盖应用到基础预算配置。"""
         return _merge_budget_configs(budget_config, self.budget_overrides)
 
@@ -449,15 +449,23 @@ def _extend_unique(target: list[str], values: tuple[str, ...]) -> None:
             target.append(item)
 
 
-def _merge_budget_configs(base: BudgetConfig, override: BudgetConfig) -> BudgetConfig:
+def _merge_budget_configs(base: BudgetConfig | None, override: BudgetConfig | None) -> BudgetConfig:
     """把预算覆盖配置合并到基础预算配置中。
 
     Args:
-        base (BudgetConfig): 当前基础预算配置。
-        override (BudgetConfig): 需要覆盖到基础配置上的预算配置。
+        base (BudgetConfig | None): 当前基础预算配置。
+        override (BudgetConfig | None): 需要覆盖到基础配置上的预算配置。
     Returns:
         BudgetConfig: 合并后的预算配置对象。
     """
+    # 如果 base 为 None，使用默认的 BudgetConfig
+    if base is None:
+        base = BudgetConfig()
+
+    # 如果 override 为 None，直接返回 base
+    if override is None:
+        return base
+
     payload = base.to_dict()
     for key, value in override.to_dict().items():
         if value is not None:
