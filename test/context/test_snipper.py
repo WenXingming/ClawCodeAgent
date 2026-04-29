@@ -1,7 +1,7 @@
-"""ISSUE-010 ContextSnipper 单元测试。
+"""ISSUE-010 Snipper 单元测试。
 
 测试内容：
-- ContextSnipper.snip：剪裁范围、边界、统计
+- Snipper.snip：剪裁范围、边界、统计
 """
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ class MakeTombstoneTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# ContextSnipper.snip 测试
+# Snipper.snip 测试
 # ---------------------------------------------------------------------------
 
 class SnipSessionTests(unittest.TestCase):

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from context.context_token_budget_evaluator import ContextTokenBudgetSnapshot
+from context.budget_projection import BudgetProjection
 from core_contracts.budget import BudgetConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.token_usage import TokenUsage
@@ -33,7 +33,7 @@ class BudgetGuard:
         turns_offset: int,
         turns_this_run: int,
         model_call_count: int,
-        snapshot: ContextTokenBudgetSnapshot,
+        snapshot: BudgetProjection,
         usage_delta: TokenUsage,
     ) -> str | None:
         """模型调用前的五维预算预检。
@@ -45,7 +45,7 @@ class BudgetGuard:
             turns_offset (int): 当前会话在本轮之前已经完成的 turn 数。
             turns_this_run (int): 当前 run/resume 调用中新增加的 turn 数。
             model_call_count (int): 到当前为止已经发生的模型调用次数。
-            snapshot (ContextTokenBudgetSnapshot): 本次模型调用前生成的上下文预算快照。
+            snapshot (BudgetProjection): 本次模型调用前生成的上下文预算快照。
             usage_delta (TokenUsage): 预估的本次模型调用 token 消耗。
         Returns:
             str | None: 命中的限制标识；未命中任何限制时返回 None。
@@ -98,11 +98,11 @@ class BudgetGuard:
             return 'model_call_limit'
         return None
 
-    def _check_token(self, snapshot: ContextTokenBudgetSnapshot) -> str | None:
+    def _check_token(self, snapshot: BudgetProjection) -> str | None:
         """内部方法：检查是否超过token硬限制。
 
         Args:
-            snapshot (ContextTokenBudgetSnapshot): 本次模型调用对应的预算快照。
+            snapshot (BudgetProjection): 本次模型调用对应的预算快照。
         Returns:
             str | None: 若超过 token 硬限制则返回对应限制标识，否则返回 None。
         """

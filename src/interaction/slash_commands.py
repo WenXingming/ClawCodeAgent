@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Callable, Literal, Mapping
 
-from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
+from context import ContextManager
 from core_contracts.budget import BudgetConfig
 from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
@@ -103,16 +103,16 @@ class SlashCommandDispatcher:
     可在构造时显式传入。
     """
 
-    def __init__(self, budget_evaluator: ContextTokenBudgetEvaluator | None = None) -> None:
+    def __init__(self, context_manager: ContextManager | None = None) -> None:
         """初始化 slash 命令分发器。
 
         Args:
-            budget_evaluator (ContextTokenBudgetEvaluator | None): 可选的预算评估器；未提供时创建默认实例。
+            context_manager (ContextManager | None): 可选的 context 领域门面；未提供时创建默认实例。
         Returns:
             None: 该构造函数只负责建立分发器内部状态。
         """
-        self._budget_evaluator = budget_evaluator or ContextTokenBudgetEvaluator()
-        # ContextTokenBudgetEvaluator: /context 命令使用的 token 预算评估器。
+        self._context_manager = context_manager or ContextManager()
+        # ContextManager: /context 命令使用的 context 领域统一入口。
 
         self._specs = self._build_specs()
         # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，保持帮助展示顺序。
@@ -342,8 +342,8 @@ class SlashCommandDispatcher:
         """
         del parsed
         openai_tools = self._build_openai_tools(context.tool_registry)
-        snapshot = self._budget_evaluator.evaluate(
-            messages=context.session_state.to_messages(),
+        snapshot = self._context_manager.project_budget(
+            context.session_state.to_messages(),
             tools=openai_tools,
             max_input_tokens=context.budget_config.max_input_tokens,
         )

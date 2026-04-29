@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from context.context_token_budget_evaluator import ContextTokenBudgetSnapshot
+from context.budget_projection import BudgetProjection
 from core_contracts.protocol import JSONDict, ToolCall, ToolExecutionResult
 from core_contracts.token_usage import TokenUsage
 from session.session_state import AgentSessionState
@@ -35,7 +35,7 @@ class AgentRunState:
     model_call_count: int = 0
     usage_delta: TokenUsage = field(default_factory=TokenUsage)
     events: list[JSONDict] = field(default_factory=list)
-    token_budget_snapshot: ContextTokenBudgetSnapshot | None = None
+    token_budget_snapshot: BudgetProjection | None = None
     effective_tool_registry: dict[str, LocalTool] = field(default_factory=dict)
 
     @classmethod

@@ -1,7 +1,4 @@
-"""统一编排 pre-model 阶段的上下文治理与预算检查。
-
-本模块负责把预算预检、snip、auto compact 和 reactive compact 重试收敛为单一编排层，供 `LocalAgent` 在模型调用前后复用一致的上下文治理逻辑。
-"""
+"""context 领域统一门面。"""
 
 from __future__ import annotations
 
@@ -9,9 +6,9 @@ from dataclasses import dataclass
 
 from agent.run_state import AgentRunState
 from budget.budget_guard import BudgetGuard
-from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator, ContextTokenBudgetSnapshot
-from context.context_compactor import CompactionResult, ContextCompactor
-from context.context_snipper import ContextSnipper
+from context.budget_projection import BudgetProjection, BudgetProjector
+from context.compactor import CompactionResult, Compactor
+from context.snipper import Snipper
 from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.runtime_policy import ContextPolicy
@@ -26,32 +23,56 @@ _MAX_REACTIVE_COMPACT_RETRIES = 2
 class PreModelContextOutcome:
     """表示一次 pre-model 上下文治理后的结果快照。"""
 
-    pre_model_stop: str | None  # str | None：pre-model 阶段命中的预算停止原因。
-    events: tuple[JSONDict, ...]  # tuple[JSONDict, ...]：本轮 pre-model 阶段产生的结构化事件集合。
+    pre_model_stop: str | None
+    events: tuple[JSONDict, ...]
 
 
 @dataclass(frozen=True)
 class ReactiveCompactOutcome:
     """表示一次模型调用及 reactive compact 重试链路的结果。"""
 
-    response: OneTurnResponse | None  # OneTurnResponse | None：成功完成模型调用时的最终响应。
-    stop_reason: str | None  # str | None：reactive compact 之后命中的预算停止原因。
-    events: tuple[JSONDict, ...]  # tuple[JSONDict, ...]：本轮调用与重试过程中产生的结构化事件集合。
+    response: OneTurnResponse | None
+    stop_reason: str | None
+    events: tuple[JSONDict, ...]
 
 
-@dataclass
-class BudgetContextOrchestrator:
-    """组合预算评估、snip 与 compact，统一处理上下文治理编排。
+class ContextManager:
+    """统一收口预算投影、snip 与 compact 的 context 门面。"""
 
-    典型工作流如下：
-    1. `run_pre_model_cycle()` 在真正请求模型前执行预算预检、soft-over snip 与 auto compact。
-    2. `complete_with_reactive_compact()` 在模型调用失败且命中 context-length 错误时执行 reactive compact 重试。
-    3. 上层消费 `PreModelContextOutcome` 与 `ReactiveCompactOutcome`，统一推进主循环状态。
-    """
+    def __init__(
+        self,
+        client: OpenAIClient | None = None,
+        *,
+        budget_projector: BudgetProjector | None = None,
+        snipper: Snipper | None = None,
+        compactor: Compactor | None = None,
+    ) -> None:
+        self._budget_projector = budget_projector or BudgetProjector()
+        self._snipper = snipper or Snipper()
+        if compactor is not None:
+            self._compactor = compactor
+        elif client is not None:
+            self._compactor = Compactor(client)
+        else:
+            self._compactor = None
 
-    budget_evaluator: ContextTokenBudgetEvaluator  # ContextTokenBudgetEvaluator：负责生成 token 预算快照。
-    context_snipper: ContextSnipper  # ContextSnipper：负责在 soft-over 时做轻量级上下文剪裁。
-    context_compactor: ContextCompactor  # ContextCompactor：负责主动与被动的摘要压缩。
+    def project_budget(
+        self,
+        messages: list[JSONDict],
+        *,
+        tools: list[JSONDict] | None = None,
+        max_input_tokens: int | None = None,
+        output_reserve_tokens: int | None = None,
+        soft_buffer_tokens: int | None = None,
+    ) -> BudgetProjection:
+        """对当前消息和工具集合执行预算投影。"""
+        return self._budget_projector.project(
+            messages,
+            tools=tools,
+            max_input_tokens=max_input_tokens,
+            output_reserve_tokens=output_reserve_tokens,
+            soft_buffer_tokens=soft_buffer_tokens,
+        )
 
     def run_pre_model_cycle(
         self,
@@ -62,31 +83,22 @@ class BudgetContextOrchestrator:
         guard: BudgetGuard,
         openai_tools: list[JSONDict],
     ) -> PreModelContextOutcome:
-        """执行模型调用前的上下文治理编排并返回统一结果。
-
-        Args:
-            run_state (AgentRunState): 当前调用共享的动态运行态对象。
-            budget_config (BudgetConfig): 当前预算配置对象。
-            context_policy (ContextPolicy): 当前上下文治理策略对象。
-            guard (BudgetGuard): 预算闸门对象，用于统一判断是否需要停止。
-            openai_tools (list[JSONDict]): 当前可见工具定义列表。
-        Returns:
-            PreModelContextOutcome: 包含停止原因和事件的治理结果；usage、计数和预算快照直接回写到 run_state。
-        """
+        """执行模型调用前的上下文治理编排并返回统一结果。"""
         events: list[JSONDict] = []
         turn_index = run_state.turn_index
         next_usage_delta = run_state.usage_delta
         next_model_call_count = run_state.model_call_count
         session_state = run_state.session_state
+        compactor = self._require_compactor()
 
-        snapshot = self.budget_evaluator.evaluate(
-            messages=session_state.to_messages(),
+        snapshot = self.project_budget(
+            session_state.to_messages(),
             tools=openai_tools,
             max_input_tokens=budget_config.max_input_tokens,
         )
 
         if snapshot.is_soft_over:
-            snip_result = self.context_snipper.snip(
+            snip_result = self._snipper.snip(
                 session_state.messages,
                 preserve_messages=context_policy.compact_preserve_messages,
                 tools=openai_tools,
@@ -101,8 +113,8 @@ class BudgetContextOrchestrator:
                         'tokens_removed': snip_result.tokens_removed,
                     }
                 )
-                snapshot = self.budget_evaluator.evaluate(
-                    messages=session_state.to_messages(),
+                snapshot = self.project_budget(
+                    session_state.to_messages(),
                     tools=openai_tools,
                     max_input_tokens=budget_config.max_input_tokens,
                 )
@@ -115,14 +127,8 @@ class BudgetContextOrchestrator:
             usage_delta=next_usage_delta,
         )
 
-        if (
-            self.context_compactor.should_auto_compact(
-                snapshot.projected_input_tokens,
-                context_policy.auto_compact_threshold_tokens,
-            )
-            and pre_model_stop is None
-        ):
-            compact_result = self.context_compactor.compact(
+        if compactor.should_auto_compact(snapshot.projected_input_tokens, context_policy.auto_compact_threshold_tokens) and pre_model_stop is None:
+            compact_result = compactor.compact(
                 session_state.messages,
                 preserve_messages=context_policy.compact_preserve_messages,
             )
@@ -130,8 +136,8 @@ class BudgetContextOrchestrator:
                 next_model_call_count += 1
                 next_usage_delta = next_usage_delta + compact_result.usage
                 events.append(self._make_compact_event(turn_index, 'auto', compact_result))
-                snapshot = self.budget_evaluator.evaluate(
-                    messages=session_state.to_messages(),
+                snapshot = self.project_budget(
+                    session_state.to_messages(),
                     tools=openai_tools,
                     max_input_tokens=budget_config.max_input_tokens,
                 )
@@ -175,25 +181,13 @@ class BudgetContextOrchestrator:
     def complete_with_reactive_compact(
         self,
         *,
-        client: OpenAIClient,
         run_state: AgentRunState,
         budget_config: BudgetConfig,
         context_policy: ContextPolicy,
         openai_tools: list[JSONDict],
         guard: BudgetGuard,
     ) -> ReactiveCompactOutcome:
-        """执行模型调用，并在需要时做 reactive compact 重试。
-
-        Args:
-            client (OpenAIClient): 用于发起模型调用的客户端。
-            run_state (AgentRunState): 当前调用共享的动态运行态对象。
-            budget_config (BudgetConfig): 当前预算配置对象。
-            context_policy (ContextPolicy): 当前上下文治理策略对象。
-            openai_tools (list[JSONDict]): 当前可见工具定义列表。
-            guard (BudgetGuard): 预算闸门对象，用于在重试后重新检查预算停止条件。
-        Returns:
-            ReactiveCompactOutcome: 包含最终响应、停止原因和事件的调用结果；usage 和模型调用计数直接回写到 run_state。
-        """
+        """执行模型调用，并在需要时做 reactive compact 重试。"""
         events: list[JSONDict] = []
         session_state = run_state.session_state
         turn_index = run_state.turn_index
@@ -201,10 +195,11 @@ class BudgetContextOrchestrator:
         current_model_call_count = run_state.model_call_count
         attempt = 0
         current_error: OpenAIClientError | None = None
+        compactor = self._require_compactor()
 
         while True:
             try:
-                response = client.complete(
+                response = compactor.client.complete(
                     messages=session_state.to_messages(),
                     tools=openai_tools,
                     output_schema=context_policy.output_schema,
@@ -220,15 +215,12 @@ class BudgetContextOrchestrator:
                 )
             except OpenAIClientError as exc:
                 current_error = exc
-                if not self.context_compactor.is_context_length_error(exc) or attempt >= _MAX_REACTIVE_COMPACT_RETRIES:
+                if not compactor.is_context_length_error(exc) or attempt >= _MAX_REACTIVE_COMPACT_RETRIES:
                     break
 
                 attempt += 1
-                preserve_messages = max(
-                    1,
-                    context_policy.compact_preserve_messages - (attempt - 1),
-                )
-                compact_result = self.context_compactor.compact(
+                preserve_messages = max(1, context_policy.compact_preserve_messages - (attempt - 1))
+                compact_result = compactor.compact(
                     session_state.messages,
                     preserve_messages=preserve_messages,
                 )
@@ -255,8 +247,8 @@ class BudgetContextOrchestrator:
                 events.append(self._make_compact_event(turn_index, 'reactive', compact_result, attempt=attempt))
                 events.append(retry_event)
 
-                snapshot = self.budget_evaluator.evaluate(
-                    messages=session_state.to_messages(),
+                snapshot = self.project_budget(
+                    session_state.to_messages(),
                     tools=openai_tools,
                     max_input_tokens=budget_config.max_input_tokens,
                 )
@@ -293,16 +285,7 @@ class BudgetContextOrchestrator:
         *,
         attempt: int | None = None,
     ) -> JSONDict:
-        """统一构造 compact_boundary 事件。
-
-        Args:
-            turn_index (int): 当前 turn 序号。
-            trigger (str): 当前 compact 的触发方式，如 `auto` 或 `reactive`。
-            result (CompactionResult): compact 执行结果。
-            attempt (int | None): reactive compact 场景下的重试次数。
-        Returns:
-            JSONDict: 统一格式的 compact_boundary 事件载荷。
-        """
+        """统一构造 compact_boundary 事件。"""
         event: JSONDict = {
             'type': 'compact_boundary',
             'turn': turn_index,
@@ -316,3 +299,9 @@ class BudgetContextOrchestrator:
         if attempt is not None:
             event['attempt'] = attempt
         return event
+
+    def _require_compactor(self) -> Compactor:
+        """返回 compact 能力；未启用时抛出显式错误。"""
+        if self._compactor is None:
+            raise RuntimeError('ContextManager requires a compactor-enabled client for compact operations')
+        return self._compactor

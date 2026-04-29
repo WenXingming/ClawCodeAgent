@@ -11,13 +11,10 @@ from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from agent.run_state import AgentRunState
-from context.context_token_budget_evaluator import ContextTokenBudgetEvaluator
+from context import ContextManager
 from budget.budget_guard import BudgetGuard
 from interaction.slash_commands import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
-from context.context_compactor import ContextCompactor
-from orchestration.budget_context_orchestrator import BudgetContextOrchestrator
 from orchestration.agent_manager import AgentManager, DelegatedTaskSpec
-from context.context_snipper import ContextSnipper
 from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.run_result import AgentRunResult
@@ -62,10 +59,7 @@ class LocalAgent:
     current_agent_id: str | None = None  # str | None: 当前 LocalAgent 对应的受管代理标识；根调用与 child 调用均会设置。
     progress_reporter: Callable[[JSONDict], None] | None = None  # Callable[[JSONDict], None] | None: 可选的实时进度上报回调。
     tool_registry: dict[str, LocalTool] = field(init=False)  # 可用工具集合。
-    budget_evaluator: ContextTokenBudgetEvaluator = field(default_factory=ContextTokenBudgetEvaluator)
-    context_snipper: ContextSnipper = field(default_factory=ContextSnipper)
-    context_compactor: ContextCompactor = field(init=False)
-    budget_context_orchestrator: BudgetContextOrchestrator = field(init=False)
+    context_manager: ContextManager = field(init=False)
     workspace_gateway: WorkspaceGateway = field(init=False)
     mcp_runtime: MCPRuntime = field(init=False)
     slash_dispatcher: SlashCommandDispatcher = field(init=False)
@@ -207,13 +201,8 @@ class LocalAgent:
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
         self.tool_registry = self.workspace_gateway.prepare_tool_registry(self.tool_registry)
         self.budget_config = self.workspace_gateway.apply_budget_config(self.budget_config)
-        self.context_compactor = ContextCompactor(self.client)
-        self.budget_context_orchestrator = BudgetContextOrchestrator(
-            budget_evaluator=self.budget_evaluator,
-            context_snipper=self.context_snipper,
-            context_compactor=self.context_compactor,
-        )
-        self.slash_dispatcher = SlashCommandDispatcher(self.budget_evaluator)
+        self.context_manager = ContextManager(client=self.client)
+        self.slash_dispatcher = SlashCommandDispatcher(self.context_manager)
 
     def _emit_progress_event(self, event: JSONDict) -> None:
         """向可选 reporter 发送一个实时事件。"""
@@ -1388,7 +1377,7 @@ class LocalAgent:
                 safe_env=self.workspace_gateway.safe_env,
             )
             openai_tools = self.tool_gateway.to_openai_tools(effective_tool_registry)
-            pre_model_outcome = self.budget_context_orchestrator.run_pre_model_cycle(
+            pre_model_outcome = self.context_manager.run_pre_model_cycle(
                 run_state=run_state,
                 budget_config=self.budget_config,
                 context_policy=self.context_policy,
@@ -1551,8 +1540,7 @@ class LocalAgent:
         guard: BudgetGuard,
     ) -> tuple[OneTurnResponse | None, str | None]:
         """执行一次模型调用；必要时在 context-length 错误后进行 reactive compact 重试。"""
-        reactive_outcome = self.budget_context_orchestrator.complete_with_reactive_compact(
-            client=self.client,
+        reactive_outcome = self.context_manager.complete_with_reactive_compact(
             run_state=run_state,
             budget_config=self.budget_config,
             context_policy=self.context_policy,
