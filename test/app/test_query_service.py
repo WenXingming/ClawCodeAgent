@@ -18,7 +18,7 @@ from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, Sessio
 from core_contracts.token_usage import TokenUsage
 from agent import Agent
 from openai_client.openai_client import OpenAIClient
-from session.session_store import AgentSessionStore
+from session import SessionManager
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ class QueryServiceTests(unittest.TestCase):
             contracts.permissions,
             contracts.budget_config,
             contracts.session_paths,
-            AgentSessionStore(contracts.session_paths.session_directory),
+            SessionManager(contracts.session_paths.session_directory),
         )
         return QueryService.from_runtime_agent(agent), fake_client
 

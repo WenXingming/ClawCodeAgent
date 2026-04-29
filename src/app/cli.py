@@ -13,8 +13,7 @@ from interaction.quit_render import ExitRenderer
 from interaction.slash_render import SlashCommandRenderer
 from interaction.startup_render import StartupRenderer
 from openai_client.openai_client import OpenAIClient, OpenAIClientError
-from session.session_snapshot import AgentSessionSnapshot
-from session.session_store import AgentSessionStore
+from session import AgentSessionSnapshot, SessionManager
 
 
 class AppCLI:
@@ -27,7 +26,7 @@ class AppCLI:
         *,
         openai_client_cls: type[OpenAIClient] = OpenAIClient,
         agent_cls,
-        session_store_cls: type[AgentSessionStore] = AgentSessionStore,
+        session_manager_cls: type[SessionManager] = SessionManager,
         startup_renderer: StartupRenderer | None = None,
         exit_renderer: ExitRenderer | None = None,
         slash_renderer: SlashCommandRenderer | None = None,
@@ -36,10 +35,10 @@ class AppCLI:
         self._runtime_builder = RuntimeBuilder(
             openai_client_cls=openai_client_cls,
             agent_cls=agent_cls,
-            session_store_cls=session_store_cls,
+            session_manager_cls=session_manager_cls,
         )
         self._chat_loop = ChatLoop(
-            session_store_cls=session_store_cls,
+            session_manager_cls=session_manager_cls,
             startup_renderer=startup_renderer or StartupRenderer(),
             exit_renderer=exit_renderer or ExitRenderer(),
             slash_renderer=slash_renderer or SlashCommandRenderer(),

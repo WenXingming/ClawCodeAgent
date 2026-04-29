@@ -17,7 +17,7 @@ from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from session.session_state import AgentSessionState
+from session import AgentSessionState
 from tools.registry import LocalTool, render_openai_tools
 
 

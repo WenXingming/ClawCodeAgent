@@ -19,9 +19,7 @@ from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from interaction.slash_commands import SlashCommandDispatcher
 from openai_client.openai_client import OpenAIClient
-from session.session_snapshot import AgentSessionSnapshot
-from session.session_state import AgentSessionState
-from session.session_store import AgentSessionStore
+from session import AgentSessionSnapshot, AgentSessionState, SessionManager
 from tools.mcp import MCPRuntime
 from tools.registry import LocalTool
 from tools.tool_gateway import ToolGateway
@@ -39,7 +37,7 @@ class Agent:
     permissions: ToolPermissionPolicy
     budget_config: BudgetConfig
     session_paths: SessionPaths
-    session_store: AgentSessionStore
+    session_manager: SessionManager
     tool_gateway: ToolGateway = field(default_factory=ToolGateway)
     delegation_service: DelegationService = field(default_factory=DelegationService)
     current_agent_id: str | None = None
@@ -134,7 +132,7 @@ class Agent:
             permissions=self.permissions,
             budget_config=self.budget_config,
             session_paths=self.session_paths,
-            session_store=self.session_store,
+            session_manager=self.session_manager,
         )
         self._turn_coordinator = TurnCoordinator(
             client=self.client,
@@ -144,7 +142,7 @@ class Agent:
             permissions=self.permissions,
             budget_config=self.budget_config,
             session_paths=self.session_paths,
-            session_store=self.session_store,
+            session_manager=self.session_manager,
             workspace_gateway=self._workspace_gateway,
             mcp_runtime=self._mcp_runtime,
             context_manager=self._context_manager,
@@ -184,7 +182,7 @@ class Agent:
             self.permissions,
             self.budget_config,
             self.session_paths,
-            self.session_store,
+            self.session_manager,
             tool_gateway=self.tool_gateway,
             delegation_service=self._turn_coordinator.delegation_service,
             current_agent_id=child_agent_id,
