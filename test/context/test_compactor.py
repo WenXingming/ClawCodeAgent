@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from context.compactor import Compactor
+from context.context_gateway import Compactor
 from core_contracts.model import ModelConfig
 from core_contracts.openai_contracts import ModelClient, ModelConnectionError, ModelResponseError
 from core_contracts.protocol import OneTurnResponse

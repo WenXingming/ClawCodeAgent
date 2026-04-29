@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from context.snipper import SnipResult, Snipper
+from context.context_gateway import SnipResult, Snipper
 
 
 SNIPPER = Snipper()

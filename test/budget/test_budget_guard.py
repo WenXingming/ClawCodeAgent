@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from agent.run_limits import RunLimits
-from context.budget_projection import BudgetProjection
+from context.context_gateway import BudgetProjection
 from core_contracts.budget import BudgetConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.token_usage import TokenUsage
