@@ -9,6 +9,17 @@
 
 除上述两类外，跨模块导入一律视为违规。
 
+### 0.1 破坏式重构的硬约束（新增）
+
+本轮不是“搬运式重构”，而是“删除式重构”。
+
+必须同时满足：
+
+1. 不允许把巨石函数原样搬到其他领域（例如把 turn_coordinator 的大段编排逻辑整段搬到 tools）。
+2. 允许且鼓励删除冗余分支、重复适配层、历史兼容入口。
+3. 每次领域改造都要有明确的“删除清单”（删了什么、为什么可删）。
+4. 编排器只保留 orchestration 职责：流程推进、状态切换、停止条件判定；参数解析、结果渲染、底层异常细节必须下沉到领域内服务并经 Gateway 翻译。
+
 ---
 
 ## 1. 当前违规面扫描结论
@@ -138,6 +149,28 @@ src/
 
 ## 3. Gateway 建设清单（必须新建/重构）
 
+### 3.0 特别原则：TurnCoordinator 去巨石，不跨域搬家（新增）
+
+目标文件：src/agent/turn_coordinator.py
+
+执行约束：
+
+1. turn_coordinator 仅保留循环编排主干，不再承载大量工具参数解析/渲染拼装细节。
+2. MCP/工具参数校验、输出格式化、异常归一化由 ToolsGateway 内部能力完成；turn_coordinator 仅接收 core_contracts DTO 与 gateway_errors。
+3. delegate_agent 相关编排仅保留“调度与状态推进”，把可复用的参数规范化与摘要构建拆到 agent 领域内部协作者（仍在 agent 内，不外迁到 tools）。
+4. 明确删除目标：重复的字符串参数解析辅助函数、重复的 metadata 合并逻辑、与网关职责重叠的错误翻译逻辑。
+
+验收阈值（硬性）：
+
+1. turn_coordinator 中跨领域 import 仅允许：
+  - from tools.tools_gateway import ToolsGateway
+  - from workspace.workspace_gateway import WorkspaceGateway
+  - from session.session_gateway import SessionGateway
+  - from context.context_gateway import ContextGateway
+  - from core_contracts.* import DTO/Errors
+2. turn_coordinator 中不再直接 import tools.executor/tools.registry/tools.mcp。
+3. turn_coordinator 中工具处理的私有方法数量显著下降（以删除重复和合并职责为导向，而非同等体量平移）。
+
 ## 3.1 tools 领域
 
 目标文件：src/tools/tools_gateway.py
@@ -148,6 +181,7 @@ src/
 2. 对外只暴露 ToolsGateway
 3. 将 ToolExecutionError、ToolPermissionError、MCPTransportError 等内部异常统一翻译为 core_contracts.gateway_errors 中的通用异常
 4. 将 LocalTool、ToolStreamUpdate、MCPTool 等内部结构对外替换为 core_contracts.tools_contracts DTO
+5. 吸收并统一工具参数规范化与输出截断策略，移除调用方（尤其 turn_coordinator）中的重复参数解析代码
 
 当前高风险泄漏调用方：
 
@@ -393,7 +427,12 @@ src/
 - 目标改为仅导入：
   - from tools.tools_gateway import ToolsGateway
   - from workspace.workspace_gateway import WorkspaceGateway
+  - from session.session_gateway import SessionGateway
+  - from context.context_gateway import ContextGateway
   - from core_contracts.* import DTO/Errors
+- 额外硬要求：
+  - 不把 turn_coordinator 巨石方法整段搬移到 tools；
+  - 删除重复参数解析/渲染辅助函数，保持编排主干可读。
 
 2. src/agent/agent.py
 - 当前直接导入 tools.mcp/tools.registry + session/context/interaction/workspace 领域对象
@@ -429,9 +468,15 @@ src/
 - 新增 gateway_errors.py + tools/session/workspace/context/planning/openai/app/agent 合同文件
 - 先定义翻译契约，不改业务行为
 
-2. Step B：tools Gateway 歼灭
+2. Step B：tools Gateway 歼灭（含 turn_coordinator 第一轮瘦身）
 - tool_gateway.py 重构为 tools_gateway.py
 - 清空外部对 tools.executor/registry/mcp 的直接依赖
+- 在 turn_coordinator 中删除与 tools_gateway 重叠的解析/翻译逻辑
+
+2.1 Step B-Prime：turn_coordinator 去巨石专项（新增）
+- 不跨域搬家，只做职责切割与删除
+- 提炼 agent 领域内部协作者（如 delegate orchestration helper），但保持在 agent 目录内
+- 删除重复私有方法与兼容分支，确保编排器主路径可读
 
 3. Step C：session Gateway 歼灭
 - 建立 session_gateway.py
@@ -465,6 +510,11 @@ src/
 - 扫描规则：跨模块只允许 module.xxx_gateway 或 core_contracts
 - 测试与文档全量回归
 
+10.1 Step J-Plus：反“搬家式重构”审计（新增）
+- 检查是否出现“巨石平移”：
+  - 新文件体量与旧巨石等体量且职责未收敛，视为不通过
+- 检查每一步是否提供删除清单与净减少证明（函数数、分支数或重复逻辑点位）
+
 ---
 
 ## 7. 验收标准（本轮）
@@ -485,6 +535,11 @@ src/
 - 全量 unittest
 - release gate
 - 文档一致性测试
+
+5. 巨石净化通过
+- turn_coordinator 职责收敛为编排主干
+- 无“把巨石从 A 挪到 B”的等体量迁移
+- 每步有明确删除项与降复杂度证据
 
 ---
 
