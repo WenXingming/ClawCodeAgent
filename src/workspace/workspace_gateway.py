@@ -43,7 +43,7 @@ class WorkspaceGateway:
         merged_registry = self.plugin_catalog.merge_tool_registry(base_tool_registry)
         return self.policy_catalog.filter_tool_registry(merged_registry)
 
-    def apply_budget_config(self, budget_config: BudgetConfig) -> BudgetConfig:
+    def apply_budget_config(self, budget_config: BudgetConfig | None) -> BudgetConfig:
         """把工作区策略中的预算覆盖应用到基础预算配置。"""
         return self.policy_catalog.apply_budget_config(budget_config)
 

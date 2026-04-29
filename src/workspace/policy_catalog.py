@@ -213,7 +213,7 @@ class PolicyCatalog:
             if not self.is_tool_denied(name)
         }
 
-    def apply_budget_config(self, budget_config: BudgetConfig) -> BudgetConfig:
+    def apply_budget_config(self, budget_config: BudgetConfig | None) -> BudgetConfig:
         """把策略中的预算覆盖应用到基础预算配置。"""
         return _merge_budget_configs(budget_config, self.budget_overrides)
 
@@ -449,15 +449,23 @@ def _extend_unique(target: list[str], values: tuple[str, ...]) -> None:
             target.append(item)
 
 
-def _merge_budget_configs(base: BudgetConfig, override: BudgetConfig) -> BudgetConfig:
+def _merge_budget_configs(base: BudgetConfig | None, override: BudgetConfig | None) -> BudgetConfig:
     """把预算覆盖配置合并到基础预算配置中。
 
     Args:
-        base (BudgetConfig): 当前基础预算配置。
-        override (BudgetConfig): 需要覆盖到基础配置上的预算配置。
+        base (BudgetConfig | None): 当前基础预算配置。
+        override (BudgetConfig | None): 需要覆盖到基础配置上的预算配置。
     Returns:
         BudgetConfig: 合并后的预算配置对象。
     """
+    # 如果 base 为 None，使用默认的 BudgetConfig
+    if base is None:
+        base = BudgetConfig()
+
+    # 如果 override 为 None，直接返回 base
+    if override is None:
+        return base
+
     payload = base.to_dict()
     for key, value in override.to_dict().items():
         if value is not None:

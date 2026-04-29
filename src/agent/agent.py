@@ -35,9 +35,9 @@ class Agent:
     execution_policy: ExecutionPolicy
     context_policy: ContextPolicy
     permissions: ToolPermissionPolicy
-    budget_config: BudgetConfig
     session_paths: SessionPaths
     session_manager: SessionGateway
+    budget_config: BudgetConfig | None = None
     tool_gateway: ToolsGateway = field(default_factory=ToolsGateway)
     delegation_service: DelegationService = field(default_factory=DelegationService)
     current_agent_id: str | None = None
@@ -104,11 +104,6 @@ class Agent:
         return self._workspace_gateway
 
     @property
-    def mcp_runtime(self):
-        """暴露当前 agent 绑定的 MCP runtime 视图。"""
-        return self.tool_gateway.mcp_runtime
-
-    @property
     def tool_registry(self) -> dict[str, ToolDescriptor]:
         """暴露当前基础工具注册表。"""
         return self._turn_coordinator.tool_registry_view()
@@ -117,6 +112,11 @@ class Agent:
     def tool_registry(self, value: dict[str, ToolDescriptor]) -> None:
         """允许测试与控制面回写基础工具注册表。"""
         self._turn_coordinator.tool_registry = dict(value)
+
+    @property
+    def mcp_runtime(self):
+        """暴露当前 agent 绑定的 MCP runtime。"""
+        return self.tool_gateway._mcp_runtime
 
     def _register_workspace_runtime_tools(self, tool_registry: dict[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
         """代理到 TurnCoordinator 的动态工具注册逻辑。"""
@@ -183,9 +183,9 @@ class Agent:
             self.execution_policy,
             self.context_policy,
             self.permissions,
-            self.budget_config,
             self.session_paths,
             self.session_manager,
+            self.budget_config,
             tool_gateway=self.tool_gateway,
             delegation_service=self._turn_coordinator.delegation_service,
             current_agent_id=child_agent_id,

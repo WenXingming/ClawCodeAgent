@@ -405,12 +405,12 @@ class TurnCoordinator:
         limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 20
 
         try:
-            resources = self.tool_gateway.mcp_runtime.list_resources(query=query, server_name=server_name, limit=limit)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            resources = self.tool_gateway.mcp_list_resources(query=query, server_name=server_name, limit=limit)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.tool_gateway.mcp_runtime.render_resource_index(query=query, server_name=server_name, limit=limit),
+            self.tool_gateway.mcp_render_resource_index(query=query, server_name=server_name, limit=limit),
             context.max_output_chars,
         )
         return content, {'resource_count': len(resources), 'server_name': server_name or ''}
@@ -434,8 +434,8 @@ class TurnCoordinator:
         max_chars = self._resolve_tool_output_limit(arguments, context, key='max_chars')
 
         try:
-            content = self.tool_gateway.mcp_runtime.render_resource(uri, max_chars=max_chars)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            content = self.tool_gateway.mcp_render_resource(uri, max_chars=max_chars)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
         return content, {'uri': uri}
 
@@ -459,24 +459,25 @@ class TurnCoordinator:
         limit = self._optional_tool_int(arguments, 'limit', min_value=1, max_value=100) or 20
 
         try:
-            capabilities = self.tool_gateway.mcp_runtime.search_capabilities(query=query, server_name=server_name, limit=limit)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            capabilities = self.tool_gateway.mcp_search_capabilities(query=query, server_name=server_name, limit=limit)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.tool_gateway.mcp_runtime.render_capability_index(query=query, server_name=server_name, limit=limit),
+            self.tool_gateway.mcp_render_capability_index(query=query, server_name=server_name, limit=limit),
             context.max_output_chars,
         )
         materialized_handles = [
-            capability.handle
+            capability['handle']
             for capability in capabilities[:_MCP_MATERIALIZED_TOOL_LIMIT]
+            if isinstance(capability.get('handle'), str)
         ]
         return (
             content,
             {
                 'capability_count': len(capabilities),
                 'server_name': server_name or '',
-                'capabilities': [capability.to_dict() for capability in capabilities],
+                'capabilities': [dict(capability) for capability in capabilities],
                 'materialized_handles': materialized_handles,
             },
         )
@@ -531,12 +532,17 @@ class TurnCoordinator:
                 raise GatewayValidationError('tool_name or capability_handle must be a non-empty string')
             return tool_name, server_name, None
 
-        capability = self.tool_gateway.mcp_runtime.resolve_capability(capability_handle)
-        if tool_name is not None and tool_name != capability.tool_name:
+        capability = self.tool_gateway.mcp_resolve_capability(capability_handle)
+        resolved_tool_name = capability.get('tool_name')
+        resolved_server_name = capability.get('server_name')
+        resolved_handle = capability.get('handle')
+        if not isinstance(resolved_tool_name, str) or not isinstance(resolved_server_name, str) or not isinstance(resolved_handle, str):
+            raise GatewayValidationError('Resolved MCP capability payload is invalid')
+        if tool_name is not None and tool_name != resolved_tool_name:
             raise GatewayValidationError('tool_name does not match capability_handle')
-        if server_name is not None and server_name != capability.server_name:
+        if server_name is not None and server_name != resolved_server_name:
             raise GatewayValidationError('server_name does not match capability_handle')
-        return capability.tool_name, capability.server_name, capability.handle
+        return resolved_tool_name, resolved_server_name, resolved_handle
 
     def _execute_mcp_tool_call(
         self,
@@ -550,9 +556,9 @@ class TurnCoordinator:
     ) -> str | tuple[str, JSONDict]:
         """执行一次远端 MCP 工具调用并统一渲染结果。"""
         try:
-            remote_tool = self.tool_gateway.mcp_runtime.resolve_tool(tool_name, server_name=server_name)
+            remote_tool = self.tool_gateway.mcp_resolve_tool(tool_name, server_name=server_name)
             self._ensure_mcp_tool_allowed(remote_tool, context)
-            result = self.tool_gateway.mcp_runtime.call_tool(
+            result = self.tool_gateway.mcp_call_tool(
                 tool_name,
                 arguments=dict(raw_tool_arguments),
                 server_name=server_name,
@@ -560,17 +566,20 @@ class TurnCoordinator:
             )
         except GatewayPermissionError:
             raise
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
 
         content = self._truncate_tool_output(
-            self.tool_gateway.mcp_runtime.render_tool_result(result),
+            self.tool_gateway.mcp_render_tool_result(result),
             context.max_output_chars,
         )
+        metadata_server_name = result.get('server_name') if isinstance(result.get('server_name'), str) else ''
+        metadata_tool_name = result.get('tool_name') if isinstance(result.get('tool_name'), str) else tool_name
+        metadata_is_error = bool(result.get('is_error'))
         metadata = {
-            'server_name': result.server_name,
-            'tool_name': result.tool_name,
-            'is_error': result.is_error,
+            'server_name': metadata_server_name,
+            'tool_name': metadata_tool_name,
+            'is_error': metadata_is_error,
         }
         if capability_handle is not None:
             metadata['capability_handle'] = capability_handle
@@ -587,13 +596,18 @@ class TurnCoordinator:
             raise GatewayValidationError('materialized MCP tool arguments must be a JSON object')
 
         try:
-            capability = self.tool_gateway.mcp_runtime.resolve_capability(capability_handle)
-        except (GatewayError, ValueError, FileNotFoundError) as exc:
+            capability = self.tool_gateway.mcp_resolve_capability(capability_handle)
+        except GatewayError as exc:
             raise GatewayValidationError(str(exc)) from exc
+        resolved_tool_name = capability.get('tool_name')
+        resolved_server_name = capability.get('server_name')
+        resolved_handle = capability.get('handle')
+        if not isinstance(resolved_tool_name, str) or not isinstance(resolved_server_name, str) or not isinstance(resolved_handle, str):
+            raise GatewayValidationError('Resolved MCP capability payload is invalid')
         return self._execute_mcp_tool_call(
-            tool_name=capability.tool_name,
-            server_name=capability.server_name,
-            capability_handle=capability.handle,
+            tool_name=resolved_tool_name,
+            server_name=resolved_server_name,
+            capability_handle=resolved_handle,
             raw_tool_arguments=arguments,
             context=context,
             max_chars=context.max_output_chars,
@@ -625,20 +639,30 @@ class TurnCoordinator:
     def _build_materialized_mcp_tool(self, capability_handle: str) -> ToolDescriptor | None:
         """把单个 capability handle 物化为当前轮次可调用的临时工具。"""
         try:
-            capability = self.tool_gateway.mcp_runtime.resolve_capability(capability_handle)
-            remote_tool = self.tool_gateway.mcp_runtime.resolve_tool(
-                capability.tool_name,
-                server_name=capability.server_name,
+            capability = self.tool_gateway.mcp_resolve_capability(capability_handle)
+            tool_name = capability.get('tool_name')
+            server_name = capability.get('server_name')
+            handle = capability.get('handle')
+            description = capability.get('description')
+            if not isinstance(tool_name, str) or not isinstance(server_name, str) or not isinstance(handle, str):
+                return None
+            remote_tool = self.tool_gateway.mcp_resolve_tool(
+                tool_name,
+                server_name=server_name,
             )
-        except (GatewayError, ValueError, FileNotFoundError):
+        except GatewayError:
             return None
 
-        description = capability.description or f'Materialized MCP capability from server {capability.server_name}.'
+        if not isinstance(description, str) or not description:
+            description = f'Materialized MCP capability from server {server_name}.'
+        parameters = remote_tool.get('input_schema', {})
+        if not isinstance(parameters, dict):
+            parameters = {}
         return ToolDescriptor(
-            name=self._materialized_mcp_tool_name(capability.handle),
+            name=self._materialized_mcp_tool_name(handle),
             description=description,
-            parameters=dict(remote_tool.input_schema),
-            handler=partial(self._run_materialized_mcp_tool, capability.handle),
+            parameters=dict(parameters),
+            handler=partial(self._run_materialized_mcp_tool, handle),
         )
 
     @staticmethod
@@ -681,7 +705,13 @@ class TurnCoordinator:
     @staticmethod
     def _ensure_mcp_tool_allowed(remote_tool: Any, context) -> None:
         """检查远端工具是否越过当前会话权限边界。"""
-        if remote_tool.server_name == 'filesystem' and remote_tool.name in _FILESYSTEM_WRITE_TOOL_NAMES:
+        if not isinstance(remote_tool, dict):
+            raise GatewayValidationError('Resolved MCP tool payload is invalid')
+        server_name = remote_tool.get('server_name')
+        tool_name = remote_tool.get('name')
+        if not isinstance(server_name, str) or not isinstance(tool_name, str):
+            raise GatewayValidationError('Resolved MCP tool payload is invalid')
+        if server_name == 'filesystem' and tool_name in _FILESYSTEM_WRITE_TOOL_NAMES:
             if not context.permissions.allow_file_write:
                 raise GatewayPermissionError('File write permission denied: allow_file_write=false')
 

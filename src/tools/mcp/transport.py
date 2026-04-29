@@ -19,7 +19,7 @@ from .models import MCPServerProfile, MCPTransportError
 
 
 MCP_PROTOCOL_VERSION = '2025-11-25'  # str: 当前请求默认使用的 MCP 协议版本。
-_DEFAULT_TIMEOUT_SECONDS = 10.0  # float: 单次 MCP 请求的默认超时时间，单位秒。
+_DEFAULT_TIMEOUT_SECONDS = 30.0  # float: 单次 MCP 请求的默认超时时间，单位秒。
 
 
 @dataclass(frozen=True)

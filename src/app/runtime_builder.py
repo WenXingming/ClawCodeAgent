@@ -192,9 +192,9 @@ class RuntimeBuilder:
             launch_spec.execution_policy,
             launch_spec.context_policy,
             launch_spec.permissions,
-            launch_spec.budget_config,
             launch_spec.session_paths,
             session_manager,
+            launch_spec.budget_config,
         )
 
     def _normalize_optional_path(self, value: str | None) -> Path | None:

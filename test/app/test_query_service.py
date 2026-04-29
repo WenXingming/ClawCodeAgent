@@ -84,9 +84,9 @@ class QueryServiceTests(unittest.TestCase):
             contracts.execution_policy,
             contracts.context_policy,
             contracts.permissions,
-            contracts.budget_config,
             contracts.session_paths,
             SessionGateway(contracts.session_paths.session_directory),
+            contracts.budget_config,
         )
         return AppGateway.create_query_service(agent), fake_client
 

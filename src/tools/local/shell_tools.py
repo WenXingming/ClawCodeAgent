@@ -1,4 +1,8 @@
-"""本地 shell 工具集合。"""
+"""本地 shell 工具集合。
+
+提供 bash 工具，支持受权限和安全策略约束的 shell 命令执行，
+包含普通执行与流式输出两种模式。
+"""
 
 from __future__ import annotations
 
@@ -11,15 +15,20 @@ from dataclasses import dataclass
 from typing import Iterator
 
 from core_contracts.protocol import JSONDict, ToolExecutionResult
+from core_contracts.tools_contracts import ToolDescriptor
 from tools.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutionContext, ToolExecutionError, ToolPermissionError, ToolStreamUpdate
-from tools.registry import LocalTool
 
 
-def build_shell_tool(shell_security_policy: ShellSecurityPolicy) -> LocalTool:
-    """构建 bash 工具定义。"""
+def build_shell_tool(shell_security_policy: ShellSecurityPolicy) -> ToolDescriptor:
+    """构建 bash 工具定义。
+    Args:
+        shell_security_policy (ShellSecurityPolicy): 控制命令风险判断的安全策略。
+    Returns:
+        ToolDescriptor: 带有 handler 和 stream_handler 的 bash 工具描述符。
+    """
     handler = _ShellToolHandler(shell_security_policy)
-    return LocalTool(
+    return ToolDescriptor(
         name='bash',
         description='在当前工作区执行 shell 命令（受权限和安全策略约束）。',
         parameters={
@@ -38,10 +47,19 @@ def build_shell_tool(shell_security_policy: ShellSecurityPolicy) -> LocalTool:
 class _ShellToolHandler:
     """封装 bash 工具的普通与流式执行逻辑。"""
 
-    shell_security_policy: ShellSecurityPolicy
+    shell_security_policy: ShellSecurityPolicy  # ShellSecurityPolicy: 安全策略实例。
 
     def run(self, arguments: JSONDict, context: ToolExecutionContext) -> str | tuple[str, JSONDict]:
-        """执行 shell 命令并返回结构化文本结果。"""
+        """执行 shell 命令并返回结构化文本结果。
+        Args:
+            arguments (JSONDict): 包含 command 的工具参数。
+            context (ToolExecutionContext): 工具执行上下文。
+        Returns:
+            str | tuple[str, JSONDict]: 命令输出及执行元数据。
+        Raises:
+            ToolPermissionError: 当 shell 权限或安全策略拒绝命令时抛出。
+            ToolExecutionError: 当命令超时或执行失败时抛出。
+        """
         command = _require_string(arguments, 'command')
         self._ensure_shell_allowed(command, context)
 
@@ -66,7 +84,16 @@ class _ShellToolHandler:
         arguments: JSONDict,
         context: ToolExecutionContext,
     ) -> Iterator[ToolStreamUpdate]:
-        """执行 shell 命令并按 stdout/stderr 分块输出流式事件。"""
+        """执行 shell 命令并按 stdout/stderr 分块输出流式事件。
+        Args:
+            arguments (JSONDict): 包含 command 的工具参数。
+            context (ToolExecutionContext): 工具执行上下文。
+        Returns:
+            Iterator[ToolStreamUpdate]: stdout/stderr 分块与最终 result 事件的序列。
+        Raises:
+            ToolPermissionError: 当 shell 权限或安全策略拒绝命令时抛出。
+            ToolExecutionError: 当命令超时时抛出。
+        """
         command = _require_string(arguments, 'command')
         self._ensure_shell_allowed(command, context)
 
@@ -153,7 +180,15 @@ class _ShellToolHandler:
         )
 
     def _ensure_shell_allowed(self, command: str, context: ToolExecutionContext) -> None:
-        """检查 shell 权限和命令安全策略。"""
+        """检查 shell 权限和命令安全策略。
+        Args:
+            command (str): 待检查的命令文本。
+            context (ToolExecutionContext): 工具执行上下文。
+        Returns:
+            None: 权限检查通过时无返回值。
+        Raises:
+            ToolPermissionError: 当 shell 权限未开启或安全策略拒绝命令时抛出。
+        """
         allowed, reason = self.shell_security_policy.check_shell_security(
             command,
             allow_shell=context.permissions.allow_shell_commands,
@@ -165,7 +200,15 @@ class _ShellToolHandler:
 
 
 def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple[str, str, int]:
-    """执行 shell 命令并返回 stdout、stderr 与退出码。"""
+    """执行 shell 命令并返回 stdout、stderr 与退出码。
+    Args:
+        command (str): 待执行的命令文本。
+        context (ToolExecutionContext): 工具执行上下文。
+    Returns:
+        tuple[str, str, int]: (stdout, stderr, exit_code) 元组。
+    Raises:
+        ToolExecutionError: 当命令执行超时时抛出。
+    """
     process = _start_shell_process(command, context)
     try:
         stdout, stderr = process.communicate(timeout=context.command_timeout_seconds)
@@ -179,7 +222,13 @@ def _execute_shell_command(command: str, context: ToolExecutionContext) -> tuple
 
 
 def _start_shell_process(command: str, context: ToolExecutionContext) -> subprocess.Popen[str]:
-    """按统一参数启动一个 shell 子进程。"""
+    """按统一参数启动一个 shell 子进程。
+    Args:
+        command (str): 待执行的命令文本。
+        context (ToolExecutionContext): 工具执行上下文。
+    Returns:
+        subprocess.Popen[str]: 已启动的子进程对象。
+    """
     environment = dict(os.environ)
     environment.update(context.safe_env)
     return subprocess.Popen(
@@ -197,7 +246,12 @@ def _start_shell_process(command: str, context: ToolExecutionContext) -> subproc
 
 
 def _terminate_shell_process(process: subprocess.Popen[str]) -> None:
-    """终止子进程并尽量回收管道。"""
+    """终止子进程并尽量回收管道。
+    Args:
+        process (subprocess.Popen[str]): 待终止的子进程对象。
+    Returns:
+        None: 无返回值。
+    """
     process.kill()
     try:
         process.communicate(timeout=0.2)
@@ -210,7 +264,14 @@ def _drain_process_stream(
     stream_name: str,
     updates: queue.Queue[tuple[str, str]],
 ) -> None:
-    """把子进程 stdout 或 stderr 按行推入线程安全队列。"""
+    """把子进程 stdout 或 stderr 按行推入线程安全队列。
+    Args:
+        stream: 子进程的 stdout 或 stderr 流对象。
+        stream_name (str): 流标识，如 'stdout' 或 'stderr'。
+        updates (queue.Queue): 线程安全的更新队列。
+    Returns:
+        None: 读取完毕后通过队列推送 _closed 标记。
+    """
     if stream is None:
         updates.put((f'{stream_name}_closed', ''))
         return
@@ -226,7 +287,14 @@ def _drain_process_stream(
 
 
 def _render_shell_output(stdout: str, stderr: str, exit_code: int) -> str:
-    """把 shell 执行结果渲染成 transcript 友好的文本格式。"""
+    """把 shell 执行结果渲染成 transcript 友好的文本格式。
+    Args:
+        stdout (str): 标准输出文本。
+        stderr (str): 标准错误文本。
+        exit_code (int): 进程退出码。
+    Returns:
+        str: 包含 exit_code、stdout、stderr 标签的结构化文本。
+    """
     lines = [
         f'exit_code={exit_code}',
         '[stdout]',
@@ -238,7 +306,13 @@ def _render_shell_output(stdout: str, stderr: str, exit_code: int) -> str:
 
 
 def _truncate_output(text: str, limit: int) -> str:
-    """按上限裁剪输出，同时尽量保留头尾信息。"""
+    """按上限裁剪输出，同时尽量保留头尾信息。
+    Args:
+        text (str): 原始输出文本。
+        limit (int): 最大允许字符数。
+    Returns:
+        str: 裁剪后的文本，超限时在中间插入省略提示。
+    """
     if limit <= 0 or len(text) <= limit:
         return text
 
@@ -249,7 +323,15 @@ def _truncate_output(text: str, limit: int) -> str:
 
 
 def _require_string(arguments: JSONDict, key: str) -> str:
-    """读取必填字符串参数。"""
+    """读取必填字符串参数。
+    Args:
+        arguments (JSONDict): 工具参数字典。
+        key (str): 参数名。
+    Returns:
+        str: 参数值。
+    Raises:
+        ToolExecutionError: 当参数不存在或类型非字符串时抛出。
+    """
     value = arguments.get(key)
     if not isinstance(value, str):
         raise ToolExecutionError(f'Argument "{key}" must be a string')

@@ -49,9 +49,9 @@ class _FakeAgent:
         execution_policy,
         context_policy,
         permissions,
-        budget_config,
         session_paths,
-        session_store,
+        session_manager,
+        budget_config=None,
     ) -> None:
         _FakeAgent.last_client = client
         _FakeAgent.last_runtime = SimpleNamespace(
@@ -63,7 +63,7 @@ class _FakeAgent:
             session_paths=session_paths,
             max_turns=execution_policy.max_turns,
         )
-        _FakeAgent.last_session_store = session_store
+        _FakeAgent.last_session_store = session_manager
 
     def run(self, prompt: str) -> AgentRunResult:
         _FakeAgent.run_prompts.append(prompt)

@@ -1,4 +1,12 @@
-"""tools 领域统一网关。"""
+"""tools 领域统一网关。
+
+该文件是 tools 子系统对外唯一边界，负责：
+1) 组装本地工具注册表；
+2) 构建执行上下文并执行工具；
+3) 把 MCP 运行时内部对象翻译为原生字典契约，避免类型泄漏。
+
+外部仅允许通过本文件访问 tools 子系统，禁止直接引用 tools 下的其他模块。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Iterator, Mapping
 
 from core_contracts.gateway_errors import (
+    GatewayError,
     GatewayNotFoundError,
     GatewayPermissionError,
     GatewayRuntimeError,
@@ -18,37 +27,80 @@ from core_contracts.protocol import JSONDict, ToolExecutionResult
 from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
 from core_contracts.tools_contracts import ToolDescriptor, ToolExecutionContext, ToolStreamUpdate
 from tools.bash_security import ShellSecurityPolicy
-from tools.executor import ToolExecutionContext as _InternalToolExecutionContext
-from tools.executor import ToolExecutionError, ToolExecutor, ToolPermissionError
+from tools.executor import ToolExecutor
 from tools.local.filesystem_tools import build_filesystem_tools
 from tools.local.shell_tools import build_shell_tool
-from tools.mcp import MCPRuntime, MCPTool, MCPTransportError
+from tools.mcp import MCPRuntime, MCPTransportError
 from tools.registry import build_registry, render_openai_tools
 
 
 @dataclass
 class ToolsGateway:
-    """tools 领域唯一对外入口。"""
+    """tools 领域唯一对外入口。
 
-    shell_security_policy: ShellSecurityPolicy = field(default_factory=ShellSecurityPolicy)
-    _executor: ToolExecutor = field(default_factory=ToolExecutor)
-    _mcp_runtime: MCPRuntime | None = field(default=None, init=False, repr=False)
-    _workspace: Path | None = field(default=None, init=False, repr=False)
+    该网关屏蔽 tools 子包内部实现细节，并把所有跨域返回值收敛为
+    原生类型或 core_contracts 契约对象。网关不接收任何 domain object
+    作为构造参数——所有内部依赖在实例化时自举。
+    """
+
+    _shell_security_policy: ShellSecurityPolicy = field(
+        default_factory=ShellSecurityPolicy, init=False, repr=False
+    )  # ShellSecurityPolicy: 内部 shell 安全策略，不对外暴露。
+    _executor: ToolExecutor = field(
+        default_factory=ToolExecutor, init=False, repr=False
+    )  # ToolExecutor: 内部工具执行器，封装调用与错误包装。
+    _mcp_runtime: MCPRuntime | None = field(
+        default=None, init=False, repr=False
+    )  # MCPRuntime | None: 绑定工作区后初始化的 MCP 运行时。
+    _workspace: Path | None = field(
+        default=None, init=False, repr=False
+    )  # Path | None: 当前绑定的工作区根目录。
+
+    # ── 工作区绑定 ────────────────────────────────────────────────
 
     def bind_workspace(self, workspace: Path) -> None:
-        """绑定工作区并初始化 MCP 运行时。"""
+        """绑定工作区并初始化 MCP 运行时。
+        Args:
+            workspace (Path): 当前会话绑定的工作区根目录。
+        Returns:
+            None: 仅更新网关内部运行时状态。
+        Raises:
+            ValueError: 当传入路径不可解析时由下层抛出。
+        """
         resolved = workspace.resolve()
         if self._workspace == resolved and self._mcp_runtime is not None:
             return
         self._workspace = resolved
         self._mcp_runtime = MCPRuntime.from_workspace(resolved)
 
+    # ── 工具注册表 ─────────────────────────────────────────────────
+
     def default_registry(self) -> dict[str, ToolDescriptor]:
-        """返回内置基础工具注册表。"""
+        """返回内置基础工具注册表。
+        Args:
+            None: 该方法不接收参数。
+        Returns:
+            dict[str, ToolDescriptor]: 内置工具定义映射。
+        Raises:
+            RuntimeError: 当工具构建过程中出现不可恢复错误时抛出。
+        """
         return build_registry(
             *build_filesystem_tools(),
-            build_shell_tool(self.shell_security_policy),
+            build_shell_tool(self._shell_security_policy),
         )
+
+    def to_openai_tools(self, tool_registry: Mapping[str, ToolDescriptor]) -> list[JSONDict]:
+        """把工具注册表投影为模型可见 schema 列表。
+        Args:
+            tool_registry (Mapping[str, ToolDescriptor]): 当前可见工具注册表。
+        Returns:
+            list[JSONDict]: OpenAI 兼容工具声明列表。
+        Raises:
+            ValueError: 当某个工具 schema 不合法时由下层抛出。
+        """
+        return render_openai_tools(tool_registry)
+
+    # ── 执行上下文 ────────────────────────────────────────────────
 
     def build_context(
         self,
@@ -59,24 +111,27 @@ class ToolsGateway:
         tool_registry: Mapping[str, ToolDescriptor] | None = None,
         safe_env: dict[str, str] | None = None,
     ) -> ToolExecutionContext:
-        """根据运行时配置构造工具执行上下文。"""
-        context = self._executor.build_context(
+        """根据运行时配置构造工具执行上下文。
+        Args:
+            workspace_scope (WorkspaceScope): 工作区路径与运行目录约束。
+            execution_policy (ExecutionPolicy): 执行超时与输出预算配置。
+            permissions (ToolPermissionPolicy): 工具权限策略。
+            tool_registry (Mapping[str, ToolDescriptor] | None): 可选工具注册表。
+            safe_env (dict[str, str] | None): 可选安全环境变量覆盖。
+        Returns:
+            ToolExecutionContext: 供工具执行器消费的上下文对象。
+        Raises:
+            ValueError: 当上下文参数非法时由下层抛出。
+        """
+        return self._executor.build_context(
             workspace_scope,
             execution_policy,
             permissions,
             tool_registry=tool_registry,
             safe_env=safe_env,
         )
-        if not isinstance(context, _InternalToolExecutionContext):
-            return context
-        return ToolExecutionContext(
-            root=context.root,
-            command_timeout_seconds=context.command_timeout_seconds,
-            max_output_chars=context.max_output_chars,
-            permissions=context.permissions,
-            safe_env=dict(context.safe_env),
-            tool_registry=context.tool_registry,
-        )
+
+    # ── 普通执行 ──────────────────────────────────────────────────
 
     def execute(
         self,
@@ -85,8 +140,20 @@ class ToolsGateway:
         arguments: JSONDict,
         context: ToolExecutionContext,
     ) -> ToolExecutionResult:
-        """执行一次工具调用。"""
+        """执行一次工具调用。
+        Args:
+            tool_registry (Mapping[str, ToolDescriptor]): 当前可见工具注册表。
+            name (str): 目标工具名。
+            arguments (JSONDict): 工具参数对象。
+            context (ToolExecutionContext): 工具执行上下文。
+        Returns:
+            ToolExecutionResult: 标准化的执行结果。
+        Raises:
+            RuntimeError: 当执行器出现未捕获错误时抛出。
+        """
         return self._executor.execute(tool_registry, name, arguments, context)
+
+    # ── 流式执行 ──────────────────────────────────────────────────
 
     def execute_streaming(
         self,
@@ -95,7 +162,17 @@ class ToolsGateway:
         arguments: JSONDict,
         context: ToolExecutionContext,
     ) -> Iterator[ToolStreamUpdate]:
-        """执行一次流式工具调用。"""
+        """执行一次流式工具调用。
+        Args:
+            tool_registry (Mapping[str, ToolDescriptor]): 当前可见工具注册表。
+            name (str): 目标工具名。
+            arguments (JSONDict): 工具参数对象。
+            context (ToolExecutionContext): 工具执行上下文。
+        Returns:
+            Iterator[ToolStreamUpdate]: 逐步产出的流式更新序列。
+        Raises:
+            RuntimeError: 当流式执行器出现未捕获错误时抛出。
+        """
         return self._executor.execute_streaming(tool_registry, name, arguments, context)
 
     def execute_call(
@@ -107,7 +184,18 @@ class ToolsGateway:
         *,
         on_stream_update: Callable[[ToolStreamUpdate], None] | None = None,
     ) -> ToolExecutionResult:
-        """执行一次工具调用，并在流式片段出现时回调上报。"""
+        """执行一次工具调用，并在流式片段出现时回调上报。
+        Args:
+            tool_registry (Mapping[str, ToolDescriptor]): 当前可见工具注册表。
+            name (str): 目标工具名。
+            arguments (JSONDict): 工具参数对象。
+            context (ToolExecutionContext): 工具执行上下文。
+            on_stream_update (Callable[[ToolStreamUpdate], None] | None): 可选流式片段回调。
+        Returns:
+            ToolExecutionResult: 最终工具结果。
+        Raises:
+            RuntimeError: 当执行过程出现未捕获错误时抛出。
+        """
         final_result: ToolExecutionResult | None = None
         for update in self.execute_streaming(tool_registry, name, arguments, context):
             if update.kind == 'result':
@@ -125,47 +213,100 @@ class ToolsGateway:
             metadata={'error_kind': 'tool_execution_error'},
         )
 
-    def to_openai_tools(self, tool_registry: Mapping[str, ToolDescriptor]) -> list[JSONDict]:
-        """把工具注册表投影为模型可见 schema 列表。"""
-        return render_openai_tools(tool_registry)
+    # ── MCP 运行时查询 ─────────────────────────────────────────────
 
-    @property
-    def mcp_runtime(self) -> MCPRuntime:
-        """返回已绑定工作区的 MCP runtime。"""
+    def has_mcp_servers(self) -> bool:
+        """当前工作区是否存在可用 MCP 服务器。
+        Args:
+            None: 该方法不接收参数。
+        Returns:
+            bool: 若存在至少一个 MCP server 则为 True。
+        Raises:
+            GatewayRuntimeError: 当网关尚未绑定工作区时抛出。
+        """
+        return bool(self._require_mcp_runtime().servers)
+
+    def _require_mcp_runtime(self) -> MCPRuntime:
+        """获取已初始化的 MCP runtime。
+        Args:
+            None: 该方法不接收参数。
+        Returns:
+            MCPRuntime: 当前绑定工作区对应的 MCP runtime。
+        Raises:
+            GatewayRuntimeError: 当网关尚未绑定工作区时抛出。
+        """
         if self._mcp_runtime is None:
             raise GatewayRuntimeError('ToolsGateway is not bound to a workspace yet')
         return self._mcp_runtime
 
-    def has_mcp_servers(self) -> bool:
-        """当前工作区是否存在可用 MCP 服务器。"""
-        return bool(self.mcp_runtime.servers)
-
     def has_mcp_resources(self) -> bool:
-        """当前工作区是否存在可见 MCP 资源。"""
-        return bool(self.mcp_runtime.resources)
+        """当前工作区是否存在可见 MCP 资源。
+        Args:
+            None: 该方法不接收参数。
+        Returns:
+            bool: 若存在至少一个 MCP 资源则为 True。
+        Raises:
+            GatewayRuntimeError: 当网关尚未绑定工作区时抛出。
+        """
+        return bool(self._require_mcp_runtime().resources)
 
-    def mcp_list_resources(self, *, query: str | None, server_name: str | None, limit: int) -> tuple[object, ...]:
-        """列出 MCP 资源并统一异常面。"""
+    # ── MCP 资源操作 ───────────────────────────────────────────────
+
+    def mcp_list_resources(self, *, query: str | None, server_name: str | None, limit: int) -> tuple[JSONDict, ...]:
+        """列出 MCP 资源并统一异常面。
+        Args:
+            query (str | None): 可选资源查询词。
+            server_name (str | None): 可选 server 过滤条件。
+            limit (int): 最大返回条目数。
+        Returns:
+            tuple[JSONDict, ...]: 资源契约字典序列。
+        Raises:
+            GatewayValidationError: 当输入参数不合法时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
+        if self._mcp_runtime is None:
+            raise GatewayRuntimeError('ToolsGateway is not bound to a workspace yet')
         try:
-            return self.mcp_runtime.list_resources(query=query, server_name=server_name, limit=limit)
+            resources = self._mcp_runtime.list_resources(query=query, server_name=server_name, limit=limit)
+            return tuple(resource.to_dict() for resource in resources)
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except MCPTransportError as exc:
             raise GatewayTransportError(str(exc)) from exc
 
     def mcp_render_resource_index(self, *, query: str | None, server_name: str | None, limit: int) -> str:
-        """渲染 MCP 资源索引并统一异常面。"""
+        """渲染 MCP 资源索引并统一异常面。
+        Args:
+            query (str | None): 可选资源查询词。
+            server_name (str | None): 可选 server 过滤条件。
+            limit (int): 最大渲染条目数。
+        Returns:
+            str: 面向模型消费的索引文本。
+        Raises:
+            GatewayValidationError: 当输入参数不合法时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
         try:
-            return self.mcp_runtime.render_resource_index(query=query, server_name=server_name, limit=limit)
+            return self._require_mcp_runtime().render_resource_index(query=query, server_name=server_name, limit=limit)
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except MCPTransportError as exc:
             raise GatewayTransportError(str(exc)) from exc
 
     def mcp_render_resource(self, uri: str, *, max_chars: int) -> str:
-        """读取并渲染 MCP 资源。"""
+        """读取并渲染 MCP 资源。
+        Args:
+            uri (str): 资源 URI。
+            max_chars (int): 返回文本上限。
+        Returns:
+            str: 资源渲染后的文本内容。
+        Raises:
+            GatewayValidationError: 当参数不合法时抛出。
+            GatewayNotFoundError: 当目标资源不存在时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
         try:
-            return self.mcp_runtime.render_resource(uri, max_chars=max_chars)
+            return self._require_mcp_runtime().render_resource(uri, max_chars=max_chars)
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except FileNotFoundError as exc:
@@ -173,28 +314,65 @@ class ToolsGateway:
         except MCPTransportError as exc:
             raise GatewayTransportError(str(exc)) from exc
 
-    def mcp_search_capabilities(self, *, query: str | None, server_name: str | None, limit: int) -> tuple[object, ...]:
-        """搜索 MCP 能力目录。"""
+    # ── MCP 能力目录 ───────────────────────────────────────────────
+
+    def mcp_search_capabilities(self, *, query: str | None, server_name: str | None, limit: int) -> tuple[JSONDict, ...]:
+        """搜索 MCP 能力目录。
+        Args:
+            query (str | None): 可选能力查询词。
+            server_name (str | None): 可选 server 过滤条件。
+            limit (int): 最大返回条目数。
+        Returns:
+            tuple[JSONDict, ...]: 能力契约字典序列。
+        Raises:
+            GatewayValidationError: 当输入参数不合法时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
         try:
-            return self.mcp_runtime.search_capabilities(query=query, server_name=server_name, limit=limit)
+            capabilities = self._require_mcp_runtime().search_capabilities(
+                query=query,
+                server_name=server_name,
+                limit=limit,
+            )
+            return tuple(capability.to_dict() for capability in capabilities)
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except MCPTransportError as exc:
             raise GatewayTransportError(str(exc)) from exc
 
     def mcp_render_capability_index(self, *, query: str | None, server_name: str | None, limit: int) -> str:
-        """渲染 MCP 能力目录文本。"""
+        """渲染 MCP 能力目录文本。
+        Args:
+            query (str | None): 可选能力查询词。
+            server_name (str | None): 可选 server 过滤条件。
+            limit (int): 最大渲染条目数。
+        Returns:
+            str: 面向模型消费的能力目录文本。
+        Raises:
+            GatewayValidationError: 当输入参数不合法时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
         try:
-            return self.mcp_runtime.render_capability_index(query=query, server_name=server_name, limit=limit)
+            return self._require_mcp_runtime().render_capability_index(query=query, server_name=server_name, limit=limit)
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except MCPTransportError as exc:
             raise GatewayTransportError(str(exc)) from exc
 
-    def mcp_resolve_capability(self, capability_handle: str):
-        """解析能力句柄。"""
+    def mcp_resolve_capability(self, capability_handle: str) -> JSONDict:
+        """解析能力句柄。
+        Args:
+            capability_handle (str): 目标能力句柄。
+        Returns:
+            JSONDict: 能力契约字典。
+        Raises:
+            GatewayValidationError: 当句柄非法时抛出。
+            GatewayNotFoundError: 当能力不存在时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
         try:
-            return self.mcp_runtime.resolve_capability(capability_handle)
+            capability = self._require_mcp_runtime().resolve_capability(capability_handle)
+            return capability.to_dict()
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except FileNotFoundError as exc:
@@ -202,10 +380,23 @@ class ToolsGateway:
         except MCPTransportError as exc:
             raise GatewayTransportError(str(exc)) from exc
 
-    def mcp_resolve_tool(self, tool_name: str, *, server_name: str | None = None) -> MCPTool:
-        """定位 MCP 远端工具。"""
+    # ── MCP 远端工具 ───────────────────────────────────────────────
+
+    def mcp_resolve_tool(self, tool_name: str, *, server_name: str | None = None) -> JSONDict:
+        """定位 MCP 远端工具。
+        Args:
+            tool_name (str): 工具名称。
+            server_name (str | None): 可选 server 名称。
+        Returns:
+            JSONDict: 工具契约字典。
+        Raises:
+            GatewayValidationError: 当输入参数不合法时抛出。
+            GatewayNotFoundError: 当工具不存在时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
         try:
-            return self.mcp_runtime.resolve_tool(tool_name, server_name=server_name)
+            tool = self._require_mcp_runtime().resolve_tool(tool_name, server_name=server_name)
+            return tool.to_dict()
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except FileNotFoundError as exc:
@@ -220,15 +411,28 @@ class ToolsGateway:
         arguments: JSONDict,
         server_name: str | None,
         max_chars: int,
-    ):
-        """调用 MCP 远端工具。"""
+    ) -> JSONDict:
+        """调用 MCP 远端工具。
+        Args:
+            tool_name (str): 目标工具名称。
+            arguments (JSONDict): 工具参数对象。
+            server_name (str | None): 可选 server 名称。
+            max_chars (int): 返回文本上限。
+        Returns:
+            JSONDict: 工具调用结果契约字典。
+        Raises:
+            GatewayValidationError: 当输入参数不合法时抛出。
+            GatewayNotFoundError: 当工具不存在时抛出。
+            GatewayTransportError: 当 MCP 传输请求失败时抛出。
+        """
         try:
-            return self.mcp_runtime.call_tool(
+            result = self._require_mcp_runtime().call_tool(
                 tool_name,
                 arguments=arguments,
                 server_name=server_name,
                 max_chars=max_chars,
             )
+            return result.to_dict()
         except ValueError as exc:
             raise GatewayValidationError(str(exc)) from exc
         except FileNotFoundError as exc:
@@ -236,20 +440,50 @@ class ToolsGateway:
         except MCPTransportError as exc:
             raise GatewayTransportError(str(exc)) from exc
 
-    def mcp_render_tool_result(self, result) -> str:
-        """渲染 MCP 工具结果文本。"""
-        return self.mcp_runtime.render_tool_result(result)
+    def mcp_render_tool_result(self, result: JSONDict) -> str:
+        """渲染 MCP 工具结果文本。
+        Args:
+            result (JSONDict): `mcp_call_tool` 返回的结果契约。
+        Returns:
+            str: 面向模型消费的工具结果文本。
+        Raises:
+            GatewayValidationError: 当结果结构不合法时抛出。
+        """
+        tool_name = result.get('tool_name')
+        server_name = result.get('server_name')
+        is_error = result.get('is_error')
+        content = result.get('content')
+        if not isinstance(tool_name, str) or not isinstance(server_name, str):
+            raise GatewayValidationError('Invalid MCP tool result payload: missing tool_name/server_name')
+        if not isinstance(is_error, bool) or not isinstance(content, str):
+            raise GatewayValidationError('Invalid MCP tool result payload: missing is_error/content')
+        return '\n'.join(
+            [
+                '# MCP Tool Result',
+                '',
+                f'- Tool: {tool_name}',
+                f'- Server: {server_name}',
+                f'- is_error: {is_error}',
+                '',
+                content,
+            ]
+        )
+
+    # ── 错误标准化 ─────────────────────────────────────────────────
 
     @staticmethod
     def normalize_tool_failure(exc: BaseException) -> ToolExecutionResult:
-        """把网关异常标准化为工具执行结果。"""
+        """把网关异常标准化为工具执行结果。
+        Args:
+            exc (BaseException): 需要转换的异常对象。
+        Returns:
+            ToolExecutionResult: 统一格式的失败结果。
+        Raises:
+            None: 该方法始终返回结果对象。
+        """
         if isinstance(exc, GatewayPermissionError):
             error_kind = 'permission_denied'
-        elif isinstance(exc, (GatewayValidationError, GatewayNotFoundError, GatewayTransportError)):
-            error_kind = 'tool_execution_error'
-        elif isinstance(exc, GatewayRuntimeError):
-            error_kind = 'tool_execution_error'
-        elif isinstance(exc, (ToolPermissionError, ToolExecutionError)):
+        elif isinstance(exc, (GatewayValidationError, GatewayNotFoundError, GatewayTransportError, GatewayRuntimeError)):
             error_kind = 'tool_execution_error'
         else:
             error_kind = 'tool_execution_error'

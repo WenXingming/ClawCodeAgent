@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.registry import LocalTool
+from core_contracts.tools_contracts import ToolDescriptor
 from tools.tools_gateway import ToolsGateway
 from workspace import PolicyCatalog
 
@@ -80,7 +80,7 @@ class PolicyCatalogTests(unittest.TestCase):
 
     def test_filter_tool_registry_applies_deny_tools_and_prefixes(self) -> None:
         registry = self.tool_gateway.default_registry()
-        registry['workspace_banner'] = LocalTool(
+        registry['workspace_banner'] = ToolDescriptor(
             name='workspace_banner',
             description='plugin virtual tool',
             parameters={'type': 'object', 'properties': {}},
