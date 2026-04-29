@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agent.run_limits import RunLimits
 from agent.run_state import AgentRunState
-from budget.budget_guard import BudgetGuard
 from context.budget_projection import BudgetProjection, BudgetProjector
 from context.compactor import CompactionResult, Compactor
 from context.snipper import Snipper
@@ -80,7 +80,7 @@ class ContextManager:
         run_state: AgentRunState,
         budget_config: BudgetConfig,
         context_policy: ContextPolicy,
-        guard: BudgetGuard,
+        guard: RunLimits,
         openai_tools: list[JSONDict],
     ) -> PreModelContextOutcome:
         """执行模型调用前的上下文治理编排并返回统一结果。"""
@@ -185,7 +185,7 @@ class ContextManager:
         budget_config: BudgetConfig,
         context_policy: ContextPolicy,
         openai_tools: list[JSONDict],
-        guard: BudgetGuard,
+        guard: RunLimits,
     ) -> ReactiveCompactOutcome:
         """执行模型调用，并在需要时做 reactive compact 重试。"""
         events: list[JSONDict] = []

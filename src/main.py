@@ -5,16 +5,16 @@
 
 from __future__ import annotations
 
+from agent import Agent
 from interaction.command_line_interaction import CLI
 from openai_client.openai_client import OpenAIClient
-from orchestration.local_agent import LocalAgent
 from session.session_store import AgentSessionStore
 
 
 def main(argv: list[str] | None = None) -> int:
     """执行主 CLI 入口并返回进程退出码。
 
-    该函数根据传入的命令行参数创建 `CLI` 实例，并注入 `OpenAIClient`、`LocalAgent` 和 `AgentSessionStore` 作为默认依赖。测试可通过 patch 这些注入点来替换实际实现。
+    该函数根据传入的命令行参数创建 `CLI` 实例，并注入 `OpenAIClient`、`Agent` 和 `AgentSessionStore` 作为默认依赖。测试可通过 patch 这些注入点来替换实际实现。
 
     Args:
         argv (list[str] | None): 命令行参数列表；为 None 时由 CLI 自行回退到默认参数来源。
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     cli = CLI(
         openai_client_cls=OpenAIClient,
-        agent_cls=LocalAgent,
+        agent_cls=Agent,
         session_store_cls=AgentSessionStore,
     )
     return cli.main(argv)

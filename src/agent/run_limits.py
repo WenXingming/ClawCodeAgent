@@ -1,4 +1,4 @@
-"""集中管理主循环预算闸门的预算检查逻辑。
+"""集中管理 agent 主循环预算闸门的预算检查逻辑。
 
 本模块负责把会话运行过程中的多维预算判断收敛到单一入口，供主循环在模型调用前和工具调用后统一执行预算检查。其职责仅限于判定是否命中预算限制，并返回上层可识别的限制标识，不直接执行中断或恢复动作。
 """
@@ -14,8 +14,8 @@ from core_contracts.token_usage import TokenUsage
 
 
 @dataclass
-class BudgetGuard:
-    """集中管理 `_execute_loop` 的预算闸门。
+class RunLimits:
+    """集中管理 agent turn loop 的预算闸门。
 
     典型工作流如下：
     1. 主循环在发起模型调用前调用 `check_pre_model()`。

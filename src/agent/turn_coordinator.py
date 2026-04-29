@@ -1,29 +1,23 @@
-"""实现本地代理的 run/resume 主循环与工具编排。
-
-本模块负责串起模型调用、工具执行、上下文治理、slash 控制面、插件与策略运行时，以及会话快照持久化，形成当前仓库中的本地代理主入口。`LocalAgent` 是 orchestration 层真正把各子模块拼装在一起的核心对象。
-"""
+"""负责单次 agent run/resume 的 turn loop 编排。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Callable, Iterable
-from uuid import uuid4
 
+from agent.delegation_service import DelegatedTaskSpec, DelegationService
+from agent.prompt_processor import PromptProcessor
+from agent.result_factory import ResultFactory
+from agent.run_limits import RunLimits
 from agent.run_state import AgentRunState
 from context import ContextManager
-from budget.budget_guard import BudgetGuard
-from interaction.slash_commands import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
-from orchestration.agent_manager import AgentManager, DelegatedTaskSpec
 from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.run_result import AgentRunResult
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.token_usage import TokenUsage
 from openai_client.openai_client import OpenAIClient
-from session.session_snapshot import AgentSessionSnapshot
-from session.session_state import AgentSessionState
 from session.session_store import AgentSessionStore
 from tools.executor import ToolExecutionError, ToolPermissionError, ToolStreamUpdate
 from tools.registry import LocalTool
@@ -37,14 +31,8 @@ _MCP_MATERIALIZED_TOOL_LIMIT = 3
 
 
 @dataclass
-class LocalAgent:
-    """最小可用的本地编码代理。
-
-    典型工作流如下：
-    1. `run()` 为新会话建立初始状态并进入主循环。
-    2. `resume()` 从持久化会话恢复状态后继续执行。
-    3. `_execute_loop()` 在预算、上下文治理、模型调用和工具执行之间反复推进，直到命中停止条件。
-    """
+class TurnCoordinator:
+    """负责单次 agent 调用的主循环推进。"""
 
     client: OpenAIClient  # 模型客户端。
     workspace_scope: WorkspaceScope  # 工作区范围配置。
@@ -54,68 +42,30 @@ class LocalAgent:
     budget_config: BudgetConfig  # 预算配置。
     session_paths: SessionPaths  # 会话路径配置。
     session_store: AgentSessionStore  # 会话持久化依赖。
+    workspace_gateway: WorkspaceGateway  # 工作区领域门面。
+    mcp_runtime: MCPRuntime  # MCP 运行时。
+    context_manager: ContextManager  # 上下文治理门面。
     tool_gateway: ToolGateway = field(default_factory=ToolGateway)
-    agent_manager: AgentManager = field(default_factory=AgentManager)  # AgentManager: 当前 run/resume 树共享的子代理编排器。
-    current_agent_id: str | None = None  # str | None: 当前 LocalAgent 对应的受管代理标识；根调用与 child 调用均会设置。
+    delegation_service: DelegationService = field(default_factory=DelegationService)  # DelegationService: 当前 run/resume 树共享的子代理编排器。
+    current_agent_id: str | None = None  # str | None: 当前 agent 对应的受管代理标识；根调用与 child 调用均会设置。
     progress_reporter: Callable[[JSONDict], None] | None = None  # Callable[[JSONDict], None] | None: 可选的实时进度上报回调。
+    prompt_processor: PromptProcessor | None = None
+    result_factory: ResultFactory | None = None
+    child_agent_factory: Callable[[str], Any] | None = None
     tool_registry: dict[str, LocalTool] = field(init=False)  # 可用工具集合。
-    context_manager: ContextManager = field(init=False)
-    workspace_gateway: WorkspaceGateway = field(init=False)
-    mcp_runtime: MCPRuntime = field(init=False)
-    slash_dispatcher: SlashCommandDispatcher = field(init=False)
 
-    def run(self, prompt: str) -> AgentRunResult:
-        """执行一轮端到端任务（新会话）。
-
-        Args:
-            prompt (str): 用户输入的本轮任务提示词。
-
-        Returns:
-            AgentRunResult: 本轮运行结果（含输出、事件、用量与会话信息）。
-        """
-        run_state = AgentRunState.for_new_session(
-            session_state=AgentSessionState(),
-            session_id=uuid4().hex,
-        )
+    def run(
+        self,
+        *,
+        prompt: str,
+        run_state: AgentRunState,
+        resumed_from_session_id: str | None,
+    ) -> AgentRunResult:
+        """在既有运行态上执行一次完整的 agent 调用。"""
         return self._run_managed_invocation(
             prompt=prompt,
             run_state=run_state,
-            resumed_from_session_id=None,
-        )
-
-    def resume(self, prompt: str, session_snapshot: AgentSessionSnapshot) -> AgentRunResult:
-        """从已保存的会话恢复并继续执行新 prompt。
-
-        严格继承 session_snapshot 的 model/runtime 配置；
-        usage、turns、tool_calls 从历史基线累计；
-        cost = 历史成本 + 本次 delta 成本；
-        session_id 保持不变。
-
-        Args:
-            prompt (str): 本次续跑输入。
-            session_snapshot (AgentSessionSnapshot): 已持久化的会话快照。
-
-        Returns:
-            AgentRunResult: 续跑后的完整运行结果。
-        """
-        session_state = AgentSessionState.from_persisted(
-            messages=list(session_snapshot.messages),
-            transcript=list(session_snapshot.transcript),
-        )
-        run_state = AgentRunState.for_resumed_session(
-            session_state=session_state,
-            session_id=session_snapshot.session_id,
-            turns_offset=session_snapshot.turns,
-            usage_baseline=session_snapshot.usage,
-            cost_baseline=session_snapshot.total_cost_usd,
-            tool_call_count=session_snapshot.tool_calls,
-            mcp_capability_shortlist=list(session_snapshot.mcp_capability_shortlist),
-            materialized_mcp_capability_handles=list(session_snapshot.materialized_mcp_capability_handles),
-        )
-        return self._run_managed_invocation(
-            prompt=prompt,
-            run_state=run_state,
-            resumed_from_session_id=session_snapshot.session_id,
+            resumed_from_session_id=resumed_from_session_id,
         )
 
     def _run_managed_invocation(
@@ -127,7 +77,7 @@ class LocalAgent:
     ) -> AgentRunResult:
         """在受管代理上下文中执行一次 run 或 resume。
 
-        根调用会在进入前重置 `AgentManager`，并为当前 run 建立 root record；
+        根调用会在进入前重置 `DelegationService`，并为当前 run 建立 root record；
         child 调用则复用父级传入的 manager 与 current_agent_id。
 
         Args:
@@ -141,8 +91,8 @@ class LocalAgent:
         """
         is_root_invocation = self.current_agent_id is None
         if is_root_invocation:
-            self.agent_manager = AgentManager()
-            self.current_agent_id = self.agent_manager.start_agent(
+            self.delegation_service = DelegationService()
+            self.current_agent_id = self.delegation_service.start_agent(
                 prompt=prompt,
                 label='root',
                 resumed_from_session_id=resumed_from_session_id,
@@ -162,7 +112,7 @@ class LocalAgent:
                 )
         except Exception:
             if managed_agent_id is not None:
-                self.agent_manager.finish_agent(
+                self.delegation_service.finish_agent(
                     managed_agent_id,
                     session_id=None,
                     session_path=None,
@@ -175,7 +125,7 @@ class LocalAgent:
             raise
 
         if managed_agent_id is not None:
-            self.agent_manager.finish_agent(
+            self.delegation_service.finish_agent(
                 managed_agent_id,
                 session_id=result.session_id,
                 session_path=result.session_path,
@@ -196,13 +146,30 @@ class LocalAgent:
             None: 该方法原地补全实例的运行时依赖。
         """
         self.tool_registry = self.tool_gateway.default_registry()
-        self.workspace_gateway = WorkspaceGateway.from_workspace(self.workspace_scope.cwd)
-        self.mcp_runtime = MCPRuntime.from_workspace(self.workspace_scope.cwd)
         self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
         self.tool_registry = self.workspace_gateway.prepare_tool_registry(self.tool_registry)
-        self.budget_config = self.workspace_gateway.apply_budget_config(self.budget_config)
-        self.context_manager = ContextManager(client=self.client)
-        self.slash_dispatcher = SlashCommandDispatcher(self.context_manager)
+
+    def tool_registry_view(self) -> dict[str, LocalTool]:
+        """返回当前基础工具注册表的浅拷贝。"""
+        return dict(self.tool_registry)
+
+    def _require_prompt_processor(self) -> PromptProcessor:
+        """返回当前绑定的 prompt processor。"""
+        if self.prompt_processor is None:
+            raise RuntimeError('TurnCoordinator requires a PromptProcessor')
+        return self.prompt_processor
+
+    def _require_result_factory(self) -> ResultFactory:
+        """返回当前绑定的结果构造器。"""
+        if self.result_factory is None:
+            raise RuntimeError('TurnCoordinator requires a ResultFactory')
+        return self.result_factory
+
+    def _require_child_agent_factory(self) -> Callable[[str], Any]:
+        """返回 child agent 构造器。"""
+        if self.child_agent_factory is None:
+            raise RuntimeError('TurnCoordinator requires a child agent factory')
+        return self.child_agent_factory
 
     def _emit_progress_event(self, event: JSONDict) -> None:
         """向可选 reporter 发送一个实时事件。"""
@@ -725,7 +692,7 @@ class LocalAgent:
     ) -> str | tuple[str, JSONDict]:
         """构造 delegate_agent 的注册工具返回值。
 
-        该方法主要用于向模型暴露统一工具协议；真正的执行会在 LocalAgent 的工具循环中
+        该方法主要用于向模型暴露统一工具协议；真正的执行会在 turn loop 中
         通过 `_execute_delegate_agent_tool()` 走专门编排分支，以便保留 child/group 事件与
         delegated task budget 语义。
 
@@ -765,14 +732,14 @@ class LocalAgent:
         try:
             group_label = self._optional_tool_string(arguments, 'label')
             task_specs = self._parse_delegate_task_specs(arguments)
-            planned_child_count = self.agent_manager.child_agent_count() + len(task_specs)
+            planned_child_count = self.delegation_service.child_agent_count() + len(task_specs)
             max_delegated_tasks = self.budget_config.max_delegated_tasks
             if max_delegated_tasks is not None and planned_child_count > max_delegated_tasks:
                 blocked_event = {
                     'type': 'delegate_group_blocked',
                     'parent_agent_id': self.current_agent_id,
                     'requested_children': len(task_specs),
-                    'existing_children': self.agent_manager.child_agent_count(),
+                    'existing_children': self.delegation_service.child_agent_count(),
                     'max_delegated_tasks': max_delegated_tasks,
                 }
                 return (
@@ -787,19 +754,19 @@ class LocalAgent:
                         metadata={
                             'error_kind': 'delegated_task_limit',
                             'requested_children': len(task_specs),
-                            'existing_children': self.agent_manager.child_agent_count(),
+                            'existing_children': self.delegation_service.child_agent_count(),
                             'max_delegated_tasks': max_delegated_tasks,
                         },
                     ),
                     [blocked_event],
                 )
 
-            group_id = self.agent_manager.start_group(
+            group_id = self.delegation_service.start_group(
                 label=group_label,
                 parent_agent_id=self.current_agent_id,
                 strategy='serial',
             )
-            batches = self.agent_manager.plan_batches(task_specs)
+            batches = self.delegation_service.plan_batches(task_specs)
             delegate_events: list[JSONDict] = [
                 {
                     'type': 'delegate_group_start',
@@ -815,7 +782,7 @@ class LocalAgent:
             child_indices: dict[str, int] = {}
             for child_index, task in enumerate(task_specs):
                 child_indices[task.task_id] = child_index
-                child_agent_ids[task.task_id] = self.agent_manager.start_agent(
+                child_agent_ids[task.task_id] = self.delegation_service.start_agent(
                     prompt=task.prompt,
                     parent_agent_id=self.current_agent_id,
                     group_id=group_id,
@@ -841,7 +808,7 @@ class LocalAgent:
                         if not bool(child_outcomes.get(dependency_id, {}).get('ok', False))
                     ]
                     if failed_dependencies:
-                        self.agent_manager.skip_agent(child_agent_id, reason='dependency_skipped')
+                        self.delegation_service.skip_agent(child_agent_id, reason='dependency_skipped')
                         dependency_skips += 1
                         child_outcomes[task.task_id] = {
                             'ok': False,
@@ -874,20 +841,7 @@ class LocalAgent:
                         }
                     )
 
-                    child_agent = LocalAgent(
-                        self.client,
-                        self.workspace_scope,
-                        self.execution_policy,
-                        self.context_policy,
-                        self.permissions,
-                        self.budget_config,
-                        self.session_paths,
-                        self.session_store,
-                        tool_gateway=self.tool_gateway,
-                        agent_manager=self.agent_manager,
-                        current_agent_id=child_agent_id,
-                    )
-                    child_agent.progress_reporter = self.progress_reporter
+                    child_agent = self._require_child_agent_factory()(child_agent_id)
                     if task.resume_session_id:
                         session_snapshot = self.session_store.load(task.resume_session_id)
                         child_result = child_agent.resume(task.prompt, session_snapshot)
@@ -923,7 +877,7 @@ class LocalAgent:
                     )
 
             group_status = 'completed' if failed_children == 0 and dependency_skips == 0 else 'completed_with_failures'
-            self.agent_manager.finish_group(
+            self.delegation_service.finish_group(
                 group_id,
                 status=group_status,
                 completed_children=completed_children,
@@ -932,7 +886,7 @@ class LocalAgent:
                 max_batch_size=max_batch_size,
                 dependency_skips=dependency_skips,
             )
-            group_summary = self.agent_manager.group_summary(group_id) or {}
+            group_summary = self.delegation_service.group_summary(group_id) or {}
             delegate_events.append(
                 {
                     'type': 'delegate_group_complete',
@@ -944,7 +898,7 @@ class LocalAgent:
 
             child_records = [
                 self._managed_agent_record_to_metadata(record)
-                for record in self.agent_manager.group_children(group_id)
+                for record in self.delegation_service.group_children(group_id)
             ]
             return (
                 ToolExecutionResult(
@@ -1031,10 +985,10 @@ class LocalAgent:
 
     @staticmethod
     def _managed_agent_record_to_metadata(record) -> JSONDict:
-        """把 AgentManager child record 转为工具元数据友好的字典。
+        """把 DelegationService child record 转为工具元数据友好的字典。
 
         Args:
-            record (Any): AgentManager 返回的 child record。
+            record (Any): DelegationService 返回的 child record。
         Returns:
             JSONDict: 适合写入 tool metadata 的轻量字典。
         """
@@ -1209,142 +1163,8 @@ class LocalAgent:
         prompt: str,
         run_state: AgentRunState,
     ) -> AgentRunResult | None:
-        """在 prompt 写入 session_state 前执行 slash 分流。
-
-        Args:
-            prompt (str): 用户输入。
-            run_state (AgentRunState): 当前调用共享的动态运行态对象。
-
-        Returns:
-            AgentRunResult | None: slash 本地处理有结果时返回 AgentRunResult，否则返回 None。
-        """
-        slash_result = self.slash_dispatcher.dispatch_slash_command(
-            SlashCommandContext(
-                session_state=run_state.session_state,
-                session_id=run_state.session_id,
-                turns_offset=run_state.turns_offset,
-                tool_call_count=run_state.tool_call_count,
-                workspace_scope=self.workspace_scope,
-                context_policy=self.context_policy,
-                permissions=self.permissions,
-                budget_config=self.budget_config,
-                model_config=self.client.model_config,
-                tool_registry=self.tool_registry,
-                plugin_summary=self.workspace_gateway.render_plugin_summary(),
-            ),
-            prompt,
-        )
-
-        if not slash_result.handled:
-            run_state.session_state.append_user(slash_result.prompt or prompt)
-            return None
-
-        if slash_result.continue_query:
-            run_state.session_state.append_user(slash_result.prompt or prompt)
-            return None
-
-        return self._build_slash_result(
-            slash_result,
-            run_state=run_state,
-        )
-
-    def _build_slash_result(
-        self,
-        slash_result: SlashCommandResult,
-        *,
-        run_state: AgentRunState,
-    ) -> AgentRunResult:
-        """构造本地 slash 命令结果并落盘。
-
-        Returns:
-            AgentRunResult: slash 命令对应的标准运行结果对象。
-        """
-        effective_session_state = slash_result.replacement_session_state or run_state.session_state
-        effective_session_id = uuid4().hex if slash_result.fork_session else run_state.session_id
-
-        if slash_result.fork_session:
-            effective_run_state = AgentRunState.for_new_session(
-                session_state=effective_session_state,
-                session_id=effective_session_id,
-            )
-        else:
-            effective_run_state = AgentRunState.for_resumed_session(
-                session_state=effective_session_state,
-                session_id=effective_session_id,
-                turns_offset=run_state.turns_offset,
-                usage_baseline=run_state.usage_baseline,
-                cost_baseline=run_state.cost_baseline,
-                tool_call_count=run_state.tool_call_count,
-                mcp_capability_shortlist=run_state.mcp_capability_candidates(),
-                materialized_mcp_capability_handles=run_state.materialized_mcp_capabilities(),
-            )
-
-        event = self._make_slash_event(
-            slash_result,
-            session_id_before=run_state.session_id,
-            session_id_after=effective_session_id,
-        )
-        effective_run_state.final_output = self._format_slash_output(
-            slash_result,
-            session_id_before=run_state.session_id,
-            session_id_after=effective_session_id,
-        )
-        effective_run_state.stop_reason = 'slash_command'
-        effective_run_state.events.append(event)
-        return self._build_run_result(run_state=effective_run_state)
-
-    @staticmethod
-    def _make_slash_event(
-        slash_result: SlashCommandResult,
-        *,
-        session_id_before: str,
-        session_id_after: str,
-    ) -> JSONDict:
-        """为本地 slash 命令构造统一事件载荷。
-
-        Args:
-            slash_result (SlashCommandResult): 已完成分流的 slash 处理结果。
-            session_id_before (str): 执行 slash 之前的会话 ID。
-            session_id_after (str): 执行 slash 之后的会话 ID。
-        Returns:
-            JSONDict: 可写入事件日志的结构化 slash_command 事件。
-        """
-        event: JSONDict = {
-            'type': 'slash_command',
-            'command': slash_result.command_name,
-            'continue_query': slash_result.continue_query,
-            'mode': 'mutating' if slash_result.fork_session else 'read_only',
-            'session_id_before': session_id_before,
-            'session_id_after': session_id_after,
-        }
-        for key, value in slash_result.metadata.items():
-            event[key] = value
-        return event
-
-    @staticmethod
-    def _format_slash_output(
-        slash_result: SlashCommandResult,
-        *,
-        session_id_before: str,
-        session_id_after: str,
-    ) -> str:
-        """把 slash 处理结果格式化为最终输出文本。
-
-        Args:
-            slash_result (SlashCommandResult): 已完成分流的 slash 处理结果。
-            session_id_before (str): 执行 slash 之前的会话 ID。
-            session_id_after (str): 执行 slash 之后的会话 ID。
-        Returns:
-            str: 面向用户展示的 slash 结果文本。
-        """
-        if slash_result.command_name != 'clear':
-            return slash_result.output
-
-        lines = [slash_result.output]
-        if slash_result.metadata.get('had_history'):
-            lines.append(f'Previous session id: {session_id_before}')
-        lines.append(f'Cleared session id: {session_id_after}')
-        return '\n'.join(lines)
+        """在 prompt 写入 session_state 前执行 prompt 分流。"""
+        return self._require_prompt_processor().prepare(prompt=prompt, run_state=run_state)
 
     def _execute_loop(
         self,
@@ -1360,7 +1180,7 @@ class LocalAgent:
         Returns:
             AgentRunResult: 达到停止条件后的最终运行结果。
         """
-        guard = BudgetGuard(
+        guard = RunLimits(
             budget=self.budget_config,
             pricing=self.client.model_config.pricing,
             cost_baseline=run_state.cost_baseline,
@@ -1537,7 +1357,7 @@ class LocalAgent:
         *,
         run_state: AgentRunState,
         openai_tools: list[JSONDict],
-        guard: BudgetGuard,
+        guard: RunLimits,
     ) -> tuple[OneTurnResponse | None, str | None]:
         """执行一次模型调用；必要时在 context-length 错误后进行 reactive compact 重试。"""
         reactive_outcome = self.context_manager.complete_with_reactive_compact(
@@ -1680,48 +1500,5 @@ class LocalAgent:
         *,
         run_state: AgentRunState,
     ) -> AgentRunResult:
-        """统一构造最终运行结果并落盘会话快照。
-
-        total_cost_usd = cost_baseline + estimate_cost_usd(usage_delta)，
-        避免因历史计费策略变化导致重算偏差。
-        """
-        transcript = run_state.session_state.transcript()
-        events_snapshot = tuple(dict(item) for item in run_state.events)
-        delta_cost = self.client.model_config.pricing.estimate_cost_usd(run_state.usage_delta)
-        total_cost_usd = run_state.cost_baseline + delta_cost
-        session_snapshot = AgentSessionSnapshot(
-            session_id=run_state.session_id,
-            model_config=self.client.model_config,
-            workspace_scope=self.workspace_scope,
-            execution_policy=self.execution_policy,
-            context_policy=self.context_policy,
-            permissions=self.permissions,
-            budget_config=self.budget_config,
-            session_paths=self.session_paths,
-            messages=tuple(run_state.session_state.to_messages()),
-            transcript=transcript,
-            events=events_snapshot,
-            final_output=run_state.final_output,
-            turns=run_state.turns_total,
-            tool_calls=run_state.tool_call_count,
-            usage=run_state.usage_total,
-            total_cost_usd=total_cost_usd,
-            stop_reason=run_state.stop_reason,
-            mcp_capability_shortlist=run_state.mcp_capability_candidates(),
-            materialized_mcp_capability_handles=run_state.materialized_mcp_capabilities(),
-        )
-        session_path = self.session_store.save(session_snapshot)
-        return AgentRunResult(
-            final_output=run_state.final_output,
-            turns=run_state.turns_total,
-            tool_calls=run_state.tool_call_count,
-            transcript=transcript,
-            events=events_snapshot,
-            usage=run_state.usage_total,
-            total_cost_usd=total_cost_usd,
-            stop_reason=run_state.stop_reason,
-            file_history=session_snapshot.file_history,
-            session_id=run_state.session_id,
-            session_path=str(session_path),
-            scratchpad_directory=session_snapshot.scratchpad_directory,
-        )
+        """统一构造最终运行结果并落盘会话快照。"""
+        return self._require_result_factory().build(run_state)

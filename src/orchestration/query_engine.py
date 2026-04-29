@@ -1,6 +1,6 @@
 """提供面向上层交互的 runtime facade 与累计统计汇总。
 
-本模块把 `LocalAgent` 的 run/resume 能力封装为统一的 submit、stream_submit 和 persist 门面，并在每次调用后累计运行事件、mutation、orchestration 与 lineage 统计，供控制面或外层集成直接消费。
+本模块把 `Agent` 的 run/resume 能力封装为统一的 submit、stream_submit 和 persist 门面，并在每次调用后累计运行事件、mutation、orchestration 与 lineage 统计，供控制面或外层集成直接消费。
 
 当前实现只支持 runtime agent 模式，不引入旧兼容端口或额外控制面抽象。
 """
@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agent import Agent
 from core_contracts.protocol import JSONDict
 from core_contracts.run_result import AgentRunResult
 from core_contracts.token_usage import TokenUsage
-from orchestration.local_agent import LocalAgent
 
 
 @dataclass(frozen=True)
@@ -67,16 +67,16 @@ class TurnResult:
 
 @dataclass
 class QueryEngine:
-    """封装 LocalAgent 的上层交互门面。
+    """封装 Agent 的上层交互门面。
 
     典型工作流如下：
-    1. 通过 `from_runtime_agent()` 注入一个 `LocalAgent`。
+    1. 通过 `from_runtime_agent()` 注入一个 `Agent`。
     2. 调用 `submit()` 或 `stream_submit()` 处理用户输入。
     3. 通过 `persist_session()` 获取最近一次已落盘的 session 文件路径。
     4. 通过 `render_summary()` 输出当前累计统计与最后一轮结果摘要。
     """
 
-    runtime_agent: LocalAgent  # LocalAgent: 被 QueryEngine 包装的运行时代理实例。
+    runtime_agent: Agent  # Agent: 被 QueryEngine 包装的运行时代理实例。
     config: QueryEngineConfig = field(default_factory=QueryEngineConfig)  # QueryEngineConfig: QueryEngine 行为配置。
     session_id: str | None = None  # str | None: 最近一次提交后可见的 session_id。
     turns: list[TurnResult] = field(default_factory=list)  # list[TurnResult]: 已记录的提交结果列表。
@@ -96,14 +96,14 @@ class QueryEngine:
     @classmethod
     def from_runtime_agent(
         cls,
-        runtime_agent: LocalAgent,
+        runtime_agent: Agent,
         *,
         config: QueryEngineConfig | None = None,
     ) -> 'QueryEngine':
-        """基于现有 LocalAgent 创建 QueryEngine。
+        """基于现有 Agent 创建 QueryEngine。
 
         Args:
-            runtime_agent (LocalAgent): 需要包装的运行时代理。
+            runtime_agent (Agent): 需要包装的运行时代理。
             config (QueryEngineConfig | None): 可选 QueryEngine 配置。
         Returns:
             QueryEngine: 已绑定 runtime agent 的 QueryEngine 实例。
@@ -234,7 +234,7 @@ class QueryEngine:
         Args:
             prompt (str): 当前提交的用户输入。
         Returns:
-            AgentRunResult: LocalAgent 返回的标准运行结果。
+            AgentRunResult: Agent 返回的标准运行结果。
         """
         if self._last_turn is None or not self._last_turn.session_id:
             return self.runtime_agent.run(prompt)

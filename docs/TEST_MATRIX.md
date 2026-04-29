@@ -8,8 +8,8 @@
 
 | 层级 | 风险面 | 当前自动化覆盖 | 命令入口 | 发布门禁 |
 |------|--------|----------------|----------|----------|
-| 单元 | core_contracts / session / budget / context / tools | 配置契约、序列化、预算、上下文治理、基础工具 | `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v` | 必跑 |
-| 集成 | LocalAgent 主循环 | slash、resume、预算、plugin/policy、delegate_agent、QueryEngine | `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/orchestration -v` | 必跑 |
+| 单元 | core_contracts / session / agent / context / tools | 配置契约、序列化、预算闸门、上下文治理、基础工具 | `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v` | 必跑 |
+| 集成 | Agent 主循环 | slash、resume、预算、plugin/policy、delegate_agent、QueryEngine | `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/agent -v` | 必跑 |
 | 控制面 | CLI 入口与 chat loop | `agent` / `agent-chat` / `agent-resume` 参数面与交互循环 | `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -p "test_main*.py" -v` | 必跑 |
 | 扩展 | plugin / policy / search / MCP / worktree | manifest 发现、状态持久化、真实适配、受管 worktree | `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/extensions -v` | 必跑 |
 | 计划与流程 | task / plan / workflow | 任务状态机、计划同步、工作流执行记录 | `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test/planning -v` | 必跑 |
@@ -21,11 +21,11 @@
 
 | 高风险场景 | 主要测试文件 | 说明 |
 |------------|--------------|------|
-| prompt 过长治理链路 | `test/context/test_context_*.py` + `test/orchestration/test_local_agent.py` | 覆盖 preflight、snip、auto compact、reactive compact |
-| 权限拒绝链路 | `test/tools/test_local_tools_shell.py` + `test/orchestration/test_local_agent.py` | 覆盖写文件权限、shell 权限与危险命令限制 |
-| resume 累计预算链路 | `test/orchestration/test_local_agent.py` + `test/test_main_chat.py` | 覆盖 session 连续性、usage/tool_calls/turns 累计 |
-| plugin / policy 冲突链路 | `test/extensions/test_plugin_runtime.py` + `test/extensions/test_hook_policy_runtime.py` + `test/orchestration/test_local_agent.py` | 覆盖 deny、hook、block 优先级 |
-| delegate_agent 失败/跳过/预算终止 | `test/orchestration/test_agent_manager.py` + `test/orchestration/test_local_agent.py` + `test/orchestration/test_query_engine.py` | 覆盖 child failure、dependency_skipped、delegated_task_limit 和统计汇总 |
+| prompt 过长治理链路 | `test/context/test_context_*.py` + `test/agent/test_agent.py` | 覆盖 preflight、snip、auto compact、reactive compact |
+| 权限拒绝链路 | `test/tools/test_local_tools_shell.py` + `test/agent/test_agent.py` | 覆盖写文件权限、shell 权限与危险命令限制 |
+| resume 累计预算链路 | `test/agent/test_agent.py` + `test/test_main_chat.py` | 覆盖 session 连续性、usage/tool_calls/turns 累计 |
+| plugin / policy 冲突链路 | `test/extensions/test_plugin_runtime.py` + `test/extensions/test_hook_policy_runtime.py` + `test/agent/test_agent.py` | 覆盖 deny、hook、block 优先级 |
+| delegate_agent 失败/跳过/预算终止 | `test/agent/test_delegation_service.py` + `test/agent/test_agent.py` + `test/orchestration/test_query_engine.py` | 覆盖 child failure、dependency_skipped、delegated_task_limit 和统计汇总 |
 
 ## 4. 推荐执行顺序
 

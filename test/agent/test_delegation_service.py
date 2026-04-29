@@ -1,15 +1,15 @@
-"""ISSUE-024 AgentManager 单元测试。"""
+"""ISSUE-024 DelegationService 单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
-from orchestration.agent_manager import AgentManager, DelegatedTaskSpec, ManagedAgentStatus
+from agent.delegation_service import DelegationService, DelegatedTaskSpec, ManagedAgentStatus
 
 
-class AgentManagerTests(unittest.TestCase):
+class DelegationServiceTests(unittest.TestCase):
     def test_plan_batches_respects_dependencies_and_input_order(self) -> None:
-        manager = AgentManager()
+        manager = DelegationService()
         tasks = (
             DelegatedTaskSpec(task_id='task-a', prompt='执行 A'),
             DelegatedTaskSpec(task_id='task-b', prompt='执行 B'),
@@ -27,7 +27,7 @@ class AgentManagerTests(unittest.TestCase):
         ])
 
     def test_plan_batches_rejects_unknown_and_circular_dependencies(self) -> None:
-        manager = AgentManager()
+        manager = DelegationService()
 
         with self.assertRaisesRegex(ValueError, 'unknown tasks'):
             manager.plan_batches((
@@ -41,7 +41,7 @@ class AgentManagerTests(unittest.TestCase):
             ))
 
     def test_group_summary_counts_stop_reasons_resume_and_skips(self) -> None:
-        manager = AgentManager()
+        manager = DelegationService()
         parent_id = manager.start_agent(prompt='父任务')
         group_id = manager.start_group(label='delegation', parent_agent_id=parent_id)
 
