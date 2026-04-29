@@ -24,7 +24,7 @@ try {
     $env:PYTHONPATH = 'src'
 
     Invoke-GateStep -Label 'Full unittest regression' -Arguments @('-m', 'unittest', 'discover', '-s', 'test', '-v')
-    Invoke-GateStep -Label 'Orchestration regression' -Arguments @('-m', 'unittest', 'discover', '-s', 'test/orchestration', '-v')
+    # Note: orchestration regression was merged into full regression in Step 8
     Invoke-GateStep -Label 'Release docs validation' -Arguments @('-m', 'unittest', 'discover', '-s', 'test', '-p', 'test_release_gate_docs.py', '-v')
 
     Invoke-GateStep -Label 'CLI smoke: agent --help' -Arguments @('./src/main.py', 'agent', '--help')

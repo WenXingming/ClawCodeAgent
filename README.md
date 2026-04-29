@@ -1,4 +1,4 @@
-# 快速开始（设置 API Key 直接实验）
+﻿# 快速开始（设置 API Key 直接实验）
 
 ## 1. 前置条件
 
@@ -673,4 +673,5 @@ print(result.stop_reason)  # 预算超限时返回对应的 *_limit 字符串
 - 从仓库根执行 Python 命令时，`sitecustomize.py` 会自动把 `src/` 注入 `sys.path`，因此测试与脚本都按源码根模式运行。
 - 递归测试发现的标准命令是 `C:/ProgramData/anaconda3/python.exe -m unittest discover -s test -v`；它通过 `test/test_all.py` 在无 `__init__.py` 的测试树上继续递归装载所有测试。
 - 发布前的统一验证入口是 `powershell -ExecutionPolicy Bypass -File ./scripts/run_release_gate.ps1`。
-- 最终测试矩阵见 [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md)，发布门禁清单见 [docs/RELEASE_GATE_CHECKLIST.md](docs/RELEASE_GATE_CHECKLIST.md)，人工演示流程见 [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)。
+- 最终测试矩阵见 [docs/release/TEST_MATRIX.md](docs/release/TEST_MATRIX.md)，发布门禁清单见 [docs/release/RELEASE_GATE_CHECKLIST.md](docs/release/RELEASE_GATE_CHECKLIST.md)，人工演示流程见 [docs/release/DEMO_SCRIPT.md](docs/release/DEMO_SCRIPT.md)。
+
