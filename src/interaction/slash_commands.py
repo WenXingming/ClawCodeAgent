@@ -11,13 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Callable, Literal, Mapping
 
-from context import ContextManager
+from context.context_gateway import ContextGateway
 from core_contracts.budget import BudgetConfig
 from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from session import AgentSessionState
+from session.session_gateway import AgentSessionState
 from core_contracts.tools_contracts import ToolDescriptor
 
 
@@ -103,16 +103,16 @@ class SlashCommandDispatcher:
     可在构造时显式传入。
     """
 
-    def __init__(self, context_manager: ContextManager | None = None) -> None:
+    def __init__(self, context_manager: ContextGateway | None = None) -> None:
         """初始化 slash 命令分发器。
 
         Args:
-            context_manager (ContextManager | None): 可选的 context 领域门面；未提供时创建默认实例。
+            context_manager (ContextGateway | None): 可选的 context 领域网关；未提供时创建默认实例。
         Returns:
             None: 该构造函数只负责建立分发器内部状态。
         """
-        self._context_manager = context_manager or ContextManager()
-        # ContextManager: /context 命令使用的 context 领域统一入口。
+        self._context_manager = context_manager or ContextGateway()
+        # ContextGateway: /context 命令使用的 context 领域统一入口。
 
         self._specs = self._build_specs()
         # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，保持帮助展示顺序。

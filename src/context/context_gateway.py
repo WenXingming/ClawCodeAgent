@@ -1,19 +1,18 @@
-"""context 领域统一门面。"""
+"""context 域统一网关。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.run_limits import RunLimits
-from agent.run_state import AgentRunState
-from context.budget_projection import BudgetProjection, BudgetProjector
+from context.budget_projection import BudgetProjector
 from context.compactor import CompactionResult, Compactor
 from context.snipper import Snipper
 from core_contracts.budget import BudgetConfig
+from core_contracts.context_contracts import BudgetProjection, ContextRunState, PreModelBudgetGuard
+from core_contracts.openai_contracts import ModelClient
 from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.runtime_policy import ContextPolicy
 from core_contracts.token_usage import TokenUsage
-from openai_client import OpenAIClient, OpenAIClientError
 
 
 _MAX_REACTIVE_COMPACT_RETRIES = 2
@@ -36,12 +35,12 @@ class ReactiveCompactOutcome:
     events: tuple[JSONDict, ...]
 
 
-class ContextManager:
-    """统一收口预算投影、snip 与 compact 的 context 门面。"""
+class ContextGateway:
+    """对外暴露 context 能力并屏蔽内部实现细节。"""
 
     def __init__(
         self,
-        client: OpenAIClient | None = None,
+        client: ModelClient | None = None,
         *,
         budget_projector: BudgetProjector | None = None,
         snipper: Snipper | None = None,
@@ -77,10 +76,10 @@ class ContextManager:
     def run_pre_model_cycle(
         self,
         *,
-        run_state: AgentRunState,
+        run_state: ContextRunState,
         budget_config: BudgetConfig,
         context_policy: ContextPolicy,
-        guard: RunLimits,
+        guard: PreModelBudgetGuard,
         openai_tools: list[JSONDict],
     ) -> PreModelContextOutcome:
         """执行模型调用前的上下文治理编排并返回统一结果。"""
@@ -181,11 +180,11 @@ class ContextManager:
     def complete_with_reactive_compact(
         self,
         *,
-        run_state: AgentRunState,
+        run_state: ContextRunState,
         budget_config: BudgetConfig,
         context_policy: ContextPolicy,
         openai_tools: list[JSONDict],
-        guard: RunLimits,
+        guard: PreModelBudgetGuard,
     ) -> ReactiveCompactOutcome:
         """执行模型调用，并在需要时做 reactive compact 重试。"""
         events: list[JSONDict] = []
@@ -194,7 +193,7 @@ class ContextManager:
         current_usage = run_state.usage_delta
         current_model_call_count = run_state.model_call_count
         attempt = 0
-        current_error: OpenAIClientError | None = None
+        current_error: Exception | None = None
         compactor = self._require_compactor()
 
         while True:
@@ -213,7 +212,7 @@ class ContextManager:
                     stop_reason=None,
                     events=tuple(events),
                 )
-            except OpenAIClientError as exc:
+            except Exception as exc:
                 current_error = exc
                 if not compactor.is_context_length_error(exc) or attempt >= _MAX_REACTIVE_COMPACT_RETRIES:
                     break
@@ -303,5 +302,5 @@ class ContextManager:
     def _require_compactor(self) -> Compactor:
         """返回 compact 能力；未启用时抛出显式错误。"""
         if self._compactor is None:
-            raise RuntimeError('ContextManager requires a compactor-enabled client for compact operations')
+            raise RuntimeError('ContextGateway requires a compactor-enabled client for compact operations')
         return self._compactor

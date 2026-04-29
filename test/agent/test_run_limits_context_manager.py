@@ -1,4 +1,4 @@
-"""ContextManager 单元测试。"""
+"""ContextGateway 单元测试。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from agent.run_state import AgentRunState
 from agent.run_limits import RunLimits
-from context import ContextManager
+from context.context_gateway import ContextGateway
 from context.budget_projection import BudgetProjector
 from context.compactor import Compactor
 from context.snipper import Snipper
@@ -61,7 +61,7 @@ class _FakeOpenAIClient(OpenAIClient):
         return current
 
 
-class ContextManagerTests(unittest.TestCase):
+class ContextGatewayTests(unittest.TestCase):
 
     def _build_runtime_policies(self, *, budget: BudgetConfig | None = None, context_policy: ContextPolicy | None = None) -> _RuntimePolicies:
         return _RuntimePolicies(
@@ -92,7 +92,7 @@ class ContextManagerTests(unittest.TestCase):
         )
         run_state.begin_turn(1)
 
-        context_manager = ContextManager(
+        context_manager = ContextGateway(
             budget_projector=BudgetProjector(),
             snipper=Snipper(),
             compactor=Compactor(_FakeOpenAIClient([])),
@@ -136,7 +136,7 @@ class ContextManagerTests(unittest.TestCase):
         run_state.begin_turn(1)
 
         compact_usage = TokenUsage(input_tokens=2, output_tokens=1)
-        context_manager = ContextManager(
+        context_manager = ContextGateway(
             budget_projector=BudgetProjector(),
             snipper=Snipper(),
             compactor=Compactor(

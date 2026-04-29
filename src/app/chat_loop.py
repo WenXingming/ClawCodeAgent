@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core_contracts.run_result import AgentRunResult
-from interaction import (
+from interaction.interaction_gateway import (
     EnvironmentLoadSummary,
     ExitRenderer,
     RuntimeEventPrinter,
@@ -17,14 +17,14 @@ from interaction import (
     SlashCommandRenderer,
     StartupRenderer,
 )
-from session import AgentSessionSnapshot, SessionManager
+from session.session_gateway import AgentSessionSnapshot, SessionGateway
 
 
 @dataclass
 class ChatLoop:
     """封装 agent / agent-chat / agent-resume 共用的交互循环。"""
 
-    session_manager_cls: type[SessionManager] = SessionManager
+    session_manager_cls: type[SessionGateway] = SessionGateway
     startup_renderer: StartupRenderer = field(default_factory=StartupRenderer)
     exit_renderer: ExitRenderer = field(default_factory=ExitRenderer)
     slash_renderer: SlashCommandRenderer = field(default_factory=SlashCommandRenderer)

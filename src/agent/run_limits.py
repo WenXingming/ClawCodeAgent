@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from context.budget_projection import BudgetProjection
 from core_contracts.budget import BudgetConfig
+from core_contracts.context_contracts import BudgetProjection
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.token_usage import TokenUsage
 

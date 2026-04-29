@@ -6,9 +6,10 @@ import unittest
 
 from context.compactor import Compactor
 from core_contracts.model import ModelConfig
+from core_contracts.openai_contracts import ModelClient, ModelConnectionError, ModelResponseError
 from core_contracts.protocol import OneTurnResponse
 from core_contracts.token_usage import TokenUsage
-from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from openai_client.openai_client import OpenAIClient
 
 
 class _FakeCompactClient(OpenAIClient):
@@ -40,7 +41,7 @@ class _FakeCompactClient(OpenAIClient):
         return current
 
 
-def _compactor(client: OpenAIClient | None = None) -> Compactor:
+def _compactor(client: ModelClient | None = None) -> Compactor:
     return Compactor(client or _FakeCompactClient([]))
 
 
@@ -57,11 +58,11 @@ class CompactThresholdTests(unittest.TestCase):
 
 class ContextLengthErrorTests(unittest.TestCase):
     def test_http_413_is_always_context_length_error(self) -> None:
-        exc = OpenAIResponseError('HTTP 413 from model backend', status_code=413, detail='too large')
+        exc = ModelResponseError('HTTP 413 from model backend', status_code=413, detail='too large')
         self.assertTrue(_compactor().is_context_length_error(exc))
 
     def test_keyword_based_context_length_error_detection(self) -> None:
-        exc = OpenAIResponseError(
+        exc = ModelResponseError(
             'HTTP 400 from model backend: maximum context length exceeded',
             status_code=400,
             detail='maximum context length exceeded',
@@ -69,7 +70,7 @@ class ContextLengthErrorTests(unittest.TestCase):
         self.assertTrue(_compactor().is_context_length_error(exc))
 
     def test_non_context_error_is_not_detected(self) -> None:
-        self.assertFalse(_compactor().is_context_length_error(OpenAIConnectionError('network down')))
+        self.assertFalse(_compactor().is_context_length_error(ModelConnectionError('network down')))
 
 
 class CompactWorkflowTests(unittest.TestCase):

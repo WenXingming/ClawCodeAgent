@@ -6,25 +6,25 @@ from dataclasses import dataclass
 
 from agent.run_state import AgentRunState
 from core_contracts.budget import BudgetConfig
+from core_contracts.openai_contracts import ModelClient
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from openai_client import OpenAIClient
-from session import AgentSessionSnapshot, SessionManager
+from session.session_gateway import AgentSessionSnapshot, SessionGateway
 
 
 @dataclass
 class ResultFactory:
     """集中构造 session 快照与 AgentRunResult。"""
 
-    client: OpenAIClient
+    client: ModelClient
     workspace_scope: WorkspaceScope
     execution_policy: ExecutionPolicy
     context_policy: ContextPolicy
     permissions: ToolPermissionPolicy
     budget_config: BudgetConfig
     session_paths: SessionPaths
-    session_manager: SessionManager
+    session_manager: SessionGateway
 
     def build(self, run_state: AgentRunState) -> AgentRunResult:
         """基于当前运行态落盘并返回标准结果对象。"""

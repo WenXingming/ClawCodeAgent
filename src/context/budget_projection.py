@@ -6,18 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from context.context_token_estimator import ContextTokenEstimator
-
-
-@dataclass(frozen=True)
-class BudgetProjection:
-    """描述一次 token 预算预检的结果快照。"""
-
-    projected_input_tokens: int
-    output_reserve_tokens: int
-    hard_input_limit: int | None
-    soft_input_limit: int | None
-    is_hard_over: bool
-    is_soft_over: bool
+from core_contracts.context_contracts import BudgetProjection
 
 
 OUTPUT_RESERVE_TOKENS: int = 4_096

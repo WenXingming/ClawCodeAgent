@@ -11,16 +11,16 @@ from agent.prompt_processor import PromptProcessor
 from agent.result_factory import ResultFactory
 from agent.run_limits import RunLimits
 from agent.run_state import AgentRunState
-from context import ContextManager
+from context.context_gateway import ContextGateway
 from core_contracts.budget import BudgetConfig
 from core_contracts.gateway_errors import GatewayError, GatewayPermissionError, GatewayValidationError
+from core_contracts.openai_contracts import ModelClient
 from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.run_result import AgentRunResult
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.tools_contracts import ToolDescriptor, ToolStreamUpdate
-from openai_client import OpenAIClient
-from session import SessionManager
+from session.session_gateway import SessionGateway
 from tools.tools_gateway import ToolsGateway
 from workspace.workspace_gateway import WorkspaceGateway
 
@@ -33,16 +33,16 @@ _MCP_MATERIALIZED_TOOL_LIMIT = 3
 class TurnCoordinator:
     """负责单次 agent 调用的主循环推进。"""
 
-    client: OpenAIClient  # 模型客户端。
+    client: ModelClient  # 模型客户端。
     workspace_scope: WorkspaceScope  # 工作区范围配置。
     execution_policy: ExecutionPolicy  # 执行限制配置。
     context_policy: ContextPolicy  # 上下文治理配置。
     permissions: ToolPermissionPolicy  # 工具权限配置。
     budget_config: BudgetConfig  # 预算配置。
     session_paths: SessionPaths  # 会话路径配置。
-    session_manager: SessionManager  # 会话管理门面。
+    session_manager: SessionGateway  # 会话管理门面。
     workspace_gateway: WorkspaceGateway  # 工作区领域门面。
-    context_manager: ContextManager  # 上下文治理门面。
+    context_manager: ContextGateway  # 上下文治理门面。
     tool_gateway: ToolsGateway = field(default_factory=ToolsGateway)
     delegation_service: DelegationService = field(default_factory=DelegationService)  # DelegationService: 当前 run/resume 树共享的子代理编排器。
     current_agent_id: str | None = None  # str | None: 当前 agent 对应的受管代理标识；根调用与 child 调用均会设置。
