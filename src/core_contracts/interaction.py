@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Mapping, Protocol
 
 from .config import BudgetConfig, ContextPolicy, ToolPermissionPolicy, WorkspaceScope
 from .model import ModelConfig
@@ -123,3 +123,15 @@ class SlashCommandResult:
     replacement_session_state: AgentSessionState | None = None  # AgentSessionState | None：替换的会话状态。
     fork_session: bool = False  # bool：是否开启新会话。
     metadata: JSONDict = field(default_factory=dict)  # JSONDict：额外元数据。
+
+
+class SlashDispatcher(Protocol):
+    """slash 命令分发器的最小跨域协议。"""
+
+    def dispatch_slash_command(
+        self,
+        context: SlashCommandContext,
+        input_text: str,
+    ) -> SlashCommandResult:
+        """分发一条 slash 输入并返回处理结果。"""
+        ...

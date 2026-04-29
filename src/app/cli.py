@@ -11,14 +11,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from app.chat_loop import ChatLoop
-from app.runtime_builder import RuntimeBuilder
+from app.runtime_facade import AppRuntimeFacade
 from core_contracts.errors import ModelGatewayError
-from core_contracts.outcomes import AgentRunResult
 from core_contracts.session import AgentSessionSnapshot
-from interaction.interaction_gateway import ExitRenderer, SlashCommandRenderer, StartupRenderer
-from openai_client import OpenAIClientGateway
-from session.session_gateway import SessionGateway
 
 
 class AppCLI:
@@ -35,41 +30,18 @@ class AppCLI:
     def __init__(
         self,
         *,
-        openai_client_cls: type[OpenAIClientGateway] = OpenAIClientGateway,
-        agent_cls,
-        session_manager_cls: type[SessionGateway] = SessionGateway,
-        startup_renderer: StartupRenderer | None = None,
-        exit_renderer: ExitRenderer | None = None,
-        slash_renderer: SlashCommandRenderer | None = None,
-        chat_exit_commands: frozenset[str] | None = None,
+        app_runtime_facade: AppRuntimeFacade,
     ) -> None:
-        """组装 CLI 所需的 RuntimeBuilder 与 ChatLoop 依赖。
+        """组装 CLI 所需的 app 运行时门面。
 
         Args:
-            openai_client_cls: 可注入的 OpenAI 客户端类。
-            agent_cls: 可注入的 Agent 类。
-            session_manager_cls: 可注入的会话管理器类。
-            startup_renderer (StartupRenderer | None): 启动横幅渲染器；None 时使用默认。
-            exit_renderer (ExitRenderer | None): 退出摘要渲染器；None 时使用默认。
-            slash_renderer (SlashCommandRenderer | None): slash 结果渲染器；None 时使用默认。
-            chat_exit_commands (frozenset[str] | None): 触发退出的命令集；None 时使用默认。
+            app_runtime_facade (AppRuntimeFacade): 已组装的 app 运行时门面。
         Returns:
             None
         Raises:
             无。
         """
-        self._runtime_builder = RuntimeBuilder(  # RuntimeBuilder：负责把命令行参数装配成 Agent 实例。
-            openai_client_cls=openai_client_cls,
-            agent_cls=agent_cls,
-            session_manager_cls=session_manager_cls,
-        )
-        self._chat_loop = ChatLoop(
-            session_manager_cls=session_manager_cls,
-            startup_renderer=startup_renderer or StartupRenderer(),
-            exit_renderer=exit_renderer or ExitRenderer(),
-            slash_renderer=slash_renderer or SlashCommandRenderer(),
-            chat_exit_commands=chat_exit_commands or self._DEFAULT_CHAT_EXIT_COMMANDS,
-        )
+        self._app_runtime_facade = app_runtime_facade
 
     def main(self, argv: list[str] | None = None) -> int:
         """执行 CLI 主入口并返回进程退出码。
@@ -295,17 +267,17 @@ class AppCLI:
         Raises:
             ValueError: 当必填参数缺失时由 RuntimeBuilder 抛出并向上透传。
         """
-        agent, session_paths = self._runtime_builder.build_agent_from_args(args)
+        agent, session_paths = self._app_runtime_facade.build_agent_from_args(args)
         current_session_directory = (
             self._normalize_optional_path(args.session_directory)
             or session_paths.session_directory.resolve()
         )
-        return self._chat_loop.run(
+        return self._app_runtime_facade.run_chat_loop(
             agent,
             current_session_id=None,
             current_session_directory=current_session_directory,
             pending_session_snapshot=None,
-            show_progress=RuntimeBuilder.resolve_show_progress(args),
+            show_progress=self._app_runtime_facade.resolve_show_progress(args),
         )
 
     def _run_agent_resume_command(self, args: argparse.Namespace) -> int:
@@ -318,16 +290,16 @@ class AppCLI:
         Raises:
             ValueError: 当会话不存在或快照损坏时由 RuntimeBuilder 抛出并向上透传。
         """
-        agent, pending_session_snapshot, current_session_directory = self._runtime_builder.build_resumed_agent(
+        agent, pending_session_snapshot, current_session_directory = self._app_runtime_facade.build_resumed_agent(
             args,
             session_id=args.session_id,
         )
-        return self._chat_loop.run(
+        return self._app_runtime_facade.run_chat_loop(
             agent,
             current_session_id=args.session_id,
             current_session_directory=current_session_directory,
             pending_session_snapshot=pending_session_snapshot,
-            show_progress=RuntimeBuilder.resolve_show_progress(args),
+            show_progress=self._app_runtime_facade.resolve_show_progress(args),
         )
 
     def _run_agent_chat_command(self, args: argparse.Namespace) -> int:
@@ -347,20 +319,20 @@ class AppCLI:
         pending_session_snapshot: AgentSessionSnapshot | None = None
 
         if current_session_id:
-            agent, pending_session_snapshot, current_session_directory = self._runtime_builder.build_resumed_agent(
+            agent, pending_session_snapshot, current_session_directory = self._app_runtime_facade.build_resumed_agent(
                 args,
                 session_id=current_session_id,
             )
         else:
-            agent, session_paths = self._runtime_builder.build_agent_from_args(args)
+            agent, session_paths = self._app_runtime_facade.build_agent_from_args(args)
             current_session_directory = current_session_directory or session_paths.session_directory.resolve()
 
-        return self._chat_loop.run(
+        return self._app_runtime_facade.run_chat_loop(
             agent,
             current_session_id=current_session_id,
             current_session_directory=current_session_directory,
             pending_session_snapshot=pending_session_snapshot,
-            show_progress=RuntimeBuilder.resolve_show_progress(args),
+            show_progress=self._app_runtime_facade.resolve_show_progress(args),
         )
 
     @staticmethod
@@ -398,6 +370,15 @@ class AppCLI:
 def main(argv: list[str] | None = None) -> int:
     """模块级入口，便于外部直接调用 app CLI。"""
     from agent import AgentGateway as Agent
+    from app.composition_root import AppCompositionRoot
+    from openai_client import OpenAIClientGateway
+    from session.session_gateway import SessionGateway
 
-    cli = AppCLI(agent_cls=Agent)
+    cli = AppCLI(
+        app_runtime_facade=AppCompositionRoot.build_runtime_facade(
+            openai_client_cls=OpenAIClientGateway,
+            agent_cls=Agent,
+            session_manager_cls=SessionGateway,
+        )
+    )
     return cli.main(argv)

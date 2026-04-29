@@ -11,7 +11,6 @@ from agent.prompt_processor import PromptProcessor
 from agent.result_factory import ResultFactory
 from agent.run_limits import RunLimits
 from agent.run_state import AgentRunState
-from context.context_gateway import ContextGateway
 from core_contracts.config import BudgetConfig
 from core_contracts.errors import GatewayError, GatewayPermissionError, GatewayValidationError
 from core_contracts.model import ModelClient
@@ -21,6 +20,7 @@ from core_contracts.outcomes import AgentRunResult
 from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.tools import ToolDescriptor, ToolStreamUpdate
+from context.context_gateway import ContextGateway
 from session.session_gateway import SessionGateway
 from tools.tools_gateway import ToolsGateway
 from workspace.workspace_gateway import WorkspaceGateway
@@ -144,13 +144,44 @@ class TurnCoordinator:
         Returns:
             None: 该方法原地补全实例的运行时依赖。
         """
-        self.tool_registry = self.tool_gateway.default_registry()
-        self.tool_registry = self._register_workspace_runtime_tools(self.tool_registry)
-        self.tool_registry = self.workspace_gateway.prepare_tool_registry(self.tool_registry)
+        self.refresh_tool_registry()
 
     def tool_registry_view(self) -> dict[str, ToolDescriptor]:
-        """返回当前基础工具注册表的浅拷贝。"""
+        """返回当前基础工具注册表的浅拷贝。
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            dict[str, ToolDescriptor]: 当前工具注册表副本。
+        Raises:
+            无。
+        """
         return dict(self.tool_registry)
+
+    def replace_tool_registry(self, tool_registry: dict[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
+        """用给定注册表替换当前基础工具注册表。
+        Args:
+            tool_registry (dict[str, ToolDescriptor]): 新的工具注册表。
+        Returns:
+            dict[str, ToolDescriptor]: 替换后的工具注册表副本。
+        Raises:
+            无。
+        """
+        self.tool_registry = dict(tool_registry)
+        return self.tool_registry_view()
+
+    def refresh_tool_registry(self) -> dict[str, ToolDescriptor]:
+        """基于当前 workspace 与 tools runtime 重新构建工具注册表。
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            dict[str, ToolDescriptor]: 重建后的工具注册表副本。
+        Raises:
+            Exception: 动态工具构建失败时向上透传。
+        """
+        tool_registry = self.tool_gateway.default_registry()
+        tool_registry = self._extend_with_runtime_tools(tool_registry)
+        self.tool_registry = self.workspace_gateway.prepare_tool_registry(tool_registry)
+        return self.tool_registry_view()
 
     def _require_prompt_processor(self) -> PromptProcessor:
         """返回当前绑定的 prompt processor。"""
@@ -191,139 +222,20 @@ class TurnCoordinator:
         for event in new_events:
             self._record_event(run_state, event)
 
-    def _register_workspace_runtime_tools(
+    def _extend_with_runtime_tools(
         self,
         tool_registry: dict[str, ToolDescriptor],
     ) -> dict[str, ToolDescriptor]:
-        """把工作区相关的动态工具注册到当前工具表中。
-
-        Args:
-            tool_registry (dict[str, ToolDescriptor]): 当前已有的工具注册表。
-        Returns:
-            dict[str, ToolDescriptor]: 追加 workspace_search、MCP 与 delegate_agent 等动态工具后的注册表副本。
-        """
-        merged_registry = dict(tool_registry)
-
-        merged_registry['delegate_agent'] = ToolDescriptor(
-            name='delegate_agent',
-            description='Delegate a batch of child tasks to managed sub-agents and return an aggregated summary.',
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'label': {'type': 'string'},
-                    'tasks': {
-                        'type': 'array',
-                        'minItems': 1,
-                        'items': {
-                            'type': 'object',
-                            'properties': {
-                                'task_id': {'type': 'string'},
-                                'prompt': {'type': 'string'},
-                                'label': {'type': 'string'},
-                                'dependencies': {'type': 'array', 'items': {'type': 'string'}},
-                                'resume_session_id': {'type': 'string'},
-                            },
-                            'required': ['prompt'],
-                        },
-                    },
-                },
-                'required': ['tasks'],
-            },
-            handler=self._run_delegate_agent,
+        """把动态工具描述符构建下沉到 ToolsGateway。"""
+        return self.tool_gateway.extend_runtime_registry(
+            tool_registry,
+            delegate_agent_handler=self._run_delegate_agent,
+            workspace_search_handler=self._run_workspace_search,
+            mcp_list_resources_handler=self._run_mcp_list_resources,
+            mcp_read_resource_handler=self._run_mcp_read_resource,
+            mcp_search_capabilities_handler=self._run_mcp_search_capabilities,
+            mcp_call_tool_handler=self._run_mcp_call_tool,
         )
-
-        if self.workspace_gateway.has_search_providers():
-            merged_registry['workspace_search'] = ToolDescriptor(
-                name='workspace_search',
-                description='Search the configured workspace search provider and return structured web results.',
-                parameters={
-                    'type': 'object',
-                    'properties': {
-                        'query': {'type': 'string'},
-                        'provider_id': {'type': 'string'},
-                        'max_results': {'type': 'integer', 'minimum': 1, 'maximum': 20},
-                        'max_retries': {'type': 'integer', 'minimum': 0, 'maximum': 3},
-                    },
-                    'required': ['query'],
-                },
-                handler=self._run_workspace_search,
-            )
-
-        if self.tool_gateway.has_mcp_resources() or self.tool_gateway.has_mcp_servers():
-            merged_registry.update(
-                {
-                    'mcp_list_resources': ToolDescriptor(
-                        name='mcp_list_resources',
-                        description='List MCP resources discovered from local manifests and configured MCP servers.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'query': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
-                            },
-                        },
-                        handler=self._run_mcp_list_resources,
-                    ),
-                    'mcp_read_resource': ToolDescriptor(
-                        name='mcp_read_resource',
-                        description='Read a specific MCP resource by URI.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'uri': {'type': 'string'},
-                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
-                            },
-                            'required': ['uri'],
-                        },
-                        handler=self._run_mcp_read_resource,
-                    ),
-                }
-            )
-
-        # 仅向模型暴露精简的 MCP 能力搜索与统一调用门面，避免把整份工具目录直接转成上下文噪音。
-        if self.tool_gateway.has_mcp_servers():
-            merged_registry.update(
-                {
-                    'mcp_search_capabilities': ToolDescriptor(
-                        name='mcp_search_capabilities',
-                        description='Search concise MCP capability candidates from configured MCP servers.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'query': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
-                            },
-                        },
-                        handler=self._run_mcp_search_capabilities,
-                    ),
-                    'mcp_call_tool': ToolDescriptor(
-                        name='mcp_call_tool',
-                        description='Call a remote MCP tool by capability_handle or tool_name, optionally scoped to a specific server.',
-                        parameters={
-                            'type': 'object',
-                            'properties': {
-                                'capability_handle': {'type': 'string'},
-                                'tool_name': {'type': 'string'},
-                                'server_name': {'type': 'string'},
-                                'arguments': {
-                                    'type': 'object',
-                                    'additionalProperties': True,
-                                },
-                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
-                            },
-                            'anyOf': [
-                                {'required': ['capability_handle']},
-                                {'required': ['tool_name']},
-                            ],
-                        },
-                        handler=self._run_mcp_call_tool,
-                    ),
-                }
-            )
-
-        return merged_registry
 
     def _run_workspace_search(
         self,
@@ -346,7 +258,7 @@ class TurnCoordinator:
         max_retries = self._optional_tool_int(arguments, 'max_retries', min_value=0, max_value=3) or 0
 
         try:
-            response = self.workspace_gateway.search(
+            response = self.tool_gateway.search_workspace(
                 query,
                 provider_id=provider_id,
                 max_results=max_results,

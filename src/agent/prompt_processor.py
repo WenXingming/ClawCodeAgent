@@ -9,12 +9,12 @@ from uuid import uuid4
 from agent.result_factory import ResultFactory
 from agent.run_state import AgentRunState
 from core_contracts.config import BudgetConfig
-from core_contracts.model import ModelConfig
+from core_contracts.config import ContextPolicy, WorkspaceScope
 from core_contracts.config import ToolPermissionPolicy
+from core_contracts.interaction import SlashCommandContext, SlashCommandResult, SlashDispatcher
+from core_contracts.model import ModelConfig
 from core_contracts.primitives import JSONDict
 from core_contracts.outcomes import AgentRunResult
-from core_contracts.config import ContextPolicy, WorkspaceScope
-from interaction.interaction_gateway import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from core_contracts.tools import ToolDescriptor
 from workspace import WorkspaceGateway
 
@@ -23,7 +23,7 @@ from workspace import WorkspaceGateway
 class PromptProcessor:
     """处理 slash 分流与 prompt 写入前的本地决策。"""
 
-    slash_dispatcher: SlashCommandDispatcher
+    slash_dispatcher: SlashDispatcher
     workspace_scope: WorkspaceScope
     context_policy: ContextPolicy
     permissions: ToolPermissionPolicy

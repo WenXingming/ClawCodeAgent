@@ -55,11 +55,14 @@ class AppGateway:
             无（内部异常在 AppCLI.main 内部捕获并折叠为退出码）。
         """
         from app.cli import AppCLI
+        from app.composition_root import AppCompositionRoot
 
         cli = AppCLI(
-            openai_client_cls=openai_client_cls,
-            agent_cls=agent_cls,
-            session_manager_cls=session_manager_cls,
+            app_runtime_facade=AppCompositionRoot.build_runtime_facade(
+                openai_client_cls=openai_client_cls,
+                agent_cls=agent_cls,
+                session_manager_cls=session_manager_cls,
+            )
         )
         return cli.main(argv)
 

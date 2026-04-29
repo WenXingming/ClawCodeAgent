@@ -33,6 +33,7 @@ from tools.local.filesystem_tools import build_filesystem_tools
 from tools.local.shell_tools import build_shell_tool
 from tools.mcp import MCPRuntime, MCPTransportError
 from tools.registry import build_registry, render_openai_tools
+from workspace.workspace_gateway import WorkspaceGateway
 
 
 @dataclass
@@ -53,6 +54,9 @@ class ToolsGateway:
     _mcp_runtime: MCPRuntime | None = field(
         default=None, init=False, repr=False
     )  # MCPRuntime | None: 绑定工作区后初始化的 MCP 运行时。
+    _workspace_gateway: WorkspaceGateway | None = field(
+        default=None, init=False, repr=False
+    )  # WorkspaceGateway | None: 绑定工作区后初始化的 workspace 运行时。
     _workspace: Path | None = field(
         default=None, init=False, repr=False
     )  # Path | None: 当前绑定的工作区根目录。
@@ -72,6 +76,7 @@ class ToolsGateway:
         if self._workspace == resolved and self._mcp_runtime is not None:
             return
         self._workspace = resolved
+        self._workspace_gateway = WorkspaceGateway.from_workspace(resolved)
         self._mcp_runtime = MCPRuntime.from_workspace(resolved)
 
     # ── 工具注册表 ─────────────────────────────────────────────────
@@ -89,6 +94,191 @@ class ToolsGateway:
             *build_filesystem_tools(),
             build_shell_tool(self._shell_security_policy),
         )
+
+    def _require_workspace_gateway(self) -> WorkspaceGateway:
+        """获取已初始化的 workspace gateway。"""
+        if self._workspace_gateway is None:
+            raise GatewayRuntimeError('ToolsGateway is not bound to a workspace yet')
+        return self._workspace_gateway
+
+    def prepare_tool_registry(self, tool_registry: Mapping[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
+        """应用工作区策略，生成最终可见工具注册表。"""
+        return self._require_workspace_gateway().prepare_tool_registry(dict(tool_registry))
+
+    def has_search_providers(self) -> bool:
+        """当前工作区是否配置了搜索 provider。"""
+        return self._require_workspace_gateway().has_search_providers()
+
+    def search_workspace(
+        self,
+        query: str,
+        *,
+        provider_id: str | None,
+        max_results: int | None,
+        max_retries: int,
+    ) -> JSONDict:
+        """执行工作区搜索并返回统一 JSON 契约。"""
+        return self._require_workspace_gateway().search(
+            query,
+            provider_id=provider_id,
+            max_results=max_results,
+            max_retries=max_retries,
+        )
+
+    def workspace_plugin_count(self) -> int:
+        """返回当前工作区插件数量。"""
+        return self._require_workspace_gateway().plugin_count
+
+    def workspace_policy_count(self) -> int:
+        """返回当前工作区策略数量。"""
+        return self._require_workspace_gateway().policy_count
+
+    def workspace_search_provider_count(self) -> int:
+        """返回当前工作区搜索 provider 数量。"""
+        return self._require_workspace_gateway().search_provider_count
+
+    def workspace_load_error_count(self) -> int:
+        """返回当前工作区加载错误数量。"""
+        return self._require_workspace_gateway().load_error_count
+
+    def mcp_server_count(self) -> int:
+        """返回 MCP server 数量。"""
+        return len(self._require_mcp_runtime().servers)
+
+    def mcp_load_error_count(self) -> int:
+        """返回 MCP 运行时加载错误数量。"""
+        return len(self._require_mcp_runtime().load_errors)
+
+    def extend_runtime_registry(
+        self,
+        tool_registry: Mapping[str, ToolDescriptor],
+        *,
+        delegate_agent_handler: Callable,
+        workspace_search_handler: Callable,
+        mcp_list_resources_handler: Callable,
+        mcp_read_resource_handler: Callable,
+        mcp_search_capabilities_handler: Callable,
+        mcp_call_tool_handler: Callable,
+    ) -> dict[str, ToolDescriptor]:
+        """基于当前 runtime 状态补齐动态工具描述符。"""
+        merged_registry = dict(tool_registry)
+
+        merged_registry['delegate_agent'] = ToolDescriptor(
+            name='delegate_agent',
+            description='Delegate a batch of child tasks to managed sub-agents and return an aggregated summary.',
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'label': {'type': 'string'},
+                    'tasks': {
+                        'type': 'array',
+                        'minItems': 1,
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'task_id': {'type': 'string'},
+                                'prompt': {'type': 'string'},
+                                'label': {'type': 'string'},
+                                'dependencies': {'type': 'array', 'items': {'type': 'string'}},
+                                'resume_session_id': {'type': 'string'},
+                            },
+                            'required': ['prompt'],
+                        },
+                    },
+                },
+                'required': ['tasks'],
+            },
+            handler=delegate_agent_handler,
+        )
+
+        if self.has_search_providers():
+            merged_registry['workspace_search'] = ToolDescriptor(
+                name='workspace_search',
+                description='Search the configured workspace search provider and return structured web results.',
+                parameters={
+                    'type': 'object',
+                    'properties': {
+                        'query': {'type': 'string'},
+                        'provider_id': {'type': 'string'},
+                        'max_results': {'type': 'integer', 'minimum': 1, 'maximum': 20},
+                        'max_retries': {'type': 'integer', 'minimum': 0, 'maximum': 3},
+                    },
+                    'required': ['query'],
+                },
+                handler=workspace_search_handler,
+            )
+
+        if self.has_mcp_resources() or self.has_mcp_servers():
+            merged_registry.update(
+                {
+                    'mcp_list_resources': ToolDescriptor(
+                        name='mcp_list_resources',
+                        description='List MCP resources discovered from local manifests and configured MCP servers.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'query': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+                            },
+                        },
+                        handler=mcp_list_resources_handler,
+                    ),
+                    'mcp_read_resource': ToolDescriptor(
+                        name='mcp_read_resource',
+                        description='Read a specific MCP resource by URI.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'uri': {'type': 'string'},
+                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
+                            },
+                            'required': ['uri'],
+                        },
+                        handler=mcp_read_resource_handler,
+                    ),
+                }
+            )
+
+        if self.has_mcp_servers():
+            merged_registry.update(
+                {
+                    'mcp_search_capabilities': ToolDescriptor(
+                        name='mcp_search_capabilities',
+                        description='Search concise MCP capability candidates from configured MCP servers.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'query': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+                            },
+                        },
+                        handler=mcp_search_capabilities_handler,
+                    ),
+                    'mcp_call_tool': ToolDescriptor(
+                        name='mcp_call_tool',
+                        description='Call a remote MCP tool by capability_handle or tool_name, optionally scoped to a specific server.',
+                        parameters={
+                            'type': 'object',
+                            'properties': {
+                                'capability_handle': {'type': 'string'},
+                                'tool_name': {'type': 'string'},
+                                'server_name': {'type': 'string'},
+                                'arguments': {'type': 'object', 'additionalProperties': True},
+                                'max_chars': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
+                            },
+                            'anyOf': [
+                                {'required': ['capability_handle']},
+                                {'required': ['tool_name']},
+                            ],
+                        },
+                        handler=mcp_call_tool_handler,
+                    ),
+                }
+            )
+
+        return merged_registry
 
     def to_openai_tools(self, tool_registry: Mapping[str, ToolDescriptor]) -> list[JSONDict]:
         """把工具注册表投影为模型可见 schema 列表。

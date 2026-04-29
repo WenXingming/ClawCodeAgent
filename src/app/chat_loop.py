@@ -122,6 +122,12 @@ class ChatLoop:
         Raises:
             无。
         """
+        summary_provider = getattr(agent, 'environment_load_summary', None)
+        if callable(summary_provider):
+            summary = summary_provider()
+            if isinstance(summary, EnvironmentLoadSummary):
+                return summary
+
         return EnvironmentLoadSummary(
             mcp_servers=self._count_runtime_items(agent, 'mcp_runtime', 'servers'),
             plugins=self._count_workspace_items(agent, 'plugin_count'),

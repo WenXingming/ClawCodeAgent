@@ -469,7 +469,7 @@ class AgentTests(unittest.TestCase):
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
         result = agent.run('尝试读取 demo.txt')
 
-        self.assertNotIn('read_file', agent.tool_registry)
+        self.assertNotIn('read_file', agent.tool_registry_snapshot())
         self.assertEqual(result.stop_reason, 'stop')
         tool_rows = [item for item in result.transcript if item.get('role') == 'tool']
         self.assertEqual(len(tool_rows), 1)
@@ -1309,13 +1309,13 @@ class AgentTests(unittest.TestCase):
         ])
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
 
-        # Mock 网关公开方法：让搜索工具可注册并返回稳定 JSON 契约。
-        agent.workspace_gateway.has_search_providers = mock.Mock(return_value=True)
+        # Mock 工具网关门面：让搜索工具可注册并返回稳定 JSON 契约。
+        agent.tool_gateway.has_search_providers = mock.Mock(return_value=True)
 
         # 重新注册工具以应用模拟的 provider
-        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        agent.refresh_tool_registry()
 
-        agent.workspace_gateway.search = mock.Mock(
+        agent.tool_gateway.search_workspace = mock.Mock(
             return_value={
                 'provider': {
                     'provider_id': 'test_provider',
@@ -1346,7 +1346,12 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.stop_reason, 'stop')
         self.assertEqual(result.final_output, '搜索完成')
-        agent.workspace_gateway.search.assert_called_once()
+        agent.tool_gateway.search_workspace.assert_called_once_with(
+            'hello',
+            provider_id=None,
+            max_results=None,
+            max_retries=0,
+        )
 
     def test_run_calls_mcp_search_capabilities_from_main_loop(self) -> None:
         """验证主循环通过 mcp_search_capabilities 搜索远端能力。"""
@@ -1390,7 +1395,7 @@ class AgentTests(unittest.TestCase):
         ))
         agent.tool_gateway.mcp_render_capability_index = mock.Mock(return_value='- mcp:tavily:tavily_search')
 
-        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        agent.refresh_tool_registry()
 
         result = agent.run('查询适合当前任务的 MCP 能力')
 
@@ -1466,7 +1471,7 @@ class AgentTests(unittest.TestCase):
         })
         agent.tool_gateway.mcp_render_tool_result = mock.Mock(return_value='headline-1')
 
-        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        agent.refresh_tool_registry()
 
         result = agent.run('查询今天的科技新闻')
 
@@ -1555,7 +1560,7 @@ class AgentTests(unittest.TestCase):
             'raw_result': {},
         })
         agent.tool_gateway.mcp_render_tool_result = mock.Mock(return_value='headline-1')
-        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        agent.refresh_tool_registry()
 
         result = agent.run('查询今天的科技新闻并继续执行')
 
@@ -1578,23 +1583,24 @@ class AgentTests(unittest.TestCase):
         agent = self._build_agent(fake_client, self._build_runtime_config(workspace))
         
         # 配置 search provider 和 MCP 资源
-        agent.workspace_gateway.has_search_providers = mock.Mock(return_value=True)
+        agent.tool_gateway.has_search_providers = mock.Mock(return_value=True)
         
         agent.tool_gateway.has_mcp_resources = mock.Mock(return_value=True)
         agent.tool_gateway.has_mcp_servers = mock.Mock(return_value=True)
         
         # 重新注册工具
-        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        agent.refresh_tool_registry()
         
         # 验证工具被注册
-        self.assertIn('workspace_search', agent.tool_registry)
-        self.assertIn('mcp_list_resources', agent.tool_registry)
-        self.assertIn('mcp_read_resource', agent.tool_registry)
-        self.assertIn('mcp_search_capabilities', agent.tool_registry)
-        self.assertIn('mcp_call_tool', agent.tool_registry)
-        self.assertNotIn('mcp_list_tools', agent.tool_registry)
-        self.assertNotIn('tavily_search', agent.tool_registry)
-        self.assertNotIn('mcp_filesystem_read_file', agent.tool_registry)
+        tool_registry = agent.tool_registry_snapshot()
+        self.assertIn('workspace_search', tool_registry)
+        self.assertIn('mcp_list_resources', tool_registry)
+        self.assertIn('mcp_read_resource', tool_registry)
+        self.assertIn('mcp_search_capabilities', tool_registry)
+        self.assertIn('mcp_call_tool', tool_registry)
+        self.assertNotIn('mcp_list_tools', tool_registry)
+        self.assertNotIn('tavily_search', tool_registry)
+        self.assertNotIn('mcp_filesystem_read_file', tool_registry)
 
     def test_mcp_call_tool_blocks_filesystem_writes_without_permission(self) -> None:
         """验证 mcp_call_tool 仍会拦截 filesystem 写工具。"""
@@ -1625,16 +1631,16 @@ class AgentTests(unittest.TestCase):
             },
         })
         agent.tool_gateway.mcp_call_tool = mock.Mock()
-        agent.tool_registry = agent._register_workspace_runtime_tools(agent.tool_registry)
+        agent.refresh_tool_registry()
 
         context = agent.tool_gateway.build_context(
             config.workspace_scope,
             config.execution_policy,
             config.permissions,
-            tool_registry=agent.tool_registry,
+            tool_registry=agent.tool_registry_snapshot(),
         )
         result = agent.tool_gateway.execute(
-            agent.tool_registry,
+            agent.tool_registry_snapshot(),
             'mcp_call_tool',
             {
                 'tool_name': 'write_file',

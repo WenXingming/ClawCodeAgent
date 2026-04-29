@@ -8,7 +8,7 @@ agent 文件夹内的其他内部实现模块。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 from uuid import uuid4
 
 from agent.delegation_service import DelegationService
@@ -19,12 +19,13 @@ from agent.turn_coordinator import TurnCoordinator
 from context.context_gateway import ContextGateway
 from core_contracts.config import BudgetConfig
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, ToolPermissionPolicy, WorkspaceScope
+from core_contracts.interaction import SlashDispatcher
 from core_contracts.model import ModelClient
 from core_contracts.outcomes import AgentRunResult
 from core_contracts.primitives import JSONDict
 from core_contracts.session import AgentSessionSnapshot, AgentSessionState
 from core_contracts.tools import ToolDescriptor
-from interaction.interaction_gateway import SlashCommandDispatcher
+from interaction.interaction_gateway import EnvironmentLoadSummary, InteractionGateway
 from session.session_gateway import SessionGateway
 from tools.tools_gateway import ToolsGateway
 from workspace import WorkspaceGateway
@@ -53,11 +54,23 @@ class AgentGateway:
     delegation_service: DelegationService = field(default_factory=DelegationService)  # DelegationService: 子代理委派与分组状态。
     current_agent_id: str | None = None  # str | None: 当前调用树中的受管代理 ID。
     progress_reporter: Callable[[JSONDict], None] | None = None  # Callable[[JSONDict], None] | None: 实时事件上报回调。
-    _context_gateway: ContextGateway = field(init=False, repr=False)  # ContextGateway: 上下文预算和压缩门面。
-    _workspace_gateway: WorkspaceGateway = field(init=False, repr=False)  # WorkspaceGateway: 工作区策略、hook 与搜索门面。
-    _result_factory: ResultFactory = field(init=False, repr=False)  # ResultFactory: 最终结果与会话快照构建器。
-    _prompt_processor: PromptProcessor = field(init=False, repr=False)  # PromptProcessor: slash 命令和 prompt 预处理器。
-    _turn_coordinator: TurnCoordinator = field(init=False, repr=False)  # TurnCoordinator: 单轮主循环编排器。
+    workspace_gateway_factory: Callable[[Any], WorkspaceGateway] = field(
+        default=WorkspaceGateway.from_workspace
+    )  # Callable[[Any], WorkspaceGateway]: WorkspaceGateway 构造工厂。
+    context_gateway_factory: Callable[[ModelClient], ContextGateway] = field(
+        default=lambda client: ContextGateway(client=client)
+    )  # Callable[[ModelClient], ContextGateway]: ContextGateway 构造工厂。
+    turn_coordinator_factory: Callable[..., TurnCoordinator] = field(
+        default=TurnCoordinator
+    )  # Callable[..., TurnCoordinator]: TurnCoordinator 构造工厂。
+    slash_dispatcher_factory: Callable[[ContextGateway], SlashDispatcher] = field(
+        default=lambda context_gateway: InteractionGateway.SlashCommandDispatcher(context_gateway)
+    )  # Callable[[ContextGateway], SlashDispatcher]: slash 分发器构造工厂。
+    _context_gateway: ContextGateway | None = field(default=None, init=False, repr=False)
+    _workspace_gateway: WorkspaceGateway | None = field(default=None, init=False, repr=False)
+    _result_factory: ResultFactory | None = field(default=None, init=False, repr=False)
+    _prompt_processor: PromptProcessor | None = field(default=None, init=False, repr=False)
+    _turn_coordinator: TurnCoordinator | None = field(default=None, init=False, repr=False)
 
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务（新会话）。
@@ -114,102 +127,66 @@ class AgentGateway:
         self.delegation_service = self._turn_coordinator.delegation_service
         return result
 
-    @property
-    def context_gateway(self) -> ContextGateway:
-        """返回当前绑定的 context gateway。
-        Args:
-            无。
-        Returns:
-            ContextGateway: 当前运行时的上下文门面。
-        Raises:
-            无。
-        """
-        return self._context_gateway
+    def environment_load_summary(self) -> EnvironmentLoadSummary:
+        """返回交互横幅所需的环境加载摘要。"""
+        self._ensure_runtime()
+        return EnvironmentLoadSummary(
+            mcp_servers=self.tool_gateway.mcp_server_count(),
+            plugins=self.tool_gateway.workspace_plugin_count(),
+            hook_policies=self.tool_gateway.workspace_policy_count(),
+            search_providers=self.tool_gateway.workspace_search_provider_count(),
+            load_errors=self.tool_gateway.mcp_load_error_count() + self.tool_gateway.workspace_load_error_count(),
+        )
 
-    @property
-    def context_manager(self) -> ContextGateway:
-        """返回当前绑定的 context facade。
+    def tool_registry_snapshot(self) -> dict[str, ToolDescriptor]:
+        """返回当前基础工具注册表快照。
         Args:
-            无。
+            None: 该方法不接收额外参数。
         Returns:
-            ContextGateway: 当前运行时的上下文门面。
+            dict[str, ToolDescriptor]: 当前工具注册表副本。
         Raises:
             无。
         """
-        return self._context_gateway
-
-    @property
-    def workspace_gateway(self) -> WorkspaceGateway:
-        """返回当前绑定的 workspace facade。
-        Args:
-            无。
-        Returns:
-            WorkspaceGateway: 当前运行时的工作区门面。
-        Raises:
-            无。
-        """
-        return self._workspace_gateway
-
-    @property
-    def tool_registry(self) -> dict[str, ToolDescriptor]:
-        """返回当前基础工具注册表。
-        Args:
-            无。
-        Returns:
-            dict[str, ToolDescriptor]: 工具名到描述符的映射副本。
-        Raises:
-            无。
-        """
+        self._ensure_runtime()
         return self._turn_coordinator.tool_registry_view()
 
-    @tool_registry.setter
-    def tool_registry(self, value: dict[str, ToolDescriptor]) -> None:
-        """回写当前基础工具注册表。
+    def replace_tool_registry(self, tool_registry: dict[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
+        """用给定注册表替换当前工具集合。
         Args:
-            value (dict[str, ToolDescriptor]): 需要替换的工具注册表。
+            tool_registry (dict[str, ToolDescriptor]): 新的工具注册表。
         Returns:
-            None: 原地更新运行时注册表。
+            dict[str, ToolDescriptor]: 替换后的工具注册表副本。
         Raises:
             无。
         """
-        self._turn_coordinator.tool_registry = dict(value)
+        self._ensure_runtime()
+        return self._turn_coordinator.replace_tool_registry(tool_registry)
 
-    @property
-    def mcp_runtime(self):
-        """返回当前绑定的 MCP runtime。
+    def refresh_tool_registry(self) -> dict[str, ToolDescriptor]:
+        """根据当前 runtime 状态重建工具注册表。
         Args:
-            无。
+            None: 该方法不接收额外参数。
         Returns:
-            Any: tool gateway 内部维护的 MCP runtime 对象。
+            dict[str, ToolDescriptor]: 重建后的工具注册表副本。
         Raises:
-            无。
+            Exception: 动态工具构建失败时向上透传。
         """
-        return self.tool_gateway._mcp_runtime
-
-    def _register_workspace_runtime_tools(self, tool_registry: dict[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
-        """代理到 TurnCoordinator 的动态工具注册逻辑。
-        Args:
-            tool_registry (dict[str, ToolDescriptor]): 待扩展的工具注册表。
-        Returns:
-            dict[str, ToolDescriptor]: 已追加动态工具后的注册表。
-        Raises:
-            Exception: 底层工具注册过程异常会向上透传。
-        """
-        return self._turn_coordinator._register_workspace_runtime_tools(tool_registry)
+        self._ensure_runtime()
+        return self._turn_coordinator.refresh_tool_registry()
 
     def __post_init__(self) -> None:
-        """初始化运行时内部协作者。
-        Args:
-            无。
-        Returns:
-            None: 原地完成运行时装配。
-        Raises:
-            Exception: 任一协作者构造失败时向上透传。
-        """
-        self._workspace_gateway = WorkspaceGateway.from_workspace(self.workspace_scope.cwd)
+        """延迟初始化：构造工作在首次 run/resume 时完成。"""
+        return None
+
+    def _ensure_runtime(self) -> None:
+        """按需初始化内部运行时协作者。"""
+        if self._turn_coordinator is not None:
+            return
+
+        self._workspace_gateway = self.workspace_gateway_factory(self.workspace_scope.cwd)
         self.tool_gateway.bind_workspace(self.workspace_scope.cwd)
         self.budget_config = self._workspace_gateway.apply_budget_config(self.budget_config)
-        self._context_gateway = ContextGateway(client=self.client)
+        self._context_gateway = self.context_gateway_factory(self.client)
         self._result_factory = ResultFactory(
             client=self.client,
             workspace_scope=self.workspace_scope,
@@ -220,7 +197,7 @@ class AgentGateway:
             session_paths=self.session_paths,
             session_gateway=self.session_manager,
         )
-        self._turn_coordinator = TurnCoordinator(
+        self._turn_coordinator = self.turn_coordinator_factory(
             client=self.client,
             workspace_scope=self.workspace_scope,
             execution_policy=self.execution_policy,
@@ -237,7 +214,7 @@ class AgentGateway:
             progress_reporter=self.progress_reporter,
         )
         self._prompt_processor = PromptProcessor(
-            slash_dispatcher=SlashCommandDispatcher(self._context_gateway),
+            slash_dispatcher=self.slash_dispatcher_factory(self._context_gateway),
             workspace_scope=self.workspace_scope,
             context_policy=self.context_policy,
             permissions=self.permissions,
@@ -260,6 +237,7 @@ class AgentGateway:
         Raises:
             无。
         """
+        self._ensure_runtime()
         self._turn_coordinator.progress_reporter = self.progress_reporter
         self._turn_coordinator.current_agent_id = self.current_agent_id
         self._turn_coordinator.budget_config = self.budget_config
@@ -285,6 +263,10 @@ class AgentGateway:
             tool_gateway=self.tool_gateway,
             delegation_service=self._turn_coordinator.delegation_service,
             current_agent_id=child_agent_id,
+            workspace_gateway_factory=self.workspace_gateway_factory,
+            context_gateway_factory=self.context_gateway_factory,
+            turn_coordinator_factory=self.turn_coordinator_factory,
+            slash_dispatcher_factory=self.slash_dispatcher_factory,
         )
         child_agent.progress_reporter = self.progress_reporter
         return child_agent
