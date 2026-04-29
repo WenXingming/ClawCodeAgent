@@ -20,9 +20,8 @@ from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, Sessio
 from interaction import SlashCommandDispatcher
 from openai_client import OpenAIClient
 from session import AgentSessionSnapshot, AgentSessionState, SessionManager
-from tools.mcp import MCPRuntime
-from tools.registry import LocalTool
-from tools.tool_gateway import ToolGateway
+from core_contracts.tools_contracts import ToolDescriptor
+from tools.tools_gateway import ToolsGateway
 from workspace import WorkspaceGateway
 
 
@@ -38,13 +37,12 @@ class Agent:
     budget_config: BudgetConfig
     session_paths: SessionPaths
     session_manager: SessionManager
-    tool_gateway: ToolGateway = field(default_factory=ToolGateway)
+    tool_gateway: ToolsGateway = field(default_factory=ToolsGateway)
     delegation_service: DelegationService = field(default_factory=DelegationService)
     current_agent_id: str | None = None
     progress_reporter: Callable[[JSONDict], None] | None = None
     _context_manager: ContextManager = field(init=False, repr=False)
     _workspace_gateway: WorkspaceGateway = field(init=False, repr=False)
-    _mcp_runtime: MCPRuntime = field(init=False, repr=False)
     _result_factory: ResultFactory = field(init=False, repr=False)
     _prompt_processor: PromptProcessor = field(init=False, repr=False)
     _turn_coordinator: TurnCoordinator = field(init=False, repr=False)
@@ -100,28 +98,28 @@ class Agent:
         return self._workspace_gateway
 
     @property
-    def mcp_runtime(self) -> MCPRuntime:
-        """暴露当前 agent 绑定的 MCP runtime。"""
-        return self._mcp_runtime
+    def mcp_runtime(self):
+        """暴露当前 agent 绑定的 MCP runtime 视图。"""
+        return self.tool_gateway.mcp_runtime
 
     @property
-    def tool_registry(self) -> dict[str, LocalTool]:
+    def tool_registry(self) -> dict[str, ToolDescriptor]:
         """暴露当前基础工具注册表。"""
         return self._turn_coordinator.tool_registry_view()
 
     @tool_registry.setter
-    def tool_registry(self, value: dict[str, LocalTool]) -> None:
+    def tool_registry(self, value: dict[str, ToolDescriptor]) -> None:
         """允许测试与控制面回写基础工具注册表。"""
         self._turn_coordinator.tool_registry = dict(value)
 
-    def _register_workspace_runtime_tools(self, tool_registry: dict[str, LocalTool]) -> dict[str, LocalTool]:
+    def _register_workspace_runtime_tools(self, tool_registry: dict[str, ToolDescriptor]) -> dict[str, ToolDescriptor]:
         """代理到 TurnCoordinator 的动态工具注册逻辑。"""
         return self._turn_coordinator._register_workspace_runtime_tools(tool_registry)
 
     def __post_init__(self) -> None:
         """初始化 agent facade 所需的内部协作者。"""
         self._workspace_gateway = WorkspaceGateway.from_workspace(self.workspace_scope.cwd)
-        self._mcp_runtime = MCPRuntime.from_workspace(self.workspace_scope.cwd)
+        self.tool_gateway.bind_workspace(self.workspace_scope.cwd)
         self.budget_config = self._workspace_gateway.apply_budget_config(self.budget_config)
         self._context_manager = ContextManager(client=self.client)
         self._result_factory = ResultFactory(
@@ -144,7 +142,6 @@ class Agent:
             session_paths=self.session_paths,
             session_manager=self.session_manager,
             workspace_gateway=self._workspace_gateway,
-            mcp_runtime=self._mcp_runtime,
             context_manager=self._context_manager,
             tool_gateway=self.tool_gateway,
             delegation_service=self.delegation_service,

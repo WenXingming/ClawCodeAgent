@@ -1,14 +1,14 @@
 """工具子系统公共导出。"""
 
-from tools.executor import ToolExecutionContext, ToolExecutionError, ToolPermissionError, ToolStreamUpdate
-from tools.registry import LocalTool
-from tools.tool_gateway import ToolGateway
+from core_contracts.tools_contracts import ToolDescriptor, ToolExecutionContext, ToolStreamUpdate
+from tools.executor import ToolExecutionError, ToolPermissionError
+from tools.tools_gateway import ToolsGateway
 
 __all__ = [
-    'LocalTool',
+    'ToolDescriptor',
     'ToolExecutionContext',
     'ToolExecutionError',
-    'ToolGateway',
+    'ToolsGateway',
     'ToolPermissionError',
     'ToolStreamUpdate',
 ]

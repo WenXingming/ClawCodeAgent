@@ -10,14 +10,14 @@ from unittest.mock import patch
 
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
-from tools.tool_gateway import ToolGateway
+from tools.tools_gateway import ToolsGateway
 
 
 class LocalToolsShellTests(unittest.TestCase):
     """验证 bash 工具权限、安全与流式执行行为。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolGateway()
+        self.tool_gateway = ToolsGateway()
 
     def _build_context(
         self,

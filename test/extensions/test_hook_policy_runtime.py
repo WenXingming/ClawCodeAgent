@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from tools.registry import LocalTool
-from tools.tool_gateway import ToolGateway
+from tools.tools_gateway import ToolsGateway
 from workspace import PolicyCatalog
 
 
@@ -16,7 +16,7 @@ class PolicyCatalogTests(unittest.TestCase):
     """验证 policy manifest 发现、合并与工具过滤。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolGateway()
+        self.tool_gateway = ToolsGateway()
 
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
         manifest_dir = workspace / '.claw' / 'policies'
