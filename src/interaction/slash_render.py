@@ -9,7 +9,7 @@ from __future__ import annotations
 import shutil
 from typing import Mapping, TextIO
 
-from interaction.terminal_render import TerminalRenderer
+from .terminal_render import TerminalRenderer
 
 
 class SlashCommandRenderer(TerminalRenderer):

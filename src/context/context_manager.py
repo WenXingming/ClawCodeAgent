@@ -13,7 +13,7 @@ from core_contracts.budget import BudgetConfig
 from core_contracts.protocol import JSONDict, OneTurnResponse
 from core_contracts.runtime_policy import ContextPolicy
 from core_contracts.token_usage import TokenUsage
-from openai_client.openai_client import OpenAIClient, OpenAIClientError
+from openai_client import OpenAIClient, OpenAIClientError
 
 
 _MAX_REACTIVE_COMPACT_RETRIES = 2
