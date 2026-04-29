@@ -1,4 +1,4 @@
-"""管理工作流清单读取、执行与运行历史持久化。
+﻿"""管理工作流清单读取、执行与运行历史持久化。
 
 本模块负责从工作区加载工作流定义，按步骤驱动 `TaskRuntime` 执行任务操作，并把每次工作流运行结果保存到历史记录中。它提供的是本地工作流运行时，不负责远程编排或模型调用。
 """
@@ -12,7 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.protocol import JSONDict
+from core_contracts.primitives import JSONDict
 from planning.task_runtime import TaskRecord, TaskRuntime
 
 

@@ -1,4 +1,4 @@
-"""Agent 最小闭环测试。"""
+﻿"""Agent 最小闭环测试。"""
 
 from __future__ import annotations
 
@@ -9,16 +9,16 @@ from pathlib import Path
 from unittest import mock
 from uuid import uuid4
 
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.protocol import OneTurnResponse, ToolCall
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.token_usage import TokenUsage
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.messaging import OneTurnResponse, ToolCall
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.primitives import TokenUsage
 from agent import Agent
 from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
 from session import SessionGateway
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.session import AgentSessionSnapshot
 from workspace import SearchProviderProfile, SearchResponse, SearchResult
 
 

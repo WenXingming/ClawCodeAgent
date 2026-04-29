@@ -1,4 +1,4 @@
-"""本地文件系统工具集合。
+﻿"""本地文件系统工具集合。
 
 提供 list_dir、read_file、write_file、edit_file 四个基础文件系统工具，
 所有工具通过 build_filesystem_tools 工厂函数产出 ToolDescriptor 注册表条目。
@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from core_contracts.protocol import JSONDict
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.primitives import JSONDict
+from core_contracts.tools import ToolDescriptor
 from tools.executor import ToolExecutionContext, ToolExecutionError, ToolPermissionError
 
 

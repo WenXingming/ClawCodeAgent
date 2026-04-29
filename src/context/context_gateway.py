@@ -1,4 +1,4 @@
-"""context 领域统一网关。
+﻿"""context 领域统一网关。
 
 本模块是 context 目录对外的唯一公开入口，隔离全部内部实现细节：
 1. project_budget()                  —— 预算投影：评估本次调用的 token 预算快照；
@@ -11,8 +11,8 @@
 
 from __future__ import annotations
 
-from core_contracts.budget import BudgetConfig
-from core_contracts.context_contracts import (
+from core_contracts.config import BudgetConfig
+from core_contracts.context import (
     BudgetProjection,
     CompactionResult,
     ContextRunState,
@@ -21,9 +21,9 @@ from core_contracts.context_contracts import (
     ReactiveCompactOutcome,
     SnipResult,
 )
-from core_contracts.openai_contracts import ModelClient
-from core_contracts.protocol import JSONDict
-from core_contracts.runtime_policy import ContextPolicy
+from core_contracts.model import ModelClient
+from core_contracts.primitives import JSONDict
+from core_contracts.config import ContextPolicy
 
 from .budget_projection import BudgetProjector, OUTPUT_RESERVE_TOKENS, SOFT_BUFFER_TOKENS
 from .compactor import Compactor

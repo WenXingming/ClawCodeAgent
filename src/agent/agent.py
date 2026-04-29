@@ -1,4 +1,4 @@
-"""agent 领域统一对外入口。"""
+﻿"""agent 领域统一对外入口。"""
 
 from __future__ import annotations
 
@@ -12,16 +12,16 @@ from agent.result_factory import ResultFactory
 from agent.run_state import AgentRunState
 from agent.turn_coordinator import TurnCoordinator
 from context.context_gateway import ContextGateway
-from core_contracts.budget import BudgetConfig
-from core_contracts.openai_contracts import ModelClient
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.protocol import JSONDict
-from core_contracts.run_result import AgentRunResult
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.session_contracts import AgentSessionSnapshot, AgentSessionState
+from core_contracts.config import BudgetConfig
+from core_contracts.model import ModelClient
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.primitives import JSONDict
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.session import AgentSessionSnapshot, AgentSessionState
 from interaction.interaction_gateway import SlashCommandDispatcher
 from session.session_gateway import SessionGateway
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.tools import ToolDescriptor
 from tools.tools_gateway import ToolsGateway
 from workspace import WorkspaceGateway
 

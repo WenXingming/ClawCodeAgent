@@ -1,4 +1,4 @@
-"""执行模型调用前的上下文预算投影。
+﻿"""执行模型调用前的上下文预算投影。
 
 本模块提供 BudgetProjector，根据消息列表与工具 schema 的启发式 token 估算，
 生成本次调用的预算快照（BudgetProjection），供后续 snip / compact / guard 链路使用。
@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .token_estimator import TokenEstimator
-from core_contracts.context_contracts import BudgetProjection
+from core_contracts.context import BudgetProjection
 
 
 OUTPUT_RESERVE_TOKENS: int = 4_096   # 默认从输入上限中预留给模型输出的 token 数。

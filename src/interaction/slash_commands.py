@@ -1,4 +1,4 @@
-"""Slash 命令交互面模块。
+﻿"""Slash 命令交互面模块。
 
 本模块负责三件事：
 1. 解析用户输入中的本地 slash 命令。
@@ -12,10 +12,10 @@ from dataclasses import dataclass, replace
 from typing import Callable, Literal, Mapping
 
 from context.context_gateway import ContextGateway
-from core_contracts.interaction_contracts import SlashCommandContext, SlashCommandResult
-from core_contracts.protocol import JSONDict
-from core_contracts.session_contracts import AgentSessionState
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.interaction import SlashCommandContext, SlashCommandResult
+from core_contracts.primitives import JSONDict
+from core_contracts.session import AgentSessionState
+from core_contracts.tools import ToolDescriptor
 
 
 @dataclass(frozen=True)

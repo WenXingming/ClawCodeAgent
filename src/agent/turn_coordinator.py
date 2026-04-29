@@ -12,14 +12,15 @@ from agent.result_factory import ResultFactory
 from agent.run_limits import RunLimits
 from agent.run_state import AgentRunState
 from context.context_gateway import ContextGateway
-from core_contracts.budget import BudgetConfig
-from core_contracts.gateway_errors import GatewayError, GatewayPermissionError, GatewayValidationError
-from core_contracts.openai_contracts import ModelClient
-from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExecutionResult
-from core_contracts.run_result import AgentRunResult
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.tools_contracts import ToolDescriptor, ToolStreamUpdate
+from core_contracts.config import BudgetConfig
+from core_contracts.errors import GatewayError, GatewayPermissionError, GatewayValidationError
+from core_contracts.model import ModelClient
+from core_contracts.messaging import OneTurnResponse, ToolCall, ToolExecutionResult
+from core_contracts.primitives import JSONDict
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.tools import ToolDescriptor, ToolStreamUpdate
 from session.session_gateway import SessionGateway
 from tools.tools_gateway import ToolsGateway
 from workspace.workspace_gateway import WorkspaceGateway

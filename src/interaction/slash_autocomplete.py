@@ -1,4 +1,4 @@
-"""slash 自动补全输入适配模块。
+﻿"""slash 自动补全输入适配模块。
 
 本模块把交互循环的输入职责从 CLI 协调器中抽离出来：
 1. 在可用时通过 prompt_toolkit 提供 slash 命令补全；
@@ -12,7 +12,7 @@ import builtins
 import sys
 from typing import Callable, TextIO
 
-from core_contracts.interaction_contracts import SlashAutocompleteEntry
+from core_contracts.interaction import SlashAutocompleteEntry
 
 try:
     from prompt_toolkit import PromptSession

@@ -1,16 +1,16 @@
-"""负责构造持久化快照与最终运行结果。"""
+﻿"""负责构造持久化快照与最终运行结果。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from agent.run_state import AgentRunState
-from core_contracts.budget import BudgetConfig
-from core_contracts.openai_contracts import ModelClient
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.run_result import AgentRunResult
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.config import BudgetConfig
+from core_contracts.model import ModelClient
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.session import AgentSessionSnapshot
 from session.session_gateway import SessionGateway
 
 

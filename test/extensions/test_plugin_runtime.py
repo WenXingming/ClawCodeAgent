@@ -1,4 +1,4 @@
-"""ISSUE-014 Plugin Runtime 单元测试。"""
+﻿"""ISSUE-014 Plugin Runtime 单元测试。"""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
 from tools.tools_gateway import ToolsGateway
 from workspace import PluginCatalog
 

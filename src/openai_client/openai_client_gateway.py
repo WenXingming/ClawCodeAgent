@@ -1,24 +1,24 @@
-"""openai_client 领域统一网关。
+﻿"""openai_client 领域统一网关。
 
 该模块是 openai_client 文件夹唯一公开入口实现，负责：
 1. 接收 core_contracts 定义的模型请求契约；
 2. 调用内部 OpenAI-compatible 客户端完成请求；
-3. 把内部异常统一翻译成 core_contracts.openai_contracts 异常族。
+3. 把内部异常统一翻译成 core_contracts.errors 异常族。
 """
 
 from __future__ import annotations
 
 from typing import Iterator
 
-from core_contracts.model import ModelConfig, StructuredOutputSpec
-from core_contracts.openai_contracts import (
-    ModelClient,
+from core_contracts.errors import (
     ModelConnectionError,
     ModelGatewayError,
     ModelResponseError,
     ModelTimeoutError,
 )
-from core_contracts.protocol import JSONDict, OneTurnResponse, StreamEvent
+from core_contracts.messaging import OneTurnResponse, StreamEvent
+from core_contracts.model import ModelClient, ModelConfig, StructuredOutputSpec
+from core_contracts.primitives import JSONDict
 
 from .openai_client import OpenAIClient, OpenAIClientError, OpenAIConnectionError, OpenAIResponseError, OpenAITimeoutError
 

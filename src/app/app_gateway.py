@@ -1,4 +1,4 @@
-"""app 模块对外唯一公开网关。
+﻿"""app 模块对外唯一公开网关。
 
 本模块是 src/app 文件夹的唯一合法出口。
 外部调用方（main.py、测试、远程接口）只允许通过 AppGateway 访问 app 领域的能力；
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from core_contracts.app_contracts import QueryServiceConfig, QueryTurnResult
+from core_contracts.outcomes import QueryServiceConfig, QueryTurnResult
 
 if TYPE_CHECKING:
     from app.query_service import QueryService as _QueryService

@@ -1,4 +1,4 @@
-"""ISSUE-015 Hook Policy Runtime 单元测试。"""
+﻿"""ISSUE-015 Hook Policy Runtime 单元测试。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.tools import ToolDescriptor
 from tools.tools_gateway import ToolsGateway
 from workspace import PolicyCatalog
 

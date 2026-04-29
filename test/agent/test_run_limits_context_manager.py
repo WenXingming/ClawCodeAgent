@@ -1,4 +1,4 @@
-"""ContextGateway 单元测试。"""
+﻿"""ContextGateway 单元测试。"""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ from uuid import uuid4
 from agent.run_state import AgentRunState
 from agent.run_limits import RunLimits
 from context.context_gateway import ContextGateway
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.protocol import OneTurnResponse, ToolCall
-from core_contracts.runtime_policy import ContextPolicy
-from core_contracts.token_usage import TokenUsage
+from core_contracts.messaging import OneTurnResponse, ToolCall
+from core_contracts.config import ContextPolicy
+from core_contracts.primitives import TokenUsage
 from openai_client.openai_client import OpenAIClient
-from core_contracts.session_contracts import AgentSessionState
+from core_contracts.session import AgentSessionState
 
 
 @dataclass(frozen=True)

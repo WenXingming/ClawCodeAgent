@@ -1,10 +1,10 @@
-"""ISSUE-008 AgentSessionState.from_persisted 单元测试。"""
+﻿"""ISSUE-008 AgentSessionState.from_persisted 单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
-from core_contracts.session_contracts import AgentSessionState
+from core_contracts.session import AgentSessionState
 
 
 class SessionStateFromPersistedTests(unittest.TestCase):

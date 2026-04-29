@@ -1,4 +1,4 @@
-"""工具注册表基础模型。
+﻿"""工具注册表基础模型。
 
 提供工具注册表的构建、合并与模型投影功能。
 所有函数以 ToolDescriptor 为核心操作对象，不依赖外部运行状态。
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from core_contracts.protocol import JSONDict
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.primitives import JSONDict
+from core_contracts.tools import ToolDescriptor
 
 
 def build_registry(*tools: ToolDescriptor) -> dict[str, ToolDescriptor]:

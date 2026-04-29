@@ -1,4 +1,4 @@
-"""ISSUE-003 OpenAI-compatible 客户端流式能力测试。
+﻿"""ISSUE-003 OpenAI-compatible 客户端流式能力测试。
 
 这个测试文件聚焦三件事：
 1) SSE 事件是否被正确解析为 StreamEvent。
@@ -15,7 +15,7 @@ from unittest.mock import patch
 from urllib import error
 
 from core_contracts.model import ModelConfig, StructuredOutputSpec
-from core_contracts.token_usage import TokenUsage
+from core_contracts.primitives import TokenUsage
 from openai_client.openai_client import (
     OpenAIClient,
     OpenAIConnectionError,

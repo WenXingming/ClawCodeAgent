@@ -1,4 +1,4 @@
-"""管理工作区本地任务状态机、持久化与依赖解析。
+﻿"""管理工作区本地任务状态机、持久化与依赖解析。
 
 本模块负责把任务的创建、更新、状态流转和依赖阻塞规则收敛到一个本地运行时对象中，并把状态稳定持久化到 `.claw/tasks.json`。上层通常通过 `TaskRuntime.from_workspace()` 加载状态，再调用公开方法驱动任务状态变化。
 """
@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
-from core_contracts.protocol import JSONDict
+from core_contracts.primitives import JSONDict
 
 
 _TASKS_STATE_FILE = Path('.claw') / 'tasks.json'

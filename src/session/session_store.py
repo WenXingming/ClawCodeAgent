@@ -1,4 +1,4 @@
-"""提供会话快照的基础持久化与恢复能力。
+﻿"""提供会话快照的基础持久化与恢复能力。
 
 本模块只承担最小的会话存取职责：
 1. 把 AgentSessionSnapshot 写入 UTF-8 JSON 文件。
@@ -14,7 +14,7 @@ import json
 from json import JSONDecodeError
 from pathlib import Path
 
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.session import AgentSessionSnapshot
 
 
 class AgentSessionStore:

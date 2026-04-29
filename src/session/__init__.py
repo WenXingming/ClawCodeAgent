@@ -1,4 +1,4 @@
-"""session 模块公开入口与职责说明。
+﻿"""session 模块公开入口与职责说明。
 
 本模块是 session 领域的对外门面，核心职责如下：
 1. 统一暴露 SessionGateway，屏蔽内部存储与恢复实现细节。
@@ -7,7 +7,7 @@
 
 说明：
 - 会话数据契约（AgentSessionSnapshot、AgentSessionState）定义在
-	core_contracts.session_contracts，避免内部结构泄漏。
+	core_contracts.session，避免内部结构泄漏。
 """
 
 from .session_gateway import SessionGateway

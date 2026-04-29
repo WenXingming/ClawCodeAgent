@@ -1,4 +1,4 @@
-"""工作区领域统一门面。"""
+﻿"""工作区领域统一门面。"""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from core_contracts.budget import BudgetConfig
-from core_contracts.protocol import JSONDict
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.config import BudgetConfig
+from core_contracts.primitives import JSONDict
+from core_contracts.tools import ToolDescriptor
 from workspace.plugin_catalog import PluginCatalog
 from workspace.policy_catalog import PolicyCatalog
 from workspace.search_service import SearchResponse, SearchService

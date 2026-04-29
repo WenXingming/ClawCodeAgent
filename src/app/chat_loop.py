@@ -1,4 +1,4 @@
-"""负责交互式聊天循环与单轮结果渲染。
+﻿"""负责交互式聊天循环与单轮结果渲染。
 
 本模块是 app 领域的纯内部实现，禁止外部直接导入。
 ChatLoop 封装 agent / agent-chat / agent-resume 三条命令共用的多轮交互主循环，
@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core_contracts.run_result import AgentRunResult
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.session import AgentSessionSnapshot
 from interaction.interaction_gateway import (
     EnvironmentLoadSummary,
     ExitRenderer,

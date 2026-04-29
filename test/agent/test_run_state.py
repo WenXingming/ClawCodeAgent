@@ -1,13 +1,13 @@
-"""AgentRunState 单元测试。"""
+﻿"""AgentRunState 单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
 from agent.run_state import AgentRunState
-from core_contracts.protocol import ToolCall, ToolExecutionResult
-from core_contracts.token_usage import TokenUsage
-from core_contracts.session_contracts import AgentSessionState
+from core_contracts.messaging import ToolCall, ToolExecutionResult
+from core_contracts.primitives import TokenUsage
+from core_contracts.session import AgentSessionState
 
 
 class AgentRunStateTests(unittest.TestCase):

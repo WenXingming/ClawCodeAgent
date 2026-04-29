@@ -1,14 +1,15 @@
-"""维护单次 agent run/resume 调用期间的动态运行态。"""
+﻿"""维护单次 agent run/resume 调用期间的动态运行态。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from core_contracts.context_contracts import BudgetProjection
-from core_contracts.protocol import JSONDict, ToolCall, ToolExecutionResult
-from core_contracts.session_contracts import AgentSessionState
-from core_contracts.token_usage import TokenUsage
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.context import BudgetProjection
+from core_contracts.messaging import ToolCall, ToolExecutionResult
+from core_contracts.primitives import JSONDict
+from core_contracts.session import AgentSessionState
+from core_contracts.primitives import TokenUsage
+from core_contracts.tools import ToolDescriptor
 
 
 @dataclass

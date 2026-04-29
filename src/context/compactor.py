@@ -1,4 +1,4 @@
-"""主动 compact 与 reactive compact 的上下文摘要压缩器。
+﻿"""主动 compact 与 reactive compact 的上下文摘要压缩器。
 
 本模块提供 Compactor，通过调用语言模型将旧对话历史压缩为摘要，并原地写回消息列表。
 支持两种触发场景：auto-compact（投影超出阈值时主动触发）和 reactive compact（模型
@@ -12,9 +12,9 @@ import re
 from dataclasses import dataclass, field
 
 from .token_estimator import TokenEstimator
-from core_contracts.context_contracts import CompactionResult
-from core_contracts.openai_contracts import ModelClient
-from core_contracts.protocol import JSONDict
+from core_contracts.context import CompactionResult
+from core_contracts.model import ModelClient
+from core_contracts.primitives import JSONDict
 
 
 _COMPACT_BOUNDARY_PREFIX = (

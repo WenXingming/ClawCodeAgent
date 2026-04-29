@@ -1,4 +1,4 @@
-"""最小命令行入口测试。"""
+﻿"""最小命令行入口测试。"""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.run_result import AgentRunResult
-from core_contracts.token_usage import TokenUsage
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.primitives import TokenUsage
 from main import main
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.session import AgentSessionSnapshot
 
 
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:

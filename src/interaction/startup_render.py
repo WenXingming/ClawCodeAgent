@@ -1,4 +1,4 @@
-"""CLI 启动渲染模块。
+﻿"""CLI 启动渲染模块。
 
 本模块负责在交互式命令行会话启动时输出欢迎横幅，并在可用时追加一行
 环境摘要文本。它只承载启动阶段的业务排版与着色逻辑，不负责摘要建模
@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from core_contracts.interaction_contracts import EnvironmentLoadSummary
+from core_contracts.interaction import EnvironmentLoadSummary
 from .terminal_render import TerminalRenderer
 
 

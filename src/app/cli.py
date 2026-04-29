@@ -1,4 +1,4 @@
-"""控制面命令行交互模块。
+﻿"""控制面命令行交互模块。
 
 本模块是 app 领域的纯内部实现，禁止外部直接导入。
 AppCLI 负责把 argparse 命令路由到 RuntimeBuilder（负责装配运行时）
@@ -13,9 +13,9 @@ from pathlib import Path
 
 from app.chat_loop import ChatLoop
 from app.runtime_builder import RuntimeBuilder
-from core_contracts.openai_contracts import ModelGatewayError
-from core_contracts.run_result import AgentRunResult
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.errors import ModelGatewayError
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.session import AgentSessionSnapshot
 from interaction.interaction_gateway import ExitRenderer, SlashCommandRenderer, StartupRenderer
 from openai_client import OpenAIClientGateway
 from session.session_gateway import SessionGateway

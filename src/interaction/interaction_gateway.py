@@ -1,9 +1,9 @@
-"""interaction 域唯一对外网关。
+﻿"""interaction 域唯一对外网关。
 
 所有跨域访问必须通过本文件，禁止直接 import interaction 包或其子模块。
 """
 
-from core_contracts.interaction_contracts import (
+from core_contracts.interaction import (
     EnvironmentLoadSummary,
     SessionSummary,
     SlashAutocompleteEntry,

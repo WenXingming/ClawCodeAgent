@@ -1,4 +1,4 @@
-"""Step 8 QueryService 单元测试。"""
+﻿"""Step 8 QueryService 单元测试。"""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from uuid import uuid4
 
 from app.app_gateway import AppGateway
 from app.query_service import QueryService  # internal import kept for isinstance checks only
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.protocol import OneTurnResponse, ToolCall
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.token_usage import TokenUsage
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.messaging import OneTurnResponse, ToolCall
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.primitives import TokenUsage
 from agent import Agent
 from openai_client.openai_client import OpenAIClient
 from session import SessionGateway

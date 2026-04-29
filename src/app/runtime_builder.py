@@ -1,4 +1,4 @@
-"""负责 CLI 运行时依赖与静态契约装配。
+﻿"""负责 CLI 运行时依赖与静态契约装配。
 
 本模块是 app 领域的纯内部实现，禁止外部直接导入。
 RuntimeBuilder 从 argparse.Namespace 中读取所有命令行参数，
@@ -13,12 +13,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from agent import Agent
-from core_contracts.budget import BudgetConfig
+from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.model_pricing import ModelPricing
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.model import ModelPricing
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
+from core_contracts.session import AgentSessionSnapshot
 from openai_client import OpenAIClientGateway
 from session.session_gateway import SessionGateway
 

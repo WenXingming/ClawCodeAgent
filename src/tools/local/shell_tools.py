@@ -1,4 +1,4 @@
-"""本地 shell 工具集合。
+﻿"""本地 shell 工具集合。
 
 提供 bash 工具，支持受权限和安全策略约束的 shell 命令执行，
 包含普通执行与流式输出两种模式。
@@ -14,8 +14,9 @@ import time
 from dataclasses import dataclass
 from typing import Iterator
 
-from core_contracts.protocol import JSONDict, ToolExecutionResult
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.messaging import ToolExecutionResult
+from core_contracts.primitives import JSONDict
+from core_contracts.tools import ToolDescriptor
 from tools.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutionContext, ToolExecutionError, ToolPermissionError, ToolStreamUpdate
 

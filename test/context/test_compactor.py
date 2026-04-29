@@ -1,14 +1,14 @@
-"""ISSUE-011 Compactor 单元测试。"""
+﻿"""ISSUE-011 Compactor 单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
 from context.context_gateway import Compactor
-from core_contracts.model import ModelConfig
-from core_contracts.openai_contracts import ModelClient, ModelConnectionError, ModelResponseError
-from core_contracts.protocol import OneTurnResponse
-from core_contracts.token_usage import TokenUsage
+from core_contracts.errors import ModelConnectionError, ModelResponseError
+from core_contracts.model import ModelClient, ModelConfig
+from core_contracts.messaging import OneTurnResponse
+from core_contracts.primitives import TokenUsage
 from openai_client.openai_client import OpenAIClient
 
 

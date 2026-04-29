@@ -1,4 +1,4 @@
-"""管理受管 git worktree 的进入、退出与历史持久化。
+﻿"""管理受管 git worktree 的进入、退出与历史持久化。
 
 本模块负责在工作区范围内维护单个“当前激活”的 git worktree，涵盖仓库根目录与 git common dir 探测、enter/exit managed worktree 的稳定状态切换，以及 `.claw/worktree_state.json` 与 `.claw/worktree_history.json` 的持久化。
 
@@ -16,7 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.protocol import JSONDict
+from core_contracts.primitives import JSONDict
 
 
 _WORKTREE_STATE_FILE = Path('.claw') / 'worktree_state.json'

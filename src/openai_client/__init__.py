@@ -6,7 +6,7 @@
 3. 约束外部依赖边界：业务代码不得直接导入 openai_client 内部文件。
 
 说明：
-- 跨模块共享接口与异常契约定义在 core_contracts.openai_contracts。
+- 跨模块共享接口与异常契约定义在 core_contracts.errors 与 core_contracts.model。
 """
 
 from .openai_client_gateway import OpenAIClientGateway

@@ -1,4 +1,4 @@
-"""管理工作区本地计划的存储、渲染与任务同步。
+﻿"""管理工作区本地计划的存储、渲染与任务同步。
 
 本模块负责维护 `.claw/plan.json` 中的计划步骤状态，并在需要时把计划步骤投影为任务记录，同步到 `TaskRuntime`。它聚焦于计划视图本身，不负责执行模型或工具调用。
 """
@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
-from core_contracts.protocol import JSONDict
+from core_contracts.primitives import JSONDict
 from planning.task_runtime import TaskRecord, TaskRuntime, TaskStatus
 
 

@@ -1,4 +1,4 @@
-"""管理工作区 hook policy 清单的发现、合并与运行时暴露。
+﻿"""管理工作区 hook policy 清单的发现、合并与运行时暴露。
 
 本模块负责从工作区发现策略清单，过滤不可信 manifest，合并工具阻断、环境变量、预算覆盖和 before/after hooks，并把合并结果暴露为运行时可直接消费的策略快照。
 """
@@ -9,9 +9,9 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core_contracts.budget import BudgetConfig
-from core_contracts.protocol import JSONDict
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.config import BudgetConfig
+from core_contracts.primitives import JSONDict
+from core_contracts.tools import ToolDescriptor
 
 
 _POLICY_MANIFEST_FILE = Path('.claw') / 'policies.json'

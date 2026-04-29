@@ -1,8 +1,8 @@
-"""封装 Agent 的程序化查询门面，提供同步提交、流式提交与累计统计汇总。
+﻿"""封装 Agent 的程序化查询门面，提供同步提交、流式提交与累计统计汇总。
 
 本模块是 app 领域的纯内部实现，禁止外部直接导入。
 外部须通过 AppGateway.create_query_service() 获取 QueryService 实例，
-并通过 core_contracts.app_contracts 中的 QueryTurnResult / QueryServiceConfig 引用数据契约。
+并通过 core_contracts.outcomes 中的 QueryTurnResult / QueryServiceConfig 引用数据契约。
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 from typing import Generator
 
 from agent import Agent
-from core_contracts.app_contracts import QueryServiceConfig, QueryTurnResult
-from core_contracts.protocol import JSONDict
-from core_contracts.run_result import AgentRunResult
-from core_contracts.token_usage import TokenUsage
+from core_contracts.outcomes import QueryServiceConfig, QueryTurnResult
+from core_contracts.primitives import JSONDict
+from core_contracts.outcomes import AgentRunResult
+from core_contracts.primitives import TokenUsage
 
 
 @dataclass

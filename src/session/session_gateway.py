@@ -1,14 +1,14 @@
-"""session 领域唯一公开网关。
+﻿"""session 领域唯一公开网关。
 
 外部模块只允许通过 SessionGateway 访问会话能力，
-会话状态与快照类型统一来自 core_contracts.session_contracts。
+会话状态与快照类型统一来自 core_contracts.session。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from core_contracts.session_contracts import AgentSessionSnapshot, AgentSessionState
+from core_contracts.session import AgentSessionSnapshot, AgentSessionState
 from .session_store import AgentSessionStore
 
 

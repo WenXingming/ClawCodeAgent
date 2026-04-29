@@ -1,4 +1,4 @@
-"""工具执行上下文与执行器。
+﻿"""工具执行上下文与执行器。
 
 提供 ToolExecutor 作为工具调用的统一执行器，封装工具注册表查询、
 参数验证、错误包装和流式调用的分发逻辑。
@@ -9,11 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator, Mapping
 
-from core_contracts.gateway_errors import GatewayError, GatewayPermissionError, GatewayRuntimeError
-from core_contracts.permissions import ToolPermissionPolicy
-from core_contracts.protocol import JSONDict, ToolExecutionResult
-from core_contracts.runtime_policy import ExecutionPolicy, WorkspaceScope
-from core_contracts.tools_contracts import (
+from core_contracts.errors import GatewayError, GatewayPermissionError, GatewayRuntimeError
+from core_contracts.config import ToolPermissionPolicy
+from core_contracts.messaging import ToolExecutionResult
+from core_contracts.primitives import JSONDict
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
+from core_contracts.tools import (
     ToolDescriptor,
     ToolExecutionContext,
     ToolStreamUpdate,

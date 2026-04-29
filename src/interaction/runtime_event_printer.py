@@ -1,4 +1,4 @@
-"""交互式 CLI 运行事件打印模块。
+﻿"""交互式 CLI 运行事件打印模块。
 
 本模块负责把运行期结构化事件稳定地渲染为两种终端输出形态：
 1. 非 TTY 环境下的普通逐行日志；
@@ -14,7 +14,7 @@ import threading
 import time
 from typing import TextIO
 
-from core_contracts.protocol import JSONDict
+from core_contracts.primitives import JSONDict
 
 
 class RuntimeEventPrinter:
