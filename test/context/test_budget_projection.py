@@ -1,4 +1,4 @@
-"""ISSUE-009 单元测试：ContextTokenBudgetEvaluator。"""
+"""ISSUE-009 单元测试：BudgetProjector。"""
 
 from __future__ import annotations
 

@@ -14,10 +14,9 @@ src/
 |- main.py
 |- interaction/
 |  |- command_line_interaction.py
-|  '- slash_commands_interaction.py
+|  '- slash_commands.py
 |- orchestration/
 |  |- agent_manager.py
-|  |- budget_context_orchestrator.py
 |  |- query_engine.py
 |  '- local_agent.py
 |- workspace/
@@ -33,12 +32,18 @@ src/
 |- budget/
 |  '- budget_guard.py
 |- context/
+|  |- context_manager.py
+|  |- budget_projection.py
+|  |- snipper.py
+|  |- compactor.py
 |  |- context_token_estimator.py
-|  |- context_token_budget_evaluator.py
-|  |- context_snipper.py
-|  '- context_compactor.py
 |- session/
 |- tools/
+|  |- tool_gateway.py
+|  |- registry.py
+|  |- executor.py
+|  |- local/
+|  '- mcp/
 |- openai_client/
 '- core_contracts/
 ```
@@ -68,7 +73,7 @@ graph TB
     subgraph ControlPlane[interaction package / CLI 与本地交互面]
         direction TB
         n_cli(["🧭 interaction/command_line_interaction.py"])
-        n_slash(["⌨️ interaction/slash_commands_interaction.py"])
+        n_slash(["⌨️ interaction/slash_commands.py"])
         style ControlPlane fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
@@ -76,7 +81,6 @@ graph TB
         direction TB
         n_agent_manager(["🧬 orchestration/agent_manager.py"])
         n_agent(["⚙️ orchestration/local_agent.py"])
-        n_budget_context_orchestrator(["🧠 orchestration/budget_context_orchestrator.py"])
         n_query_engine(["🧾 orchestration/query_engine.py"])
         style Orchestration fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
@@ -107,18 +111,19 @@ graph TB
 
     subgraph ContextPkg[context package / 上下文治理与预算]
         direction TB
+        n_context_manager(["🧠 context/context_manager.py"])
         n_token_estimator(["🔢 context/context_token_estimator.py"])
-        n_budget_evaluator(["📏 context/context_token_budget_evaluator.py"])
-        n_snip(["✂️ context/context_snipper.py"])
-        n_compact(["🗜️ context/context_compactor.py"])
+        n_budget_evaluator(["📏 context/budget_projection.py"])
+        n_snip(["✂️ context/snipper.py"])
+        n_compact(["🗜️ context/compactor.py"])
         style ContextPkg fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
 
     subgraph Tooling[tools package / 工具执行与安全]
         direction TB
-        n_tools(["🛠️ tools/local_tools.py"])
-        n_mcp_runtime(["🛰️ tools/mcp_runtime.py"])
-        n_mcp_adapter(["🔌 tools/mcp_tool_adapter.py"])
+        n_tools(["🛠️ tools/tool_gateway.py"])
+        n_mcp_runtime(["🛰️ tools/mcp/runtime.py"])
+        n_mcp_adapter(["🔌 tools/registry.py"])
         n_bash_security(["🛡️ tools/bash_security.py"])
         style Tooling fill:#f9f9f9,stroke:#333,stroke-dasharray: 5 5
     end
@@ -161,19 +166,18 @@ graph TB
     n_agent --> n_mcp_adapter
     n_agent --> n_session_state
     n_agent --> n_session_store
-    n_agent --> n_budget_context_orchestrator
-
-    n_budget_context_orchestrator --> n_budget_guard
-    n_budget_context_orchestrator --> n_budget_evaluator
-    n_budget_context_orchestrator --> n_snip
-    n_budget_context_orchestrator --> n_compact
+    n_agent --> n_context_manager
 
     n_slash --> n_session_state
     n_slash --> n_tools
-    n_slash --> n_budget_evaluator
+    n_slash --> n_context_manager
 
     n_plan --> n_task
     n_workflow --> n_task
+    n_context_manager --> n_budget_guard
+    n_context_manager --> n_budget_evaluator
+    n_context_manager --> n_snip
+    n_context_manager --> n_compact
     n_workspace_gateway --> n_hook_policy
     n_workspace_gateway --> n_plugin
     n_workspace_gateway --> n_search
@@ -197,6 +201,7 @@ graph TB
     n_agent_manager -.-> n_core_contracts
     n_query_engine -.-> n_core_contracts
     n_agent -.-> n_core_contracts
+    n_context_manager -.-> n_core_contracts
     n_workspace_gateway -.-> n_core_contracts
     n_hook_policy -.-> n_core_contracts
     n_plugin -.-> n_core_contracts
@@ -219,8 +224,8 @@ graph TB
     style n_agent_manager fill:#0b7285,color:#fff,stroke:#095c69
     style n_query_engine fill:#495057,color:#fff,stroke:#343a40
     style n_agent fill:#007bff,color:#fff,stroke:#0056b3
+    style n_context_manager fill:#228be6,color:#fff,stroke:#1864ab
     style n_workspace_gateway fill:#5f3dc4,color:#fff,stroke:#4c2fb1
-    style n_budget_context_orchestrator fill:#228be6,color:#fff,stroke:#1864ab
     style n_hook_policy fill:#198754,color:#fff,stroke:#146c43
     style n_plugin fill:#0d6efd,color:#fff,stroke:#0a58ca
     style n_search fill:#f76707,color:#fff,stroke:#d9480f
@@ -248,17 +253,16 @@ graph TB
 
 - `orchestration/agent_manager.py` (`AgentManager`) 负责 delegate_agent 子代理的 lineage、group、dependency batch 与 stop_reason 汇总，是 orchestration 层的子任务编排状态容器。
 - `orchestration/query_engine.py` (`QueryEngine`) 负责把 `LocalAgent` 封装成统一的 submit / stream_submit / persist 门面，并累计 runtime events、mutation、orchestration 与 lineage 统计。
-- `orchestration/local_agent.py` (`LocalAgent`) 负责主循环编排职责：模型调用、工具回填、预算闸门、会话保存，通过 `BudgetContextOrchestrator` 调用上下文治理，并在 tool pipeline 中接入 delegate_agent 子代理执行。
-- `orchestration/budget_context_orchestrator.py` (`BudgetContextOrchestrator`) 统一编排 pre-model 阶段的 snip/compact/预算预检及 reactive compact 重试。
+- `orchestration/local_agent.py` (`LocalAgent`) 负责主循环编排职责：模型调用、工具回填、预算闸门、会话保存，通过 `ContextManager` 调用上下文治理，并在 tool pipeline 中接入 delegate_agent 子代理执行。
 - `budget/` 只保留执行预算闸门 `BudgetGuard`，负责在主循环中统一裁决 turns / model_calls / token / cost / tool_calls 等运行时限制。
-- `context/` 负责上下文治理与 token 预算能力：`ContextTokenEstimator` 提供 token 估算，`ContextTokenBudgetEvaluator`（含 `ContextTokenBudgetSnapshot`）提供预算投影，`ContextSnipper` 处理 tombstone 化，`ContextCompactor` 处理摘要压缩与 context-length 处理。
+- `context/` 现在是单一领域入口：`ContextManager` 统一收口预算投影、snip、auto compact 与 reactive compact；其内部组合 `BudgetProjector`、`Snipper`、`Compactor` 与 `ContextTokenEstimator`。
 - `planning/` 负责工作区内本地状态机：任务、计划、工作流都各自持久化，但共享 `TaskRuntime` 作为最底层执行对象。
 - `workspace/` 负责工作区领域能力：`WorkspaceGateway` 统一收口插件目录、策略目录、搜索服务和 worktree 服务，agent 只通过它获取 hook、block 决策、搜索能力和工作区安全环境。
 - `tools/mcp/` 保持 MCP transport、runtime 与 schema 适配；MCP 不再并入工作区目录，而是继续作为工具子系统的一部分。
-- `interaction/` 负责 CLI 和 slash 命令；`slash_commands_interaction.py` 依赖预算投影和工具注册表，但不会触发模型调用。
+- `interaction/` 负责 CLI 和 slash 命令；`slash_commands.py` 通过 `ContextManager` 提供 `/context` 预算投影视图，但不会触发模型调用。
 - `main.py` 仍是很薄的装配入口，方便命令行调用和测试 patch。
 
-这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：工作区本地能力被收口为 `workspace` 领域门面，`LocalAgent` 不再直接认识 plugin/policy/search/worktree 细节；token 估算与预算投影（`ContextTokenEstimator`、`ContextTokenBudgetEvaluator`）归入 `context`，`budget` 只保留执行闸门 `BudgetGuard`，形成 `context` → `budget` → `orchestration` 的单向树状依赖。
+这张图延续了原来的风格约束：容器框只表达包边界，实线保留主控制流和关键依赖，虚线收敛到共享契约层。与重构前相比，最大的变化不是调用方向，而是边界更清晰了：工作区本地能力被收口为 `workspace` 领域门面，上下文治理被收口为 `ContextManager` 领域门面，`LocalAgent` 不再直接认识 snip/compact/预算投影细节；`budget` 只保留执行闸门 `BudgetGuard`，由 context 与 agent 在明确边界上协作。
 
 ## 测试镜像
 
@@ -282,15 +286,15 @@ test/
 - `test/orchestration/` 对应主循环集成测试。
 - `test/planning/` 对应 task/plan/workflow 状态机测试。
 - `test/extensions/` 当前仍承接 plugin/policy/search/worktree/mcp 测试，这是测试目录名的历史遗留；生产代码对应实现已迁移到 `workspace/` 与 `tools/mcp/`。
-- `test/budget/` 对应预算快照、估算、评估与闸门测试。
+- `test/budget/` 对应预算闸门测试。
 - `test/budget/` 现在只包含 `test_budget_guard.py`（五维闸门测试）。
-- `test/context/` 包含 `test_context_token_estimator.py`、`test_context_token_budget_evaluator.py`、`test_context_snipper.py` 与 `test_context_compactor.py`。
-- `test/orchestration/` 包含 `test_budget_context_orchestrator.py` 与 `test_local_agent.py`。
+- `test/context/` 包含 `test_context_token_estimator.py`、`test_budget_projection.py`、`test_snipper.py`、`test_compactor.py` 与 `test_context_manager.py`。
+- `test/orchestration/` 包含 `test_agent_manager.py`、`test_local_agent.py` 与 `test_query_engine.py`。
 
 ## 推荐阅读顺序
 
 1. 先看 `core_contracts/`，建立共享契约层边界。
-2. 再看 `openai_client/openai_client.py` 与 `tools/local_tools.py`，理解模型侧和工具侧的外部交互面。
+2. 再看 `openai_client/openai_client.py` 与 `tools/tool_gateway.py`，理解模型侧和工具侧的外部交互面。
 3. 再看 `context/`（含 token 估算与预算投影）和 `budget/`（执行闸门），理解预算预检、上下文剪裁和摘要压缩的职责切分。
 4. 再看 `planning/` 与 `workspace/`，理解工作区本地状态、策略和搜索/worktree 能力如何发现、持久化并通过门面暴露 API。
 5. 最后看 `orchestration/local_agent.py`、`interaction/command_line_interaction.py` 和 `main.py`，理解这些能力如何被装配成完整入口。
