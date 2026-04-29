@@ -83,13 +83,13 @@ from core_contracts.budget import BudgetConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from openai_client.openai_client import OpenAIClient
-from orchestration.local_agent import LocalAgent
-from orchestration.query_engine import QueryEngine
+from agent import Agent
+from app.query_service import QueryService
 from session.session_store import AgentSessionStore
 
 workspace = Path('.')
 session_paths = SessionPaths(session_directory=Path('.port_sessions') / 'agent')
-agent = LocalAgent(
+agent = Agent(
     OpenAIClient.from_env(),
     WorkspaceScope(cwd=workspace),
     ExecutionPolicy(max_turns=4),
@@ -99,8 +99,8 @@ agent = LocalAgent(
     session_paths,
     AgentSessionStore(session_paths.session_directory),
 )
-engine = QueryEngine.from_runtime_agent(agent)
-turn = engine.submit('读取 README 并总结 QueryEngine 的职责')
+engine = QueryService.from_runtime_agent(agent)
+turn = engine.submit('读取 README 并总结 QueryService 的职责')
 print(turn.stop_reason)
 print(turn.session_id)
 print(engine.persist_session())
@@ -110,6 +110,6 @@ print(engine.render_summary())
 
 预期：
 
-1. `submit()` 返回稳定的 `TurnResult`。
+1. `submit()` 返回稳定的 `QueryTurnResult`。
 2. `persist_session()` 返回最近一次 session_path。
 3. `render_summary()` 含 runtime event 与 transcript 统计。
