@@ -9,7 +9,8 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from app.query_service import QueryService
+from app.app_gateway import AppGateway
+from app.query_service import QueryService  # internal import kept for isinstance checks only
 from core_contracts.budget import BudgetConfig
 from core_contracts.model import ModelConfig
 from core_contracts.permissions import ToolPermissionPolicy
@@ -87,7 +88,7 @@ class QueryServiceTests(unittest.TestCase):
             contracts.session_paths,
             SessionManager(contracts.session_paths.session_directory),
         )
-        return QueryService.from_runtime_agent(agent), fake_client
+        return AppGateway.create_query_service(agent), fake_client
 
     def test_submit_uses_run_then_resume_and_can_return_persisted_session_path(self) -> None:
         workspace = self._make_test_dir()
