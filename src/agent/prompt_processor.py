@@ -14,7 +14,7 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, WorkspaceScope
-from interaction.slash_commands import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
+from interaction import SlashCommandContext, SlashCommandDispatcher, SlashCommandResult
 from tools.registry import LocalTool
 from workspace import WorkspaceGateway
 

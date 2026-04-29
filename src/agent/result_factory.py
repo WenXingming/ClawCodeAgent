@@ -9,7 +9,7 @@ from core_contracts.budget import BudgetConfig
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from openai_client.openai_client import OpenAIClient
+from openai_client import OpenAIClient
 from session import AgentSessionSnapshot, SessionManager
 
 

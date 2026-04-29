@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from context.context_token_estimator import ContextTokenEstimator
 from core_contracts.protocol import JSONDict
 from core_contracts.token_usage import TokenUsage
-from openai_client.openai_client import OpenAIClient, OpenAIClientError, OpenAIResponseError
+from openai_client import OpenAIClient, OpenAIClientError, OpenAIResponseError
 
 _COMPACT_BOUNDARY_PREFIX = '<system-reminder>\nEarlier conversation history was compacted to save context.'
 _COMPACT_SUMMARY_PREFIX = '<system-reminder>\nCompact summary of earlier conversation:'

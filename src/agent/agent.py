@@ -17,8 +17,8 @@ from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.protocol import JSONDict
 from core_contracts.run_result import AgentRunResult
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from interaction.slash_commands import SlashCommandDispatcher
-from openai_client.openai_client import OpenAIClient
+from interaction import SlashCommandDispatcher
+from openai_client import OpenAIClient
 from session import AgentSessionSnapshot, AgentSessionState, SessionManager
 from tools.mcp import MCPRuntime
 from tools.registry import LocalTool

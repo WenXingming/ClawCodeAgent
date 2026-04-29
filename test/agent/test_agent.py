@@ -16,9 +16,9 @@ from core_contracts.protocol import OneTurnResponse, ToolCall
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.token_usage import TokenUsage
 from agent import Agent
-from openai_client.openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from openai_client import OpenAIClient, OpenAIConnectionError, OpenAIResponseError
+from session import SessionManager
 from session.session_snapshot import AgentSessionSnapshot
-from session.session_store import AgentSessionStore
 from tools.mcp import MCPCapability, MCPTool, MCPToolCallResult
 from workspace import SearchProviderProfile, SearchResponse, SearchResult
 
@@ -101,7 +101,7 @@ class AgentTests(unittest.TestCase):
         )
 
     def _load_session_snapshot(self, workspace: Path, session_id: str) -> AgentSessionSnapshot:
-        return AgentSessionStore(workspace / 'sessions').load(session_id)
+        return SessionManager(workspace / 'sessions').load_session(session_id)
 
     def _build_agent(self, fake_client: OpenAIClient, config: _RuntimeContracts) -> Agent:
         return Agent(
@@ -112,7 +112,7 @@ class AgentTests(unittest.TestCase):
             config.permissions,
             config.budget_config,
             config.session_paths,
-            AgentSessionStore(config.session_directory),
+            SessionManager(config.session_directory),
         )
 
     def test_run_without_tool_calls_returns_immediately(self) -> None:

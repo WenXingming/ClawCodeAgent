@@ -13,7 +13,7 @@ from core_contracts.model import ModelConfig
 from core_contracts.model_pricing import ModelPricing
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from openai_client.openai_client import OpenAIClient
+from openai_client import OpenAIClient
 from session import AgentSessionSnapshot, SessionManager
 
 

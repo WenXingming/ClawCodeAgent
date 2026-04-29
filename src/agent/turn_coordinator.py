@@ -17,7 +17,7 @@ from core_contracts.protocol import JSONDict, OneTurnResponse, ToolCall, ToolExe
 from core_contracts.run_result import AgentRunResult
 from core_contracts.permissions import ToolPermissionPolicy
 from core_contracts.runtime_policy import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from openai_client.openai_client import OpenAIClient
+from openai_client import OpenAIClient
 from session import SessionManager
 from tools.executor import ToolExecutionError, ToolPermissionError, ToolStreamUpdate
 from tools.registry import LocalTool

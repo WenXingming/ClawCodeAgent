@@ -9,10 +9,8 @@ from pathlib import Path
 from app.chat_loop import ChatLoop
 from app.runtime_builder import RuntimeBuilder
 from core_contracts.run_result import AgentRunResult
-from interaction.quit_render import ExitRenderer
-from interaction.slash_render import SlashCommandRenderer
-from interaction.startup_render import StartupRenderer
-from openai_client.openai_client import OpenAIClient, OpenAIClientError
+from interaction import ExitRenderer, SlashCommandRenderer, StartupRenderer
+from openai_client import OpenAIClient, OpenAIClientError
 from session import AgentSessionSnapshot, SessionManager
 
 

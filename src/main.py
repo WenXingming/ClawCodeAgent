@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from app.cli import AppCLI
+from app import AppCLI
 from agent import Agent
-from openai_client.openai_client import OpenAIClient
+from openai_client import OpenAIClient
 from session import SessionManager
 
 

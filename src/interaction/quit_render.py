@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Literal, TextIO
 
-from interaction.session_summary import SessionSummary
-from interaction.terminal_render import TerminalRenderer
+from .session_summary import SessionSummary
+from .terminal_render import TerminalRenderer
 
 
 class ExitRenderer(TerminalRenderer):

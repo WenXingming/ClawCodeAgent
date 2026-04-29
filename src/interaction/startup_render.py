@@ -10,8 +10,8 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from interaction.environment_summary import EnvironmentLoadSummary
-from interaction.terminal_render import TerminalRenderer
+from .environment_summary import EnvironmentLoadSummary
+from .terminal_render import TerminalRenderer
 
 
 class StartupRenderer(TerminalRenderer):
