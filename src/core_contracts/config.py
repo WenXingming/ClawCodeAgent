@@ -34,6 +34,11 @@ class WorkspaceScope:
     disable_claude_md_discovery: bool = False  # bool：是否禁用手册发现。
 
     def to_dict(self) -> JSONDict:
+        """把工作区范围配置序列化为字典。
+
+        Returns:
+            JSONDict: 包含 cwd、additional_working_directories 和 disable_claude_md_discovery 的字典。
+        """
         return {
             'cwd': str(self.cwd),
             'additional_working_directories': [str(path) for path in self.additional_working_directories],
@@ -42,6 +47,13 @@ class WorkspaceScope:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'WorkspaceScope':
+        """从 JSON 字典恢复工作区范围配置。
+
+        Args:
+            payload (JSONDict | None): 待反序列化的原始字典，兼容 camelCase 字段名。
+        Returns:
+            WorkspaceScope: 恢复后的工作区范围配置对象。
+        """
         data = _as_dict(payload)
         additional_dirs_raw = data.get('additional_working_directories', data.get('additionalWorkingDirectories', []))
         if not isinstance(additional_dirs_raw, list):
@@ -69,6 +81,11 @@ class ExecutionPolicy:
     stream_model_responses: bool = False  # bool：是否启用流式模型响应。
 
     def to_dict(self) -> JSONDict:
+        """把执行策略序列化为字典。
+
+        Returns:
+            JSONDict: 包含 max_turns、command_timeout_seconds、max_output_chars 和 stream_model_responses 的字典。
+        """
         return {
             'max_turns': self.max_turns,
             'command_timeout_seconds': self.command_timeout_seconds,
@@ -78,6 +95,13 @@ class ExecutionPolicy:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'ExecutionPolicy':
+        """从 JSON 字典恢复执行策略配置。
+
+        Args:
+            payload (JSONDict | None): 待反序列化的原始字典，兼容 camelCase 字段名。
+        Returns:
+            ExecutionPolicy: 恢复后的执行策略对象。
+        """
         data = _as_dict(payload)
         return cls(
             max_turns=_as_int(_first_present(data, 'max_turns', 'maxTurns', default=12), 12),
@@ -105,6 +129,11 @@ class ContextPolicy:
     output_schema: StructuredOutputSpec | None = None  # StructuredOutputSpec | None：结构化输出 schema。
 
     def to_dict(self) -> JSONDict:
+        """把上下文策略序列化为字典。
+
+        Returns:
+            JSONDict: 包含 auto_snip/auto_compact 阈值、compact_preserve_messages 和 output_schema 的字典。
+        """
         return {
             'auto_snip_threshold_tokens': self.auto_snip_threshold_tokens,
             'auto_compact_threshold_tokens': self.auto_compact_threshold_tokens,
@@ -114,6 +143,13 @@ class ContextPolicy:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'ContextPolicy':
+        """从 JSON 字典恢复上下文策略配置。
+
+        Args:
+            payload (JSONDict | None): 待反序列化的原始字典，兼容 camelCase 字段名。
+        Returns:
+            ContextPolicy: 恢复后的上下文策略对象。
+        """
         data = _as_dict(payload)
         return cls(
             auto_snip_threshold_tokens=_as_optional_int(
@@ -141,6 +177,11 @@ class SessionPaths:
     scratchpad_root: Path = field(default_factory=lambda: (Path('.port_sessions') / 'scratchpad').resolve())  # Path：沙盒根目录。
 
     def to_dict(self) -> JSONDict:
+        """把会话路径配置序列化为字典。
+
+        Returns:
+            JSONDict: 包含 session_directory 和 scratchpad_root 的字典。
+        """
         return {
             'session_directory': str(self.session_directory),
             'scratchpad_root': str(self.scratchpad_root),
@@ -148,6 +189,13 @@ class SessionPaths:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'SessionPaths':
+        """从 JSON 字典恢复会话路径配置。
+
+        Args:
+            payload (JSONDict | None): 待反序列化的原始字典，兼容 camelCase 字段名。
+        Returns:
+            SessionPaths: 恢复后的会话路径对象。
+        """
         data = _as_dict(payload)
         default_session_dir = (Path('.port_sessions') / 'agent').resolve()
         default_scratchpad_root = (Path('.port_sessions') / 'scratchpad').resolve()
@@ -172,6 +220,11 @@ class ToolPermissionPolicy:
     allow_destructive_shell_commands: bool = False  # bool：是否允许破坏性 shell 命令。
 
     def to_dict(self) -> JSONDict:
+        """把权限策略序列化为字典。
+
+        Returns:
+            JSONDict: 包含 allow_file_write、allow_shell_commands 和 allow_destructive_shell_commands 的字典。
+        """
         return {
             'allow_file_write': self.allow_file_write,
             'allow_shell_commands': self.allow_shell_commands,
@@ -180,6 +233,13 @@ class ToolPermissionPolicy:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'ToolPermissionPolicy':
+        """从 JSON 字典恢复权限策略配置。
+
+        Args:
+            payload (JSONDict | None): 待反序列化的原始字典，兼容 camelCase 字段名。
+        Returns:
+            ToolPermissionPolicy: 恢复后的权限策略对象。
+        """
         data = _as_dict(payload)
         return cls(
             allow_file_write=_as_bool(_first_present(data, 'allow_file_write', 'allowFileWrite'), False),
@@ -207,6 +267,11 @@ class BudgetConfig:
     max_session_turns: int | None = None  # int | None：最大会话轮次数。
 
     def to_dict(self) -> JSONDict:
+        """把预算配置序列化为字典。
+
+        Returns:
+            JSONDict: 包含全部预算限制字段的字典。
+        """
         return {
             'max_total_tokens': self.max_total_tokens,
             'max_input_tokens': self.max_input_tokens,
@@ -221,6 +286,13 @@ class BudgetConfig:
 
     @classmethod
     def from_dict(cls, payload: JSONDict | None) -> 'BudgetConfig':
+        """从 JSON 字典恢复预算配置。
+
+        Args:
+            payload (JSONDict | None): 待反序列化的原始字典，兼容 camelCase 字段名。
+        Returns:
+            BudgetConfig: 恢复后的预算配置对象。
+        """
         data = _as_dict(payload)
         return cls(
             max_total_tokens=_as_optional_int(_first_present(data, 'max_total_tokens', 'maxTotalTokens')),

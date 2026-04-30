@@ -71,7 +71,7 @@ class SessionGateway:
         """
         return AgentSessionState.create(prompt)
 
-    def restore_session_state(
+    def resume_session_state(
         self,
         messages: list[dict],
         transcript: list[dict],
@@ -86,7 +86,3 @@ class SessionGateway:
             无。
         """
         return AgentSessionState.from_persisted(messages, transcript)
-
-__all__ = [
-    'SessionGateway',
-]

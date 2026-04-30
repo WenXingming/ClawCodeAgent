@@ -8,6 +8,7 @@ RuntimeBuilder 从 argparse.Namespace 中读取所有命令行参数，
 from __future__ import annotations
 
 import argparse
+import inspect
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -186,16 +187,28 @@ class RuntimeBuilder:
         """
         client = self.openai_client_cls(launch_spec.model_config)
         session_manager = self.session_manager_cls(launch_spec.session_directory)
-        return self.agent_cls(
-            client,
-            launch_spec.workspace_scope,
-            launch_spec.execution_policy,
-            launch_spec.context_policy,
-            launch_spec.permissions,
-            launch_spec.session_paths,
-            session_manager,
-            launch_spec.budget_config,
-        )
+        agent_ctor_params = inspect.signature(self.agent_cls).parameters
+        candidate_kwargs = {
+            'client': client,
+            'model_config': launch_spec.model_config,
+            'workspace_scope': launch_spec.workspace_scope,
+            'execution_policy': launch_spec.execution_policy,
+            'context_policy': launch_spec.context_policy,
+            'permissions': launch_spec.permissions,
+            'session_paths': launch_spec.session_paths,
+            'session_store': session_manager,
+            'session_manager': session_manager,
+            'session_gateway': session_manager,
+            'budget_config': launch_spec.budget_config,
+        }
+        ctor_kwargs = {name: value for name, value in candidate_kwargs.items() if name in agent_ctor_params}
+        agent = self.agent_cls(**ctor_kwargs)
+        if 'model_config' not in agent_ctor_params:
+            try:
+                setattr(agent, 'model_config', launch_spec.model_config)
+            except AttributeError:
+                pass
+        return agent
 
     def _normalize_optional_path(self, value: str | None) -> Path | None:
         """清洗可选路径文本并解析为绝对路径。

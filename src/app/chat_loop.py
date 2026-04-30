@@ -10,19 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core_contracts.interaction import EnvironmentLoadSummary
 from core_contracts.outcomes import AgentRunResult
 from core_contracts.session import AgentSessionSnapshot
-from interaction.interaction_gateway import (
-    EnvironmentLoadSummary,
-    ExitRenderer,
-    RuntimeEventPrinter,
-    SessionInteractionTracker,
-    SlashAutocompleteEntry,
-    SlashAutocompletePrompt,
-    SlashCommandDispatcher,
-    SlashCommandRenderer,
-    StartupRenderer,
-)
+from interaction.interaction_gateway import InteractionGateway
 from session.session_gateway import SessionGateway
 
 
@@ -38,10 +29,8 @@ class ChatLoop:
     """
 
     session_manager_cls: type[SessionGateway] = SessionGateway  # 可注入的会话管理器类，用于按 ID 加载快照。
-    startup_renderer: StartupRenderer = field(default_factory=StartupRenderer)  # 负责渲染启动横幅和环境摘要。
-    exit_renderer: ExitRenderer = field(default_factory=ExitRenderer)  # 负责渲染退出时的交互统计摘要。
-    slash_renderer: SlashCommandRenderer = field(default_factory=SlashCommandRenderer)  # 负责渲染 slash 命令的结构化输出。
-    chat_exit_commands: frozenset[str] = frozenset({'/exit', '/quit'})  # 触发退出的 slash 命令集合。
+    interaction_gateway: InteractionGateway = field(default_factory=InteractionGateway)  # interaction 域门面，封装所有渲染、事件打印、输入读取与会话追踪能力。
+    chat_exit_commands: frozenset[str] = frozenset({'/exit', '/quit'})  # 触发退出的 slash 命令集合（不经 agent 分发，直接由循环处理）。
 
     def run(
         self,
@@ -69,27 +58,28 @@ class ChatLoop:
             无（内部所有已知异常已被捕获）。
         """
         environment_summary = self._build_environment_load_summary(agent)
-        self.startup_renderer.render(environment_summary=environment_summary)
-        progress_printer = RuntimeEventPrinter() if show_progress else None
-        self._configure_agent_progress(agent, progress_printer)
-        prompt_reader = self._build_slash_autocomplete_prompt(agent)
-        interaction_tracker = SessionInteractionTracker.start(current_session_id)
+        self.interaction_gateway.render_startup(environment_summary=environment_summary)
+        if show_progress:
+            agent.progress_reporter = self.interaction_gateway.build_progress_reporter()
+        else:
+            agent.progress_reporter = None
+        self.interaction_gateway.start_session_tracker(current_session_id)
         while True:
             try:
-                prompt = prompt_reader.read('agent> ')
+                prompt = self.interaction_gateway.read_input('agent> ')
             except EOFError:
-                self._flush_progress_printer(progress_printer)
-                return self._finalize_interactive_loop(interaction_tracker, leading_blank_line=True)
+                self.interaction_gateway.flush_runtime_events()
+                return self._finalize_interactive_loop(leading_blank_line=True)
             except KeyboardInterrupt:
-                self._flush_progress_printer(progress_printer)
-                return self._finalize_interactive_loop(interaction_tracker, leading_blank_line=True)
+                self.interaction_gateway.flush_runtime_events()
+                return self._finalize_interactive_loop(leading_blank_line=True)
 
             normalized = prompt.strip()
             if not normalized:
                 continue
             if normalized in self.chat_exit_commands:
-                self._flush_progress_printer(progress_printer)
-                return self._finalize_interactive_loop(interaction_tracker)
+                self.interaction_gateway.flush_runtime_events()
+                return self._finalize_interactive_loop()
 
             result = self._execute_chat_turn(
                 agent,
@@ -99,14 +89,14 @@ class ChatLoop:
                 session_snapshot=pending_session_snapshot,
             )
             pending_session_snapshot = None
-            self._flush_progress_printer(progress_printer)
+            self.interaction_gateway.flush_runtime_events()
             self._render_chat_result(result)
             current_session_id, current_session_directory = self._advance_chat_state(
                 result,
                 current_session_id=current_session_id,
                 current_session_directory=current_session_directory,
             )
-            interaction_tracker.observe_run_result(
+            self.interaction_gateway.observe_run_result(
                 result,
                 current_session_id=current_session_id,
             )
@@ -194,13 +184,13 @@ class ChatLoop:
     @staticmethod
     def _configure_agent_progress(
         agent: object,
-        progress_printer: RuntimeEventPrinter | None,
+        progress_printer,
     ) -> None:
         """为当前 agent 动态挂载 progress reporter。
 
         Args:
             agent (object): 已初始化的 Agent 实例。
-            progress_printer (RuntimeEventPrinter | None): progress 输出器；None 时清空 reporter。
+            progress_printer: progress 输出器；None 时清空 reporter。
         Returns:
             None
         Raises:
@@ -210,16 +200,20 @@ class ChatLoop:
         setattr(agent, 'progress_reporter', reporter)
 
     @staticmethod
-    def _build_slash_autocomplete_prompt(agent) -> SlashAutocompletePrompt:
+    def _build_slash_autocomplete_prompt(agent) -> object:
         """根据 agent 的 slash 命令表构造自动补全输入读取器。
 
         Args:
             agent: 已初始化的 Agent 实例，slash_dispatcher 属性可选。
         Returns:
-            SlashAutocompletePrompt: 已载入全部 slash 命令条目的自动补全输入读取器。
+            object: 已载入全部 slash 命令条目的自动补全输入读取器。
         Raises:
             无。
         """
+        from interaction.interaction_gateway import InteractionGateway
+        from interaction.slash_commands import SlashCommandDispatcher
+        from core_contracts.interaction import SlashAutocompleteEntry
+        from interaction.slash_autocomplete import SlashAutocompletePrompt
         slash_dispatcher = getattr(agent, 'slash_dispatcher', None)
         if slash_dispatcher is None:
             slash_dispatcher = SlashCommandDispatcher()
@@ -232,11 +226,11 @@ class ChatLoop:
         return SlashAutocompletePrompt(entries=slash_entries)
 
     @staticmethod
-    def _flush_progress_printer(progress_printer: RuntimeEventPrinter | None) -> None:
+    def _flush_progress_printer(progress_printer) -> None:
         """输出 progress printer 中尚未刷新的残留片段。
 
         Args:
-            progress_printer (RuntimeEventPrinter | None): progress 输出器；None 时为空操作。
+            progress_printer: progress 输出器；None 时为空操作。
         Returns:
             None
         Raises:
@@ -247,14 +241,12 @@ class ChatLoop:
 
     def _finalize_interactive_loop(
         self,
-        tracker: SessionInteractionTracker,
         *,
         leading_blank_line: bool = False,
     ) -> int:
         """渲染交互结束提示框并返回退出码。
 
         Args:
-            tracker (SessionInteractionTracker): 本次交互的统计追踪器。
             leading_blank_line (bool): 渲染前是否先输出一个空行（EOF / Ctrl-C 场景使用）。
         Returns:
             int: 固定为 0，表示正常退出。
@@ -263,7 +255,7 @@ class ChatLoop:
         """
         if leading_blank_line:
             print()
-        self.exit_renderer.render(tracker.to_summary())
+        self.interaction_gateway.render_exit(self.interaction_gateway.get_session_summary())
         return 0
 
     def _execute_chat_turn(
@@ -363,7 +355,7 @@ class ChatLoop:
         result: AgentRunResult,
         slash_event: dict[str, object] | None,
     ) -> None:
-        """把 slash 结果交给专用渲染器输出。
+        """把 slash 结果交给 interaction_gateway 渲染器输出。
 
         Args:
             result (AgentRunResult): 本轮执行结果。
@@ -376,7 +368,7 @@ class ChatLoop:
         metadata = dict(slash_event or {})
         metadata.pop('type', None)
         command_name = self._extract_slash_command_name(slash_event, result.final_output)
-        self.slash_renderer.render(
+        self.interaction_gateway.render_slash_result(
             command_name=command_name,
             output=result.final_output,
             metadata=metadata,

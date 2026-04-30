@@ -5,7 +5,8 @@ from __future__ import annotations
 import io
 import unittest
 
-from interaction.interaction_gateway import EnvironmentLoadSummary, StartupRenderer
+from core_contracts.interaction import EnvironmentLoadSummary
+from interaction import StartupRenderer
 
 
 class StartupRendererTests(unittest.TestCase):

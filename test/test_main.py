@@ -29,6 +29,7 @@ class _FakeAgent:
     """拦截 main 中的 agent 调用，避免真实网络请求。"""
 
     last_client = None
+    last_model_config = None
     last_runtime = None
     last_session_store = None
     run_prompts: list[str] = []
@@ -37,6 +38,7 @@ class _FakeAgent:
     @classmethod
     def reset(cls) -> None:
         cls.last_client = None
+        cls.last_model_config = None
         cls.last_runtime = None
         cls.last_session_store = None
         cls.run_prompts = []
@@ -45,6 +47,7 @@ class _FakeAgent:
     def __init__(
         self,
         client,
+        model_config,
         workspace_scope,
         execution_policy,
         context_policy,
@@ -54,6 +57,7 @@ class _FakeAgent:
         budget_config=None,
     ) -> None:
         _FakeAgent.last_client = client
+        _FakeAgent.last_model_config = model_config
         _FakeAgent.last_runtime = SimpleNamespace(
             workspace_scope=workspace_scope,
             execution_policy=execution_policy,
@@ -142,9 +146,9 @@ class MainEntryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         _assert_banner_rendered(self, stdout.getvalue())
         self.assertIn('echo:你好', stdout.getvalue())
-        self.assertEqual(_FakeAgent.last_client.model_config.model, 'demo-model')
-        self.assertEqual(_FakeAgent.last_client.model_config.api_key, 'demo-key')
-        self.assertEqual(_FakeAgent.last_client.model_config.base_url, 'http://127.0.0.1:9000/v1')
+        self.assertEqual(_FakeAgent.last_model_config.model, 'demo-model')
+        self.assertEqual(_FakeAgent.last_model_config.api_key, 'demo-key')
+        self.assertEqual(_FakeAgent.last_model_config.base_url, 'http://127.0.0.1:9000/v1')
 
     def test_main_missing_api_key_returns_error(self) -> None:
         with patch.dict(os.environ, {'OPENAI_MODEL': 'demo-model', 'OPENAI_API_KEY': ''}, clear=False):
@@ -301,9 +305,9 @@ class MainEntryTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         _assert_banner_rendered(self, stdout.getvalue())
-        self.assertEqual(_FakeAgent.last_client.model_config.model, 'override-model')
-        self.assertEqual(_FakeAgent.last_client.model_config.api_key, 'override-key')
-        self.assertEqual(_FakeAgent.last_client.model_config.temperature, 0.7)
+        self.assertEqual(_FakeAgent.last_model_config.model, 'override-model')
+        self.assertEqual(_FakeAgent.last_model_config.api_key, 'override-key')
+        self.assertEqual(_FakeAgent.last_model_config.temperature, 0.7)
         self.assertEqual(_FakeAgent.last_runtime.max_turns, 9)
         self.assertTrue(_FakeAgent.last_runtime.permissions.allow_shell_commands)
         self.assertFalse(_FakeAgent.last_runtime.permissions.allow_file_write)

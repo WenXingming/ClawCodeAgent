@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol
+from typing import Callable, Literal, Mapping, Protocol
 
 from .config import BudgetConfig, ContextPolicy, ToolPermissionPolicy, WorkspaceScope
 from .model import ModelConfig
@@ -123,6 +123,37 @@ class SlashCommandResult:
     replacement_session_state: AgentSessionState | None = None  # AgentSessionState | None：替换的会话状态。
     fork_session: bool = False  # bool：是否开启新会话。
     metadata: JSONDict = field(default_factory=dict)  # JSONDict：额外元数据。
+
+
+@dataclass(frozen=True)
+class ParsedSlashCommand:
+    """表示一次成功解析的 slash 输入。"""
+
+    command_name: str  # str: 规范化后的命令名，不包含前导斜杠。
+    arguments: str  # str: 命令后的原始参数文本，保留空格折叠后的用户输入。
+    raw_input: str  # str: 用户提交的原始输入，供日志与回显复用。
+
+
+SlashHandler = Callable[[SlashCommandContext, ParsedSlashCommand], SlashCommandResult]
+
+
+@dataclass(frozen=True)
+class SlashCommandSpec:
+    """定义单个 slash 命令的名称、描述与处理器。"""
+
+    names: tuple[str, ...]  # tuple[str, ...]: 当前命令支持的全部名称与别名。
+    description: str  # str: 面向 /help 输出的人类可读描述。
+    handler: SlashHandler  # SlashHandler: 真正执行业务逻辑的命令处理函数。
+
+
+@dataclass(frozen=True)
+class SlashCommandResolution:
+    """表示一次 slash 命令匹配的解析结果。"""
+
+    kind: Literal['exact', 'prefix', 'ambiguous', 'none', 'empty']
+    spec: SlashCommandSpec | None = None
+    matched_name: str = ''
+    candidates: tuple[str, ...] = ()
 
 
 class SlashDispatcher(Protocol):

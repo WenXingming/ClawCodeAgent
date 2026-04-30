@@ -5,25 +5,39 @@ from __future__ import annotations
 from dataclasses import replace
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from core_contracts.config import BudgetConfig
+from core_contracts.context import BudgetProjection
 from core_contracts.model import ModelConfig
 from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, WorkspaceScope
-from interaction.interaction_gateway import (
-    SlashCommandContext,
-    SlashCommandDispatcher,
-)
+from core_contracts.interaction import SlashCommandContext
+from interaction import SlashCommandDispatcher
 from core_contracts.session import AgentSessionState
 from tools.tools_gateway import ToolsGateway
+
+
+def _make_mock_context_gateway() -> MagicMock:
+    """创建返回固定预算快照的 ContextGateway 存根。"""
+    mock = MagicMock()
+    mock.project_budget.return_value = BudgetProjection(
+        projected_input_tokens=500,
+        output_reserve_tokens=1024,
+        hard_input_limit=None,
+        soft_input_limit=None,
+        is_hard_over=False,
+        is_soft_over=False,
+    )
+    return mock
 
 
 class SlashCommandModuleTests(unittest.TestCase):
     """验证 slash 解析与本地命令分发。"""
 
     def setUp(self) -> None:
-        """为每个测试用例创建独立的 slash 分发器实例。"""
-        self.dispatcher = SlashCommandDispatcher()
+        """为每个测试用例创建独立的 slash 分发器实例（注入 mock context gateway）。"""
+        self.dispatcher = SlashCommandDispatcher(context_manager=_make_mock_context_gateway())
         self.tool_gateway = ToolsGateway()
 
     def _make_context(self) -> SlashCommandContext:

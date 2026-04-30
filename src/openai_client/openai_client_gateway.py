@@ -43,18 +43,6 @@ class OpenAIClientGateway(ModelClient):
         """
         self._client = OpenAIClient(model_config)  # OpenAIClient：内部 HTTP 客户端实现，仅在网关内可见。
 
-    @property
-    def model_config(self) -> ModelConfig:
-        """返回当前网关绑定的模型配置。
-        Args:
-            无
-        Returns:
-            ModelConfig: 当前模型配置。
-        Raises:
-            无。
-        """
-        return self._client.model_config
-
     def complete(
         self,
         messages: list[JSONDict],

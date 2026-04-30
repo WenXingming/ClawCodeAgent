@@ -1,80 +1,55 @@
-﻿"""Slash 命令交互面模块。
+﻿"""Slash 命令内部分发器实现。
 
-本模块负责三件事：
-1. 解析用户输入中的本地 slash 命令。
-2. 根据会话与运行时上下文分发到具体命令处理器。
-3. 以兼容包装函数的形式对外暴露稳定入口，供 runtime 与测试复用。
+本模块属于 interaction 包的内部实现，外部代码禁止直接导入。
+所有功能均通过 interaction.interaction_gateway.InteractionGateway 对外暴露。
+
+职责边界：
+1. 解析用户原始输入中的本地 slash 命令（parse_slash_command）。
+2. 按精确名或唯一前缀解析命令规格，含歧义检测（resolve_slash_command）。
+3. 分发到对应命令处理器并返回结构化结果（dispatch_slash_command）。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Callable, Literal, Mapping
+from dataclasses import replace
+from typing import Mapping
 
 from context.context_gateway import ContextGateway
-from core_contracts.interaction import SlashCommandContext, SlashCommandResult
+from core_contracts.interaction import (
+    ParsedSlashCommand,
+    SlashCommandContext,
+    SlashCommandResolution,
+    SlashCommandResult,
+    SlashCommandSpec,
+)
 from core_contracts.primitives import JSONDict
 from core_contracts.session import AgentSessionState
 from core_contracts.tools import ToolDescriptor
 
 
-@dataclass(frozen=True)
-class ParsedSlashCommand:
-    """表示一次成功解析的 slash 输入。
-
-    外部通常先通过 SlashCommandDispatcher.parse_slash_command() 获取该对象，
-    然后再交给分发器或具体处理器执行。
-    """
-
-    command_name: str  # str: 规范化后的命令名，不包含前导斜杠。
-    arguments: str  # str: 命令后的原始参数文本，保留空格折叠后的用户输入。
-    raw_input: str  # str: 用户提交的原始输入，供日志与回显复用。
-
-
-SlashHandler = Callable[[SlashCommandContext, ParsedSlashCommand], SlashCommandResult]
-
-
-@dataclass(frozen=True)
-class SlashCommandSpec:
-    """定义单个 slash 命令的名称、描述与处理器。"""
-
-    names: tuple[str, ...]  # tuple[str, ...]: 当前命令支持的全部名称与别名。
-    description: str  # str: 面向 /help 输出的人类可读描述。
-    handler: SlashHandler  # SlashHandler: 真正执行业务逻辑的命令处理函数。
-
-
-@dataclass(frozen=True)
-class SlashCommandResolution:
-    """表示一次 slash 命令匹配的解析结果。"""
-
-    kind: Literal['exact', 'prefix', 'ambiguous', 'none', 'empty']
-    spec: SlashCommandSpec | None = None
-    matched_name: str = ''
-    candidates: tuple[str, ...] = ()
-
-
 class SlashCommandDispatcher:
-    """本地 slash 命令的面向对象分发器。
+    """本地 slash 命令解析、索引与分发的内部实现。
 
-    工作流分为三步：
-    1. parse_slash_command() 把原始输入转换为 ParsedSlashCommand。
-    2. dispatch_slash_command() 按命令名查找 SlashCommandSpec 并执行处理器。
-    3. 处理器从 SlashCommandContext 读取会话、预算、权限与工具信息，返回 SlashCommandResult。
+    工作流：
+    1. parse_slash_command() 将原始输入解构为 ParsedSlashCommand。
+    2. resolve_slash_command() 按名称或前缀在索引中定位命令规格。
+    3. dispatch_slash_command() 调用规格对应的处理器并返回 SlashCommandResult。
 
-    外部可直接实例化本类并调用其公有方法；如果需要注入自定义预算评估器，
-    可在构造时显式传入。
+    context_manager 通过构造函数注入（依赖倒置）；允许为 None，此时
+    /context 命令将优雅降级返回提示信息，不抛出异常。
     """
 
     def __init__(self, context_manager: ContextGateway | None = None) -> None:
         """初始化 slash 命令分发器。
 
         Args:
-            context_manager (ContextGateway | None): 可选的 context 领域网关；未提供时创建默认实例。
+            context_manager (ContextGateway | None): Context 领域网关，为 /context 命令
+                提供实时预算评估能力；为 None 时 /context 命令降级提示。
         Returns:
-            None: 该构造函数只负责建立分发器内部状态。
+            None: 构造函数只建立分发器内部状态。
         """
-        self._context_manager = context_manager or ContextGateway()
-        # ContextGateway: /context 命令使用的 context 领域统一入口。
+        self._context_manager = context_manager
+        # ContextGateway | None: /context 命令使用的预算评估入口；可为 None（降级模式）。
 
         self._specs = self._build_specs()
         # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，保持帮助展示顺序。
@@ -167,7 +142,14 @@ class SlashCommandDispatcher:
         return self._specs
 
     def get_command_completions(self, prefix: str) -> tuple[str, ...]:
-        """返回给定前缀可匹配的全部命令名与别名。"""
+        """返回给定前缀可匹配的全部命令名与别名。
+        Args:
+            prefix (str): 用户已输入的命令名前缀，为空时返回全部命令。
+        Returns:
+            tuple[str, ...]: 按命令定义顺序排列的匹配命令名列表。
+        Raises:
+            无。
+        """
         normalized_prefix = prefix.strip().lower()
         completions: list[str] = []
         for spec in self._specs:
@@ -187,7 +169,14 @@ class SlashCommandDispatcher:
         return self._spec_index.get(command_name.strip().lower())
 
     def resolve_slash_command(self, command_name: str) -> SlashCommandResolution:
-        """按精确名或唯一前缀解析 slash 命令。"""
+        """按精确名或唯一前缀解析 slash 命令。
+        Args:
+            command_name (str): 用户输入的命令名，可包含大小写与首尾空白。
+        Returns:
+            SlashCommandResolution: 解析结果，含 kind / spec / candidates 等字段。
+        Raises:
+            无。
+        """
         normalized_name = command_name.strip().lower()
         if not normalized_name:
             return SlashCommandResolution(
@@ -237,7 +226,15 @@ class SlashCommandDispatcher:
         command_name: str,
         candidates: tuple[str, ...],
     ) -> SlashCommandResult:
-        """为歧义前缀构造统一提示结果。"""
+        """为歧义前缀构造统一提示结果。
+        Args:
+            command_name (str): 用户输入的歧义命令名。
+            candidates (tuple[str, ...]): 匹配该前缀的候选命令名列表。
+        Returns:
+            SlashCommandResult: 包含歧义命令提示的本地处理结果。
+        Raises:
+            无。
+        """
         lines = [f'Ambiguous slash command: /{command_name}', 'Matches:']
         lines.extend(self._build_candidate_lines(candidates))
         lines.append('Type a longer prefix or input / to list all commands.')
@@ -296,13 +293,28 @@ class SlashCommandDispatcher:
     ) -> SlashCommandResult:
         """渲染当前会话的上下文预算状态。
 
+        当 context_manager 未注入时，返回降级提示信息而非抛出异常。
+
         Args:
             context (SlashCommandContext): 命令执行上下文，提供消息、预算与工具注册信息。
             parsed (ParsedSlashCommand): 已解析命令；当前命令不读取其参数。
         Returns:
-            SlashCommandResult: 包含上下文预算快照的本地处理结果。
+            SlashCommandResult: 包含上下文预算快照的本地处理结果；context_manager
+                不可用时返回包含提示说明的降级结果。
         """
         del parsed
+        if self._context_manager is None:
+            return SlashCommandResult(
+                handled=True,
+                continue_query=False,
+                command_name='context',
+                output=(
+                    'Context Status\n'
+                    '==============\n'
+                    'Context gateway not available.\n'
+                    'Provide a ContextGateway when creating InteractionGateway to enable this command.'
+                ),
+            )
         openai_tools = self._build_openai_tools(context.tool_registry)
         snapshot = self._context_manager.project_budget(
             context.session_state.to_messages(),
