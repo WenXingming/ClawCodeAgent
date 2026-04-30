@@ -1,4 +1,4 @@
-﻿"""封装 Agent 的程序化查询门面，提供同步提交、流式提交与累计统计汇总。
+"""封装 Agent 的程序化查询门面，提供同步提交、流式提交与累计统计汇总。
 
 本模块是 app 领域的纯内部实现，禁止外部直接导入。
 外部须通过 AppGateway.create_query_service() 获取 QueryService 实例，
@@ -357,4 +357,5 @@ def _usage_delta(previous: TokenUsage, current: TokenUsage) -> TokenUsage:
         ),
         reasoning_tokens=max(current.reasoning_tokens - previous.reasoning_tokens, 0),
     )
+
 

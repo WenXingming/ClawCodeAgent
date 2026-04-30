@@ -1,4 +1,4 @@
-﻿"""ISSUE-005 Shell 工具集成测试。"""
+"""ISSUE-005 Shell 工具集成测试。"""
 
 from __future__ import annotations
 
@@ -164,3 +164,4 @@ class LocalToolsShellTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

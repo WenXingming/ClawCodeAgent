@@ -1,4 +1,4 @@
-﻿"""ISSUE-003 OpenAI-compatible 客户端流式能力测试。
+"""ISSUE-003 OpenAI-compatible 客户端流式能力测试。
 
 这个测试文件聚焦三件事：
 1) SSE 事件是否被正确解析为 StreamEvent。

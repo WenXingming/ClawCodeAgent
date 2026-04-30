@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from core_contracts.config import BudgetConfig
-from core_contracts.tools import ToolDescriptor
+from core_contracts.tools_contracts import ToolDescriptor
 from tools.tools_gateway import ToolsGateway
 from workspace import WorkspaceGateway
 
@@ -133,3 +133,4 @@ class WorkspacePolicyGatewayTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

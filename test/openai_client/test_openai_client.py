@@ -1,4 +1,4 @@
-﻿"""ISSUE-002 OpenAI-compatible 非流式客户端测试。
+"""ISSUE-002 OpenAI-compatible 非流式客户端测试。
 
 这个测试文件专注验证三类行为：
 1) 请求构造是否符合预期。

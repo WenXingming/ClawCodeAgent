@@ -1,4 +1,4 @@
-﻿"""最小命令行入口测试。"""
+"""最小命令行入口测试。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, 
 from core_contracts.outcomes import AgentRunResult
 from core_contracts.primitives import TokenUsage
 from main import main
-from core_contracts.session import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot
 
 
 def _assert_banner_rendered(testcase: unittest.TestCase, output: str) -> None:
@@ -404,4 +404,5 @@ class MainEntryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
 

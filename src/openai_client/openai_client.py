@@ -1,4 +1,4 @@
-﻿"""OpenAI-compatible 客户端实现。
+"""OpenAI-compatible 客户端实现。
 
 本模块提供与 OpenAI API 兼容的客户端实现，支持非流式和流式两种调用方式。
 

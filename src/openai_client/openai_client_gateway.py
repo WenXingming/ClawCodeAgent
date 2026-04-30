@@ -1,4 +1,4 @@
-﻿"""openai_client 领域统一网关。
+"""openai_client 领域统一网关。
 
 该模块是 openai_client 文件夹唯一公开入口实现，负责：
 1. 接收 core_contracts 定义的模型请求契约；

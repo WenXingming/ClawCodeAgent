@@ -1,4 +1,4 @@
-﻿"""ISSUE-001 契约模型的单元测试。"""
+"""ISSUE-001 契约模型的单元测试。"""
 
 from __future__ import annotations
 
@@ -281,3 +281,4 @@ class AgentRunResultTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

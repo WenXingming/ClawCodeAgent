@@ -1,126 +1,162 @@
-﻿"""提供会话快照的基础持久化与恢复能力。
+"""Session domain storage service.
 
-本模块只承担最小的会话存取职责：
-1. 把 AgentSessionSnapshot 写入 UTF-8 JSON 文件。
-2. 按 session_id 从磁盘恢复已保存的会话快照。
-3. 对会话文件名做基础校验，避免路径逃逸与损坏数据污染。
-
-模块内部按公开入口到私有辅助函数的顺序组织，便于顺着存取链路阅读。
+AgentSessionStore consolidates persistence and runtime state construction into
+one cohesive service so SessionGateway can remain a thin facade.
 """
 
 from __future__ import annotations
 
-import json
-from json import JSONDecodeError
 from pathlib import Path
+from typing import Any
 
-from core_contracts.session import AgentSessionSnapshot
-
-
-DEFAULT_AGENT_SESSION_DIR = (Path('.port_sessions') / 'agent').resolve()  # Path：默认的会话快照目录绝对路径。
+from core_contracts.session_contracts import (
+    AgentSessionState,
+    AgentSessionSnapshot,
+    SessionContractError,
+    SessionPersistenceError,
+    SessionValidationError,
+)
+from .session_id_policy import SessionIdPolicy
+from .session_repository import DEFAULT_AGENT_SESSION_DIR, SessionFileRepository
+from .session_snapshot_codec import SessionSnapshotCodec
 
 
 class AgentSessionStore:
-    """负责代理会话快照的文件持久化与恢复。
+    """Session domain unified store service.
 
-    该类被运行时用作最薄的一层文件存储适配器：外部只需传入快照对象或 session_id，即可完成保存与恢复。类内私有方法专门负责路径计算与 session_id 规范化，避免调用方重复处理文件系统细节。
+    The class owns file persistence, payload encoding/decoding and session state
+    reconstruction so callers interact with one object only.
     """
 
-
-    def __init__(self, directory: Path | None = None) -> None:
-        """初始化会话快照存储器。
-
+    def __init__(
+        self,
+        directory: Path | None = None,
+        repository: SessionFileRepository | None = None,
+        snapshot_codec: SessionSnapshotCodec | None = None,
+        state_factory: Any | None = None,
+    ) -> None:
+        """Initialize store collaborators.
         Args:
-            directory (Path | None): 自定义的会话目录；为 None 时使用默认目录。
+            directory (Path | None): Session storage directory.
+            repository (SessionFileRepository | None): File repository dependency.
+            snapshot_codec (SessionSnapshotCodec | None): Snapshot codec dependency.
+            state_factory (Any | None): Optional state factory with create/resume.
         Returns:
-            None: 该方法初始化实例并解析最终目录路径。
+            None
+        Raises:
+            None.
         """
         self.directory = (directory or DEFAULT_AGENT_SESSION_DIR).resolve()
-        # Path：当前实例实际使用的会话快照根目录。
+        # Path: Current snapshot root directory.
+        self._repository = repository or SessionFileRepository(directory=self.directory)
+        # SessionFileRepository: Handles raw text persistence.
+        self._snapshot_codec = snapshot_codec or SessionSnapshotCodec()
+        # SessionSnapshotCodec: Encodes/decodes snapshot payloads.
+        self._state_factory = state_factory
+        # Any | None: Optional injected factory for state creation/resume.
 
     def save(self, session_snapshot: AgentSessionSnapshot) -> Path:
-        """把会话快照保存为 UTF-8 JSON 文件。
-
+        """Persist snapshot as UTF-8 JSON.
         Args:
-            session_snapshot (AgentSessionSnapshot): 待写入磁盘的会话快照对象。
+            session_snapshot (AgentSessionSnapshot): Snapshot to persist.
         Returns:
-            Path: 实际写入的 JSON 文件绝对路径。
+            Path: Written snapshot path.
         Raises:
-            ValueError: 当 session_snapshot.session_id 非法时，由路径辅助函数抛出。
+            ValueError: Raised when contract or persistence fails.
         """
-        path = self._session_file_path(session_snapshot.session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(session_snapshot.to_dict(), indent=2, ensure_ascii=False),
-            encoding='utf-8',
-        )
-        return path
+        try:
+            payload_text = self._snapshot_codec.encode(session_snapshot)
+            return self._repository.save_text(session_snapshot.session_id, payload_text)
+        except SessionContractError as exc:
+            raise ValueError(str(exc)) from exc
+        except Exception as exc:
+            wrapped = SessionPersistenceError(f'Failed to save session snapshot: {exc}')
+            raise ValueError(str(wrapped)) from wrapped
 
     def load(self, session_id: str) -> AgentSessionSnapshot:
-        """按 session_id 读取并恢复会话快照。
-
+        """Load snapshot by session id.
         Args:
-            session_id (str): 需要加载的会话唯一标识。
+            session_id (str): Session identifier.
         Returns:
-            AgentSessionSnapshot: 从 JSON 文件恢复出的会话快照对象。
+            AgentSessionSnapshot: Restored snapshot object.
         Raises:
-            ValueError: 当目标文件不存在、JSON 内容损坏、顶层结构不是对象，或
-                文件内 session_id 与请求值不一致时抛出。
+            ValueError: Raised when validation or decoding fails.
         """
-        path = self._session_file_path(session_id)
         try:
-            payload = json.loads(path.read_text(encoding='utf-8'))
-        except FileNotFoundError as exc:
-            raise ValueError(f'Session not found: {path}') from exc
-        except JSONDecodeError as exc:
-            raise ValueError(f'Corrupted session file: {path}') from exc
+            normalized_id = self._repository._id_policy.normalize(session_id)
+            payload_text = self._repository.load_text(normalized_id)
+            snapshot = self._snapshot_codec.decode(payload_text)
+            if snapshot.session_id != normalized_id:
+                file_path = self._repository._session_file_path(normalized_id)
+                raise SessionValidationError(f'Session id mismatch in session file: {file_path}')
+            return snapshot
+        except SessionContractError as exc:
+            raise ValueError(str(exc)) from exc
 
-        if not isinstance(payload, dict):
-            raise ValueError(f'Corrupted session file: {path}')
+    def create_state(self, prompt: str) -> AgentSessionState:
+        """Create runtime state for a new session.
+        Args:
+            prompt (str): Initial user prompt.
+        Returns:
+            AgentSessionState: Created runtime state.
+        Raises:
+            ValueError: Raised when prompt is invalid.
+        """
+        try:
+            if self._state_factory is not None:
+                return self._state_factory.create(prompt)
+            return AgentSessionState.create(prompt)
+        except Exception as exc:
+            wrapped = SessionValidationError(f'Failed to create session state: {exc}')
+            raise ValueError(str(wrapped)) from wrapped
 
-        session_snapshot = AgentSessionSnapshot.from_dict(payload)
-        if session_snapshot.session_id != self._normalize_session_id(session_id):
-            raise ValueError(f'Session id mismatch in session file: {path}')
-        return session_snapshot
+    def resume_state(self, messages: tuple[dict, ...], transcript: tuple[dict, ...]) -> AgentSessionState:
+        """Resume runtime state from persisted payloads.
+        Args:
+            messages (tuple[dict, ...]): Persisted messages.
+            transcript (tuple[dict, ...]): Persisted transcript entries.
+        Returns:
+            AgentSessionState: Resumed runtime state.
+        Raises:
+            ValueError: Raised when persisted payloads are invalid.
+        """
+        try:
+            if self._state_factory is not None:
+                return self._state_factory.resume(messages, transcript)
+            return AgentSessionState.from_persisted(
+                [dict(item) for item in messages],
+                [dict(item) for item in transcript],
+            )
+        except Exception as exc:
+            wrapped = SessionValidationError(f'Failed to resume session state: {exc}')
+            raise ValueError(str(wrapped)) from wrapped
 
     def _session_file_path(self, session_id: str) -> Path:
-        """根据 session_id 计算目标会话文件路径。
-
+        """Resolve snapshot path for a session id.
         Args:
-            session_id (str): 会话唯一标识。
+            session_id (str): Session identifier.
         Returns:
-            Path: 目标会话文件路径。
+            Path: Snapshot file path.
         Raises:
-            ValueError: 当 session_id 无法通过规范化校验时抛出。
+            ValueError: Raised when session id is invalid.
         """
-        normalized_id = self._normalize_session_id(session_id)
-        return self.directory / f'{normalized_id}.json'
+        try:
+            return self._repository._session_file_path(session_id)
+        except SessionContractError as exc:
+            raise ValueError(str(exc)) from exc
 
     @staticmethod
     def _normalize_session_id(session_id: str) -> str:
-        """规范化并校验 session_id。
-
-        该函数禁止空值、路径分隔符以及可能导致路径逃逸的名字，以确保会话文件始终落在目标目录内部。
-
+        """Normalize and validate session id.
         Args:
-            session_id (str): 原始会话标识。
+            session_id (str): Raw session identifier.
         Returns:
-            str: 去除首尾空白后的合法 session_id。
+            str: Normalized identifier.
         Raises:
-            ValueError: 当 session_id 不是字符串、为空或包含非法路径成分时抛出。
+            ValueError: Raised when session id is invalid.
         """
-        if not isinstance(session_id, str):
-            raise ValueError('session_id must be a string')
+        try:
+            return SessionIdPolicy().normalize(session_id)
+        except SessionContractError as exc:
+            raise ValueError(str(exc)) from exc
 
-        normalized = session_id.strip()
-        if not normalized:
-            raise ValueError('session_id must not be empty')
-
-        candidate = Path(normalized)
-        if candidate.name != normalized or normalized in {'.', '..'}:
-            raise ValueError(f'Invalid session_id: {session_id!r}')
-
-        if any(separator in normalized for separator in ('/', '\\')):
-            raise ValueError(f'Invalid session_id: {session_id!r}')
-
-        return normalized

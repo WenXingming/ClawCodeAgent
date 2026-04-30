@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core_contracts.planning import (
+from core_contracts.planning_contracts import (
     PlanStep,
     TaskRecord,
     WorkflowLoadError,

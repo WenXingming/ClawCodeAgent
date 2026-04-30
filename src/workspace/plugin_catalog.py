@@ -1,4 +1,4 @@
-﻿"""管理插件清单发现、alias/virtual 工具注册与摘要渲染。
+"""管理插件清单发现、alias/virtual 工具注册与摘要渲染。
 
 本模块负责从工作区发现插件清单，解析 alias 与 virtual 工具定义，处理注册冲突，并把插件提供的工具、hooks 与拦截规则暴露给上层运行时使用。
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from core_contracts.primitives import JSONDict
-from core_contracts.tools import ToolDescriptor, ToolExecutionContext
+from core_contracts.tools_contracts import ToolDescriptor, ToolExecutionContext
 
 
 _PLUGIN_MANIFEST_FILE = Path('.claw') / 'plugins.json'
@@ -695,4 +695,5 @@ def _describe_tool_source(
     if tool_name in plugin_registry:
         return f'plugin tool {tool_name}'
     return f'existing tool {tool_name}'
+
 

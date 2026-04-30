@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 from core_contracts.messaging import OneTurnResponse
 from core_contracts.primitives import TokenUsage
-from core_contracts.rag import (
+from core_contracts.rag_contracts import (
     EmbeddingProvider,
     RagChunk,
     RagCollectionNotFoundError,
@@ -529,3 +529,4 @@ class BuildRagGatewayTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

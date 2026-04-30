@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from core_contracts.interaction import SessionSummary
+from core_contracts.interaction_contracts import SessionSummary
 from interaction import ExitRenderer
 
 

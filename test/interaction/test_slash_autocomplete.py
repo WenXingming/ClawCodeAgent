@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import unittest
 
-from core_contracts.interaction import SlashAutocompleteEntry
+from core_contracts.interaction_contracts import SlashAutocompleteEntry
 from interaction import SlashAutocompleteCatalog, SlashAutocompletePrompt
 
 

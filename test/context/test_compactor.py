@@ -1,4 +1,4 @@
-﻿"""ISSUE-011 Compactor 单元测试。"""
+"""ISSUE-011 Compactor 单元测试。"""
 
 from __future__ import annotations
 

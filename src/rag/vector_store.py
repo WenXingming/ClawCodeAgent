@@ -9,7 +9,7 @@ from __future__ import annotations
 import heapq
 import math
 
-from core_contracts.rag import RagChunk, RagCollectionNotFoundError, RagIndexError
+from core_contracts.rag_contracts import RagChunk, RagCollectionNotFoundError, RagIndexError
 
 
 class VectorStore:
@@ -108,3 +108,4 @@ class VectorStore:
         if norm_a == 0.0 or norm_b == 0.0:
             return 0.0
         return dot / (norm_a * norm_b)
+

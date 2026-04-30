@@ -1,4 +1,4 @@
-﻿"""CLI 交互会话汇总模型模块。
+"""CLI 交互会话汇总模型模块。
 
 本模块负责承载一次交互式 CLI 会话中的统计领域对象，包括：
 1. SessionSummary：会话结束时的只读摘要快照；
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from time import perf_counter
 
-from core_contracts.interaction import SessionSummary
+from core_contracts.interaction_contracts import SessionSummary
 from core_contracts.outcomes import AgentRunResult
 
 

@@ -1,4 +1,4 @@
-﻿"""interaction 域唯一对外门面（Facade）。
+"""interaction 域唯一对外门面（Facade）。
 
 本模块是 interaction 文件夹的唯一公开边界。外部代码必须仅通过 InteractionGateway
 访问所有交互能力，严禁直接导入文件夹内的任何其他实现类（如 SlashCommandDispatcher、
@@ -18,7 +18,7 @@ import sys
 from typing import Callable, Mapping, TextIO
 
 from context.context_gateway import ContextGateway
-from core_contracts.interaction import (
+from core_contracts.interaction_contracts import (
     EnvironmentLoadSummary,
     ParsedSlashCommand,
     SessionSummary,
@@ -53,7 +53,7 @@ class InteractionGateway:
       - SlashAutocompletePrompt — 带 slash 自动补全的交互式输入读取器
       - SessionInteractionTracker — 跨多轮的会话统计累计器
 
-    本类实现 core_contracts.interaction.SlashDispatcher 协议，可直接用作
+    本类实现 core_contracts.interaction_contracts.SlashDispatcher 协议，可直接用作
     agent 的 slash_dispatcher，也可独立用于 ChatLoop 的渲染与输入职责。
 
     注入的核心依赖：
@@ -186,7 +186,7 @@ class InteractionGateway:
     ) -> SlashCommandResult:
         """解析并分发一条用户输入；非 slash 输入透传，不消耗。
 
-        满足 core_contracts.interaction.SlashDispatcher 协议，可直接用作
+        满足 core_contracts.interaction_contracts.SlashDispatcher 协议，可直接用作
         agent 的 slash_dispatcher 属性值。
 
         Args:
@@ -429,3 +429,4 @@ class InteractionGateway:
 
 
 __all__ = ['InteractionGateway']
+

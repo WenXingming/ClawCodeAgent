@@ -1,4 +1,4 @@
-﻿"""tools 领域统一网关。
+"""tools 领域统一网关。
 
 该文件是 tools 子系统对外唯一边界，负责：
 1) 组装本地工具注册表；
@@ -26,7 +26,7 @@ from core_contracts.config import ToolPermissionPolicy
 from core_contracts.messaging import ToolExecutionResult
 from core_contracts.primitives import JSONDict
 from core_contracts.config import ExecutionPolicy, WorkspaceScope
-from core_contracts.tools import ToolDescriptor, ToolExecutionContext, ToolStreamUpdate
+from core_contracts.tools_contracts import ToolDescriptor, ToolExecutionContext, ToolStreamUpdate
 from tools.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutor
 from tools.local.filesystem_tools import build_filesystem_tools
@@ -684,3 +684,4 @@ class ToolsGateway:
             content=str(exc),
             metadata={'error_kind': error_kind},
         )
+

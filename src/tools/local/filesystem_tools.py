@@ -1,4 +1,4 @@
-﻿"""本地文件系统工具集合。
+"""本地文件系统工具集合。
 
 提供 list_dir、read_file、write_file、edit_file 四个基础文件系统工具，
 所有工具通过 build_filesystem_tools 工厂函数产出 ToolDescriptor 注册表条目。
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core_contracts.primitives import JSONDict
-from core_contracts.tools import ToolDescriptor
+from core_contracts.tools_contracts import ToolDescriptor
 from tools.executor import ToolExecutionContext, ToolExecutionError, ToolPermissionError
 
 
@@ -533,3 +533,4 @@ def _get_optional_int(
     if min_value is not None and value < min_value:
         raise ToolExecutionError(f'Argument "{key}" must be >= {min_value}')
     return value
+

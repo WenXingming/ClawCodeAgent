@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from core_contracts.planning import TaskRecord, TaskStatus
+from core_contracts.planning_contracts import TaskRecord, TaskStatus
 
 
 _TASKS_STATE_FILE = Path('.claw') / 'tasks.json'
@@ -488,3 +488,4 @@ def _as_int(value: object, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+

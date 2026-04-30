@@ -27,7 +27,7 @@ from core_contracts.config import (
     ToolPermissionPolicy,
     WorkspaceScope,
 )
-from core_contracts.tools import (
+from core_contracts.tools_contracts import (
     ToolDescriptor,
     ToolExecutionContext,
     ToolHandler,
@@ -35,8 +35,8 @@ from core_contracts.tools import (
     ToolStreamUpdate,
     build_execution_context,
 )
-from core_contracts.session import AgentSessionSnapshot, AgentSessionState
-from core_contracts.context import (
+from core_contracts.session_contracts import AgentSessionSnapshot, AgentSessionState
+from core_contracts.context_contracts import (
     BudgetProjection,
     CompactionResult,
     ContextRunState,
@@ -47,7 +47,7 @@ from core_contracts.context import (
     SnipResult,
 )
 from core_contracts.outcomes import AgentRunResult, QueryServiceConfig, QueryTurnResult
-from core_contracts.interaction import (
+from core_contracts.interaction_contracts import (
     EnvironmentLoadSummary,
     ParsedSlashCommand,
     SessionSummary,
@@ -57,7 +57,7 @@ from core_contracts.interaction import (
     SlashCommandResult,
     SlashCommandSpec,
 )
-from core_contracts.planning import (
+from core_contracts.planning_contracts import (
     PlanStep,
     PlanStepStatus,
     TaskRecord,
@@ -148,3 +148,4 @@ __all__ = [
     'WorkflowStepResult',
     'WorkflowStepSpec',
 ]
+

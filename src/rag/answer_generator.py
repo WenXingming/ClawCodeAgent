@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from core_contracts.rag import RagQueryError, RagRetrievedChunk
+from core_contracts.rag_contracts import RagQueryError, RagRetrievedChunk
 
 if TYPE_CHECKING:
     from core_contracts.model import ModelClient, ModelConfig
@@ -132,3 +132,4 @@ class AnswerGenerator:
             f"用户问题：{query}\n\n"
             f"请根据上述参考资料回答，回答字数请控制在 {max_tokens} tokens 以内。"
         )
+

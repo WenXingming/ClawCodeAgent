@@ -1,4 +1,4 @@
-﻿"""ISSUE-004 基础工具集与执行上下文测试。
+"""ISSUE-004 基础工具集与执行上下文测试。
 
 本文件覆盖三类目标：
 1) 四个基础工具的正常行为。
@@ -221,3 +221,4 @@ class LocalToolsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

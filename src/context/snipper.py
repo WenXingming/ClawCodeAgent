@@ -1,4 +1,4 @@
-﻿"""轻量级上下文剪裁器（tombstone 化）。
+"""轻量级上下文剪裁器（tombstone 化）。
 
 本模块提供 Snipper，将旧消息替换为占位 tombstone 摘要，在不丢失对话结构的前提下
 大幅降低上下文 token 开销。操作就地修改消息列表，并返回 SnipResult 统计信息。
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .token_estimator import TokenEstimator
-from core_contracts.context import SnipResult
+from core_contracts.context_contracts import SnipResult
 
 
 @dataclass
@@ -182,3 +182,4 @@ class Snipper:
         if len(text) > self.preview_max_chars:
             return text[: self.preview_max_chars - 3] + '...'
         return text
+

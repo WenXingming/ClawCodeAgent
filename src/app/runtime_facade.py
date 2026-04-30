@@ -13,7 +13,7 @@ from pathlib import Path
 from app.chat_loop import ChatLoop
 from app.runtime_builder import RuntimeBuilder
 from core_contracts.outcomes import AgentRunResult
-from core_contracts.session import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot
 from core_contracts.config import SessionPaths
 
 
@@ -96,3 +96,4 @@ class AppRuntimeFacade:
             pending_session_snapshot=pending_session_snapshot,
             show_progress=show_progress,
         )
+

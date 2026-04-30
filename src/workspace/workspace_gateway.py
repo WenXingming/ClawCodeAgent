@@ -12,7 +12,7 @@ from typing import Mapping
 
 from core_contracts.config import BudgetConfig
 from core_contracts.primitives import JSONDict
-from core_contracts.tools import ToolDescriptor
+from core_contracts.tools_contracts import ToolDescriptor
 from workspace.plugin_catalog import PluginCatalog
 from workspace.policy_catalog import PolicyCatalog
 from workspace.search_service import SearchQueryError, SearchService
@@ -410,3 +410,4 @@ def _load_worktree_service(workspace: Path) -> WorktreeService | None:
         return WorktreeService.from_workspace(workspace)
     except ValueError:
         return None
+

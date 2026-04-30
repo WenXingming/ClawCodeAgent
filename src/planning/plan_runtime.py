@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from core_contracts.planning import PlanStep, PlanStepStatus, TaskRecord, TaskStatus
+from core_contracts.planning_contracts import PlanStep, PlanStepStatus, TaskRecord, TaskStatus
 from planning.task_runtime import TaskRuntime
 
 
@@ -324,3 +324,4 @@ def _as_int(value: object, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+

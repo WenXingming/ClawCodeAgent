@@ -1,4 +1,4 @@
-﻿"""ISSUE-012 slash 命令模块单元测试。"""
+"""ISSUE-012 slash 命令模块单元测试。"""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from core_contracts.config import BudgetConfig
-from core_contracts.context import BudgetProjection
+from core_contracts.context_contracts import BudgetProjection
 from core_contracts.model import ModelConfig
 from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, WorkspaceScope
-from core_contracts.interaction import SlashCommandContext
+from core_contracts.interaction_contracts import SlashCommandContext
 from interaction import SlashCommandDispatcher
-from core_contracts.session import AgentSessionState
+from core_contracts.session_contracts import AgentSessionState
 from tools.tools_gateway import ToolsGateway
 
 

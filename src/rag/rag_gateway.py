@@ -3,14 +3,14 @@
 本文件直接承担 RAG 流水线编排职责，不再引入独立 engine 包装层。
 外部调用者只依赖：
     - RagGateway
-    - core_contracts.rag 中的请求/结果契约与异常
+    - core_contracts.rag_contracts 中的请求/结果契约与异常
 """
 
 from __future__ import annotations
 
 import time
 
-from core_contracts.rag import (
+from core_contracts.rag_contracts import (
     EmbeddingProvider,
     RagChunk,
     RagCollectionNotFoundError,
@@ -252,3 +252,4 @@ class RagGateway:
             raise RagRetrieveError(f"向量检索失败: {exc}") from exc
 
         return [RagRetrievedChunk(chunk=chunk, score=score) for chunk, score in hits]
+

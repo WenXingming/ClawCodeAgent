@@ -1,4 +1,4 @@
-﻿"""ISSUE-007 会话持久化与基础恢复测试。"""
+"""ISSUE-007 会话持久化与基础恢复测试。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from core_contracts.model import ModelConfig
 from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.primitives import TokenUsage
-from core_contracts.session import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot
 from session.session_store import AgentSessionStore
 
 
@@ -175,3 +175,4 @@ class SessionStoreTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

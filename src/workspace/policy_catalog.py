@@ -1,4 +1,4 @@
-﻿"""管理工作区 hook policy 清单的发现、合并与运行时暴露。
+"""管理工作区 hook policy 清单的发现、合并与运行时暴露。
 
 本模块负责从工作区发现策略清单，过滤不可信 manifest，合并工具阻断、环境变量、预算覆盖和 before/after hooks，并把合并结果暴露为运行时可直接消费的策略快照。
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core_contracts.config import BudgetConfig
 from core_contracts.primitives import JSONDict
-from core_contracts.tools import ToolDescriptor
+from core_contracts.tools_contracts import ToolDescriptor
 
 
 _POLICY_MANIFEST_FILE = Path('.claw') / 'policies.json'
@@ -471,4 +471,5 @@ def _merge_budget_configs(base: BudgetConfig | None, override: BudgetConfig | No
         if value is not None:
             payload[key] = value
     return BudgetConfig.from_dict(payload)
+
 

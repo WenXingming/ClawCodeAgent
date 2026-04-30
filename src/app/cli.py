@@ -1,4 +1,4 @@
-﻿"""控制面命令行交互模块。
+"""控制面命令行交互模块。
 
 本模块是 app 领域的纯内部实现，禁止外部直接导入。
 AppCLI 负责把 argparse 命令路由到 RuntimeBuilder（负责装配运行时）
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from app.runtime_facade import AppRuntimeFacade
 from core_contracts.errors import ModelGatewayError
-from core_contracts.session import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot
 
 
 class AppCLI:
@@ -382,3 +382,4 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return cli.main(argv)
+

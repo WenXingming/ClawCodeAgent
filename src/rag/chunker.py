@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from core_contracts.rag import RagChunk, RagDocument, RagIndexError
+from core_contracts.rag_contracts import RagChunk, RagDocument, RagIndexError
 
 
 class DocumentChunker:
@@ -211,3 +211,4 @@ class DocumentChunker:
             bool: 字母、数字或下划线返回 True，其它返回 False。
         """
         return char.isalnum() or char == '_'
+

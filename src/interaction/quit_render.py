@@ -1,4 +1,4 @@
-﻿"""CLI 结束渲染模块。
+"""CLI 结束渲染模块。
 
 本模块负责在交互式 CLI 会话结束时输出统一的总结提示框。它只承载结束阶段的
 业务排版与着色逻辑，不负责会话汇总建模，也不负责共享的终端渲染基础设施。
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal, TextIO
 
-from core_contracts.interaction import SessionSummary
+from core_contracts.interaction_contracts import SessionSummary
 from .terminal_render import TerminalRenderer
 
 

@@ -1,4 +1,4 @@
-﻿"""ISSUE-007 会话快照契约测试。"""
+"""ISSUE-007 会话快照契约测试。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from core_contracts.model import ModelConfig
 from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.primitives import TokenUsage
-from core_contracts.session import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()

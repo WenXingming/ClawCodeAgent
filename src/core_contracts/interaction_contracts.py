@@ -11,8 +11,8 @@ from typing import Callable, Literal, Mapping, Protocol
 from .config import BudgetConfig, ContextPolicy, ToolPermissionPolicy, WorkspaceScope
 from .model import ModelConfig
 from .primitives import JSONDict
-from .session import AgentSessionState
-from .tools import ToolDescriptor
+from .session_contracts import AgentSessionState
+from .tools_contracts import ToolDescriptor
 
 
 @dataclass(frozen=True)

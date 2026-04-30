@@ -7,7 +7,7 @@
   - build_rag_gateway : 标准装配工厂，接收外部依赖并完成全链路注入。
 
 所有请求/结果契约与异常类型均定义在 src/core_contracts/rag.py，
-请直接从 core_contracts.rag 导入，无需经过本模块转发。
+请直接从 core_contracts.rag_contracts 导入，无需经过本模块转发。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from rag.rag_gateway import RagGateway
 
 if TYPE_CHECKING:
     from core_contracts.model import ModelClient, ModelConfig
-    from core_contracts.rag import EmbeddingProvider
+    from core_contracts.rag_contracts import EmbeddingProvider
 
 __all__ = ['RagGateway', 'build_rag_gateway']
 
@@ -54,3 +54,4 @@ def build_rag_gateway(
             model_config=model_config,
         ),
     )
+

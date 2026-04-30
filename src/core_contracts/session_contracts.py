@@ -24,6 +24,67 @@ from .primitives import JSONDict, TokenUsage
 from .messaging import OneTurnResponse
 
 
+class SessionContractError(RuntimeError):
+    """session 领域异常统一基类。"""
+
+
+class SessionValidationError(SessionContractError):
+    """session 请求参数或会话标识不合法。"""
+
+
+class SessionNotFoundError(SessionContractError):
+    """请求的会话快照不存在。"""
+
+
+class SessionPersistenceError(SessionContractError):
+    """会话快照存储或解析失败。"""
+
+
+@dataclass(frozen=True)
+class SessionSaveRequest:
+    """保存会话快照的标准请求契约。"""
+
+    snapshot: 'AgentSessionSnapshot'  # AgentSessionSnapshot：待保存的会话快照对象。
+
+
+@dataclass(frozen=True)
+class SessionSaveResult:
+    """保存会话快照的标准结果契约。"""
+
+    session_id: str  # str：会话唯一标识。
+    session_path: str  # str：落盘后的会话文件路径。
+
+
+@dataclass(frozen=True)
+class SessionLoadRequest:
+    """加载会话快照的标准请求契约。"""
+
+    session_id: str  # str：会话唯一标识。
+
+
+@dataclass(frozen=True)
+class SessionLoadResult:
+    """加载会话快照的标准结果契约。"""
+
+    session_id: str  # str：会话唯一标识。
+    snapshot: 'AgentSessionSnapshot'  # AgentSessionSnapshot：恢复出的会话快照。
+
+
+@dataclass(frozen=True)
+class SessionStateCreateRequest:
+    """创建运行态会话对象的标准请求契约。"""
+
+    prompt: str  # str：首条用户输入。
+
+
+@dataclass(frozen=True)
+class SessionStateResumeRequest:
+    """从持久化数据恢复运行态会话对象的标准请求契约。"""
+
+    messages: tuple[JSONDict, ...]  # tuple[JSONDict, ...]：模型消息历史。
+    transcript: tuple[JSONDict, ...] = ()  # tuple[JSONDict, ...]：转录历史。
+
+
 @dataclass(frozen=True)
 class AgentSessionSnapshot:
     """表示已落盘的代理会话快照。

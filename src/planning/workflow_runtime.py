@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from core_contracts.planning import (
+from core_contracts.planning_contracts import (
     TaskRecord,
     WorkflowAction,
     WorkflowLoadError,
@@ -353,3 +353,4 @@ def _normalize_identifier(value: object, *, label: str) -> str:
     if normalized in {'.', '..'} or any(separator in normalized for separator in ('/', '\\')):
         raise ValueError(f'Invalid {label}: {value!r}')
     return normalized
+

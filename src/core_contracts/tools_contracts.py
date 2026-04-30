@@ -95,3 +95,4 @@ def build_execution_context(
         safe_env=dict(safe_env or {}),
         tool_registry=tool_registry,
     )
+

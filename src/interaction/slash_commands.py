@@ -1,4 +1,4 @@
-﻿"""Slash 命令内部分发器实现。
+"""Slash 命令内部分发器实现。
 
 本模块属于 interaction 包的内部实现，外部代码禁止直接导入。
 所有功能均通过 interaction.interaction_gateway.InteractionGateway 对外暴露。
@@ -15,7 +15,7 @@ from dataclasses import replace
 from typing import Mapping
 
 from context.context_gateway import ContextGateway
-from core_contracts.interaction import (
+from core_contracts.interaction_contracts import (
     ParsedSlashCommand,
     SlashCommandContext,
     SlashCommandResolution,
@@ -23,8 +23,8 @@ from core_contracts.interaction import (
     SlashCommandSpec,
 )
 from core_contracts.primitives import JSONDict
-from core_contracts.session import AgentSessionState
-from core_contracts.tools import ToolDescriptor
+from core_contracts.session_contracts import AgentSessionState
+from core_contracts.tools_contracts import ToolDescriptor
 
 
 class SlashCommandDispatcher:
