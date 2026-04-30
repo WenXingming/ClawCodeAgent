@@ -30,21 +30,6 @@ from .compactor import Compactor
 from .token_estimator import TokenEstimator
 from .snipper import Snipper
 
-# 以下显式 __all__ 声明本模块对外可见的名称，
-# 包括供单元测试访问的内部类型（通过 context.context_gateway 路径）。
-__all__ = [
-    'ContextGateway',
-    # 供单元测试白盒访问的内部构件
-    'BudgetProjector',
-    'BudgetProjection',
-    'CompactionResult',
-    'Compactor',
-    'TokenEstimator',
-    'OUTPUT_RESERVE_TOKENS',
-    'SnipResult',
-    'Snipper',
-    'SOFT_BUFFER_TOKENS',
-]
 
 _MAX_REACTIVE_COMPACT_RETRIES: int = 2  # reactive compact 允许的最大重试轮次。
 
@@ -58,24 +43,39 @@ class ContextGateway:
     3. complete_with_reactive_compact() 发起模型调用并在 context error 时执行恢复性重试。
     """
 
-    def __init__(self, client: ModelClient | None = None) -> None:
-        """初始化 context 网关及其内部依赖。
+    def __init__(
+        self,
+        *,
+        client: ModelClient | None,
+        budget_projector: BudgetProjector,
+        snipper: Snipper,
+        compactor: Compactor | None,
+    ) -> None:
+        """通过依赖注入初始化 context 网关。
+
+        所有内部构件由外部（工厂函数）构造后注入；网关本身不负责 new 任何内部类。
 
         Args:
-            client (ModelClient | None): 可选模型客户端；为 None 时仅启用预算投影能力，
-                                         compact 相关方法将在调用时抛出 RuntimeError。
+            client (ModelClient | None): 模型客户端；为 None 时仅支持预算投影，
+                                         compact 与 reactive 路径调用时抛出 RuntimeError。
+            budget_projector (BudgetProjector): token 预算投影器实例。
+            snipper (Snipper): 轻量剪裁器实例，负责 tombstone 化降载。
+            compactor (Compactor | None): 摘要压缩器实例；无客户端时传 None。
         Returns:
             None: 构造函数无返回值。
         Raises:
             无。
         """
-        self._budget_projector = BudgetProjector()
+        self._client: ModelClient | None = client
+        # ModelClient | None：注入的模型客户端；compact 及 reactive 调用的统一出口。
+
+        self._budget_projector: BudgetProjector = budget_projector
         # BudgetProjector：token 预算投影器，用于预检输入上下文成本。
 
-        self._snipper = Snipper()
+        self._snipper: Snipper = snipper
         # Snipper：轻量剪裁器，用于 soft-over 阶段的 tombstone 化降载。
 
-        self._compactor: Compactor | None = Compactor(client) if client is not None else None
+        self._compactor: Compactor | None = compactor
         # Compactor | None：摘要压缩器；无客户端时保持禁用，compact 方法不可用。
 
     def project_budget(
@@ -152,12 +152,7 @@ class ContextGateway:
                 max_input_tokens=budget_config.max_input_tokens,
             )
             if snip_result.snipped_count > 0:
-                events.append({
-                    'type': 'snip_boundary',
-                    'turn': turn_index,
-                    'snipped_count': snip_result.snipped_count,
-                    'tokens_removed': snip_result.tokens_removed,
-                })
+                events.append(self._make_snip_event(turn_index, snip_result))
                 snapshot = self.project_budget(
                     session_state.to_messages(),
                     tools=openai_tools,
@@ -201,21 +196,14 @@ class ContextGateway:
                         usage_delta=next_usage_delta,
                     )
                 elif compact_result.error:
-                    events.append({
-                        'type': 'compact_failed',
-                        'turn': turn_index,
-                        'trigger': 'auto',
-                        'error': compact_result.error,
-                        'preserve_messages': context_policy.compact_preserve_messages,
-                    })
+                    events.append(
+                        self._make_compact_failed_event(
+                            turn_index, 'auto', compact_result.error,
+                            context_policy.compact_preserve_messages,
+                        )
+                    )
 
-        events.append({
-            'type': 'token_budget',
-            'turn': turn_index,
-            'projected': snapshot.projected_input_tokens,
-            'is_hard_over': snapshot.is_hard_over,
-            'is_soft_over': snapshot.is_soft_over,
-        })
+        events.append(self._make_token_budget_event(turn_index, snapshot))
 
         run_state.token_budget_snapshot = snapshot
         run_state.usage_delta = next_usage_delta
@@ -225,6 +213,22 @@ class ContextGateway:
             pre_model_stop=pre_model_stop,
             events=tuple(events),
         )
+
+    def _require_client(self) -> ModelClient:
+        """返回注入的模型客户端；未配置时抛出显式错误。
+
+        Args:
+            无。
+        Returns:
+            ModelClient: 当前网关绑定的模型客户端。
+        Raises:
+            RuntimeError: 当网关初始化时未提供模型客户端时抛出。
+        """
+        if self._client is None:
+            raise RuntimeError(
+                'ContextGateway requires a model client for model call operations'
+            )
+        return self._client
 
     def _require_compactor(self) -> Compactor:
         """返回 compact 能力实例；未配置客户端时抛出显式错误。
@@ -276,6 +280,143 @@ class ContextGateway:
             event['attempt'] = attempt
         return event
 
+    @staticmethod
+    def _make_snip_event(
+        turn_index: int,
+        result: SnipResult,
+    ) -> JSONDict:
+        """统一构造 snip_boundary 事件字典。
+
+        Args:
+            turn_index (int): 当前 turn 的序号。
+            result (SnipResult): snip 执行结果。
+        Returns:
+            JSONDict: 可直接写入事件流的 snip_boundary 事件字典。
+        Raises:
+            无。
+        """
+        return {
+            'type': 'snip_boundary',
+            'turn': turn_index,
+            'snipped_count': result.snipped_count,
+            'tokens_removed': result.tokens_removed,
+        }
+
+    @staticmethod
+    def _make_compact_failed_event(
+        turn_index: int,
+        trigger: str,
+        error: str,
+        preserve_messages: int,
+    ) -> JSONDict:
+        """统一构造 compact_failed 事件字典。
+
+        Args:
+            turn_index (int): 当前 turn 的序号。
+            trigger (str): compact 触发源。
+            error (str): compact 失败原因。
+            preserve_messages (int): compact 使用的尾部保留消息数。
+        Returns:
+            JSONDict: 可直接写入事件流的 compact_failed 事件字典。
+        Raises:
+            无。
+        """
+        return {
+            'type': 'compact_failed',
+            'turn': turn_index,
+            'trigger': trigger,
+            'error': error,
+            'preserve_messages': preserve_messages,
+        }
+
+    @staticmethod
+    def _make_token_budget_event(
+        turn_index: int,
+        snapshot: BudgetProjection,
+    ) -> JSONDict:
+        """统一构造 token_budget 事件字典。
+
+        Args:
+            turn_index (int): 当前 turn 的序号。
+            snapshot (BudgetProjection): 当前预算快照。
+        Returns:
+            JSONDict: 可直接写入事件流的 token_budget 事件字典。
+        Raises:
+            无。
+        """
+        return {
+            'type': 'token_budget',
+            'turn': turn_index,
+            'projected': snapshot.projected_input_tokens,
+            'is_hard_over': snapshot.is_hard_over,
+            'is_soft_over': snapshot.is_soft_over,
+        }
+
+    @staticmethod
+    def _make_backend_error_event(
+        turn_index: int,
+        error: str,
+    ) -> JSONDict:
+        """统一构造 backend_error 事件字典。
+
+        Args:
+            turn_index (int): 当前 turn 的序号。
+            error (str): 错误描述文本。
+        Returns:
+            JSONDict: 可直接写入事件流的 backend_error 事件字典。
+        Raises:
+            无。
+        """
+        return {
+            'type': 'backend_error',
+            'turn': turn_index,
+            'error': error,
+        }
+
+    @staticmethod
+    def _make_retry_event(
+        turn_index: int,
+        attempt: int,
+        preserve_messages: int,
+        context_error: str,
+        ok: bool,
+        *,
+        error: str | None = None,
+        tokens_removed: int | None = None,
+        messages_replaced: int | None = None,
+    ) -> JSONDict:
+        """统一构造 reactive_compact_retry 事件字典。
+
+        Args:
+            turn_index (int): 当前 turn 的序号。
+            attempt (int): reactive 重试的序号。
+            preserve_messages (int): 本次 retry 使用的尾部保留消息数。
+            context_error (str): 触发 retry 的原始上下文错误文本。
+            ok (bool): retry 的 compact 是否成功。
+            error (str | None): compact 失败时的错误原因（ok=False 时必填）。
+            tokens_removed (int | None): compact 成功时移除的 token 数。
+            messages_replaced (int | None): compact 成功时替换的消息数。
+        Returns:
+            JSONDict: 可直接写入事件流的 reactive_compact_retry 事件字典。
+        Raises:
+            无。
+        """
+        event: JSONDict = {
+            'type': 'reactive_compact_retry',
+            'turn': turn_index,
+            'attempt': attempt,
+            'preserve_messages': preserve_messages,
+            'context_error': context_error,
+            'ok': ok,
+        }
+        if error is not None:
+            event['error'] = error
+        if tokens_removed is not None:
+            event['tokens_removed'] = tokens_removed
+        if messages_replaced is not None:
+            event['messages_replaced'] = messages_replaced
+        return event
+
     def complete_with_reactive_compact(
         self,
         *,
@@ -308,11 +449,12 @@ class ContextGateway:
         current_model_call_count = run_state.model_call_count
         attempt = 0
         current_error: Exception | None = None
+        client = self._require_client()
         compactor = self._require_compactor()
 
         while True:
             try:
-                response = compactor.client.complete(
+                response = client.complete(
                     messages=session_state.to_messages(),
                     tools=openai_tools,
                     output_schema=context_policy.output_schema,
@@ -343,31 +485,29 @@ class ContextGateway:
                     preserve_messages=preserve_messages,
                 )
 
-                retry_event: JSONDict = {
-                    'type': 'reactive_compact_retry',
-                    'turn': turn_index,
-                    'attempt': attempt,
-                    'preserve_messages': preserve_messages,
-                    'context_error': str(exc),
-                }
-
                 if not compact_result.compacted:
-                    retry_event['ok'] = False
-                    retry_event['error'] = (
-                        compact_result.error or 'Reactive compact made no progress'
+                    events.append(
+                        self._make_retry_event(
+                            turn_index, attempt, preserve_messages, str(exc),
+                            ok=False,
+                            error=compact_result.error or 'Reactive compact made no progress',
+                        )
                     )
-                    events.append(retry_event)
                     break
 
                 current_model_call_count += 1
                 current_usage = current_usage + compact_result.usage
-                retry_event['ok'] = True
-                retry_event['tokens_removed'] = compact_result.tokens_removed
-                retry_event['messages_replaced'] = compact_result.messages_replaced
                 events.append(
                     self._make_compact_event(turn_index, 'reactive', compact_result, attempt=attempt)
                 )
-                events.append(retry_event)
+                events.append(
+                    self._make_retry_event(
+                        turn_index, attempt, preserve_messages, str(exc),
+                        ok=True,
+                        tokens_removed=compact_result.tokens_removed,
+                        messages_replaced=compact_result.messages_replaced,
+                    )
+                )
 
                 snapshot = self.project_budget(
                     session_state.to_messages(),
@@ -391,11 +531,7 @@ class ContextGateway:
                         events=tuple(events),
                     )
 
-        events.append({
-            'type': 'backend_error',
-            'turn': turn_index,
-            'error': str(current_error),
-        })
+        events.append(self._make_backend_error_event(turn_index, str(current_error)))
         run_state.usage_delta = current_usage
         run_state.model_call_count = current_model_call_count
         return ReactiveCompactOutcome(
@@ -403,18 +539,4 @@ class ContextGateway:
             stop_reason=None,
             events=tuple(events),
         )
-
-
-__all__ = [
-    'BudgetProjection',
-    'BudgetProjector',
-    'CompactionResult',
-    'Compactor',
-    'ContextGateway',
-    'TokenEstimator',
-    'OUTPUT_RESERVE_TOKENS',
-    'SOFT_BUFFER_TOKENS',
-    'SnipResult',
-    'Snipper',
-]
 

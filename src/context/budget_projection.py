@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .token_estimator import TokenEstimator
@@ -27,8 +27,8 @@ class BudgetProjector:
     3. 快照由调用方决策是否触发 snip / compact 或直接中止。
     """
 
-    token_estimator: TokenEstimator = field(default_factory=TokenEstimator)
-    # ContextTokenEstimator：共享的启发式 token 估算器实例。
+    token_estimator: TokenEstimator
+    # ContextTokenEstimator：共享的启发式 token 估算器实例（必须外部注入）。
 
     output_reserve_tokens: int = OUTPUT_RESERVE_TOKENS
     # int：从输入上限中预留给模型输出的默认 token 数；可在调用时覆盖。

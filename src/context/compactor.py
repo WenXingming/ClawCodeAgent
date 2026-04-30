@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .token_estimator import TokenEstimator
 from core_contracts.context_contracts import CompactionResult
@@ -44,8 +44,8 @@ class Compactor:
     client: ModelClient
     # ModelClient：用于生成摘要的模型客户端，由外部注入。
 
-    token_estimator: TokenEstimator = field(default_factory=TokenEstimator)
-    # ContextTokenEstimator：共享的启发式 token 估算器，用于统计 compact 前后变化。
+    token_estimator: TokenEstimator
+    # ContextTokenEstimator：共享的启发式 token 估算器，用于统计 compact 前后变化（必须外部注入）。
 
     def compact(
         self,
@@ -101,6 +101,52 @@ class Compactor:
             usage=response.usage,
             error=result.error,
         )
+
+    def should_auto_compact(
+        self,
+        projected_input_tokens: int,
+        auto_compact_threshold_tokens: int | None,
+    ) -> bool:
+        """判断当前投影 token 是否达到 auto compact 阈值。
+
+        Args:
+            projected_input_tokens (int): 本次调用预估消耗的输入 token 总量。
+            auto_compact_threshold_tokens (int | None): auto compact 触发阈值；None 表示禁用。
+        Returns:
+            bool: True 表示已达阈值、需要触发 compact；False 表示无需操作。
+        Raises:
+            无。
+        """
+        if auto_compact_threshold_tokens is None:
+            return False
+        return projected_input_tokens >= max(0, auto_compact_threshold_tokens)
+
+    def is_context_length_error(self, exc: Exception) -> bool:
+        """判断异常是否属于 prompt/context length 类错误。
+
+        Args:
+            exc (Exception): 模型调用抛出的异常对象。
+        Returns:
+            bool: True 表示该异常由上下文长度超限引起，可尝试 reactive compact 恢复。
+        Raises:
+            无。
+        """
+        if getattr(exc, 'status_code', None) == 413:
+            return True
+
+        detail_text = str(getattr(exc, 'detail', ''))
+        detail = f'{detail_text} {exc}'.lower()
+        keywords = (
+            'context length',
+            'context window',
+            'maximum context length',
+            'prompt too long',
+            'prompt is too long',
+            'too many tokens',
+            'context_length_exceeded',
+            'token limit exceeded',
+        )
+        return any(keyword in detail for keyword in keywords)
 
     def _build_request_messages(
         self,
@@ -276,50 +322,4 @@ class Compactor:
             post_tokens=post_tokens,
             preserve_messages_used=tail,
         )
-
-    def should_auto_compact(
-        self,
-        projected_input_tokens: int,
-        auto_compact_threshold_tokens: int | None,
-    ) -> bool:
-        """判断当前投影 token 是否达到 auto compact 阈值。
-
-        Args:
-            projected_input_tokens (int): 本次调用预估消耗的输入 token 总量。
-            auto_compact_threshold_tokens (int | None): auto compact 触发阈值；None 表示禁用。
-        Returns:
-            bool: True 表示已达阈值、需要触发 compact；False 表示无需操作。
-        Raises:
-            无。
-        """
-        if auto_compact_threshold_tokens is None:
-            return False
-        return projected_input_tokens >= max(0, auto_compact_threshold_tokens)
-
-    def is_context_length_error(self, exc: Exception) -> bool:
-        """判断异常是否属于 prompt/context length 类错误。
-
-        Args:
-            exc (Exception): 模型调用抛出的异常对象。
-        Returns:
-            bool: True 表示该异常由上下文长度超限引起，可尝试 reactive compact 恢复。
-        Raises:
-            无。
-        """
-        if getattr(exc, 'status_code', None) == 413:
-            return True
-
-        detail_text = str(getattr(exc, 'detail', ''))
-        detail = f'{detail_text} {exc}'.lower()
-        keywords = (
-            'context length',
-            'context window',
-            'maximum context length',
-            'prompt too long',
-            'prompt is too long',
-            'too many tokens',
-            'context_length_exceeded',
-            'token limit exceeded',
-        )
-        return any(keyword in detail for keyword in keywords)
 

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .token_estimator import TokenEstimator
@@ -24,14 +24,14 @@ class Snipper:
     3. 累计 token 差值后返回 SnipResult 统计快照。
     """
 
+    token_estimator: TokenEstimator
+    # ContextTokenEstimator：共享的启发式 token 估算器，用于统计节省量（必须外部注入）。
+
     long_assistant_threshold: int = 300
     # int：assistant 消息中超过此字符数才被视为"长文本"，进而允许被剪裁。
 
     preview_max_chars: int = 120
     # int：tombstone 中 preview 文本的最大字符数，超出后截断并追加省略号。
-
-    token_estimator: TokenEstimator = field(default_factory=TokenEstimator)
-    # ContextTokenEstimator：共享的启发式 token 估算器，用于统计节省量。
 
     def snip(
         self,
