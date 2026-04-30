@@ -13,7 +13,7 @@ from app.app_gateway import AppGateway
 from core_contracts.config import BudgetConfig
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, ToolPermissionPolicy, WorkspaceScope
 from core_contracts.model import ModelConfig
-from session import SessionGateway
+from session import create_session_gateway
 
 
 class _DummyClient:
@@ -36,7 +36,7 @@ class QueryServiceTests(unittest.TestCase):
             ContextPolicy(),
             ToolPermissionPolicy(),
             SessionPaths(session_directory=workspace / 'sessions'),
-            SessionGateway(workspace / 'sessions'),
+            create_session_gateway(workspace / 'sessions'),
             BudgetConfig(),
             ModelConfig(model='dummy-model'),
         )

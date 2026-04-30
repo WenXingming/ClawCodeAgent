@@ -1,16 +1,18 @@
-"""Session domain facade.
+"""Session 模块唯一公开门面（Facade）。
 
-SessionGateway is the only public entrypoint for session operations. It accepts
-contract DTOs, delegates to AgentSessionStore, and translates exceptions.
+SessionGateway 是 session 领域的唯一对外入口，负责：
+  1. 接收 core_contracts.session_contracts 中的标准请求 DTO
+    2. 将请求路由到 SessionStore（持久化链路）或 SessionStateRuntime（运行态链路）
+  3. 将内部 SessionContractError 子类原样透传，其他未预期异常翻译为 SessionContractError
+
+Gateway 本身不含任何业务运算——所有计算均委托给两个内部组件。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from core_contracts.session_contracts import (
-    AgentSessionSnapshot,
     AgentSessionState,
     SessionContractError,
     SessionLoadRequest,
@@ -20,202 +22,130 @@ from core_contracts.session_contracts import (
     SessionStateCreateRequest,
     SessionStateResumeRequest,
 )
-from .session_repository import SessionFileRepository
-from .session_snapshot_codec import SessionSnapshotCodec
-from .session_state_factory import SessionStateFactory
-from .session_store import AgentSessionStore
+from .session_state import SessionStateRuntime
+from .session_store import SessionStore
 
 
 class SessionGateway:
-    """Session domain public facade."""
+    """Session 域公开门面。
+
+    对上层编排器暴露四个标准契约方法（save / load / create_state / resume_state）
+    不再提供冗余便捷方法，调用方统一走标准契约接口。
+    """
 
     def __init__(
         self,
         session_store_directory: Path | None = None,
-        repository: SessionFileRepository | None = None,
-        snapshot_codec: SessionSnapshotCodec | None = None,
-        state_factory: SessionStateFactory | None = None,
-        store: AgentSessionStore | None = None,
+        *,
+        session_store: SessionStore | None = None,
+        session_state: SessionStateRuntime | None = None,
     ) -> None:
-        """Initialize the session facade.
+        """初始化 SessionGateway，优先走显式依赖注入。
+
         Args:
-            session_store_directory (Path | None): Optional store directory.
-            repository (SessionFileRepository | None): Optional repository override.
-            snapshot_codec (SessionSnapshotCodec | None): Optional codec override.
-            state_factory (SessionStateFactory | None): Optional state factory override.
-            store (AgentSessionStore | None): Optional full store injection.
+            session_store_directory (Path | None): 兼容模式下的快照目录。
+            session_store (SessionStore | None): 显式注入的会话持久化组件。
+            session_state (SessionStateRuntime | None): 显式注入的会话运行态组件。
         Returns:
             None
         Raises:
-            None.
+            None
         """
-        if store is not None and repository is None and snapshot_codec is None and state_factory is None:
-            self._store = store
-        else:
-            self._store = AgentSessionStore(
-                directory=session_store_directory,
-                repository=repository,
-                snapshot_codec=snapshot_codec,
-                state_factory=state_factory,
-            )
-        # AgentSessionStore: Unified session persistence and runtime-state service.
+        effective_store = session_store or SessionStore(directory=session_store_directory)
+        effective_state = session_state or SessionStateRuntime()
+
+        self._session_store = effective_store
+        # SessionStore: 承载所有持久化职责（校验 / 路径 / I/O / 编解码）。
+        self._session_state = effective_state
+        # SessionStateRuntime: 承载运行态状态创建与恢复职责。
 
     @property
     def directory(self) -> Path:
-        """Return current session storage directory.
+        """返回当前快照存储根目录。
+
         Args:
             None
         Returns:
-            Path: Current store directory.
+            Path: 快照文件存储的绝对根目录。
         Raises:
-            None.
+            None
         """
-        return self._store.directory
+        return self._session_store.directory
+
+    # ── 公有接口 ──────────────────────────────────────────────────────────────
 
     def save(self, request: SessionSaveRequest) -> SessionSaveResult:
-        """Persist a snapshot through the store.
+        """将会话快照持久化到磁盘。
+
         Args:
-            request (SessionSaveRequest): Save request contract.
+            request (SessionSaveRequest): 包含待保存快照的标准请求契约。
         Returns:
-            SessionSaveResult: Save result contract.
+            SessionSaveResult: 包含 session_id 与落盘路径的结果契约。
         Raises:
-            SessionContractError: Raised when save fails.
+            SessionContractError: 持久化失败时抛出（含 ID 校验错误与 I/O 错误子类）。
         """
         try:
-            session_path = self._store.save(request.snapshot)
-            return SessionSaveResult(session_id=request.snapshot.session_id, session_path=str(session_path))
-        except ValueError as exc:
-            contract_error = self._translate_store_error(exc)
-            raise contract_error from exc
+            saved_path = self._session_store.save(request.snapshot)
+            return SessionSaveResult(
+                session_id=request.snapshot.session_id,
+                session_path=str(saved_path),
+            )
+        except SessionContractError:
+            raise
+        except Exception as exc:
+            raise SessionContractError(f'会话保存失败: {exc}') from exc
 
     def load(self, request: SessionLoadRequest) -> SessionLoadResult:
-        """Load a snapshot through the store.
+        """从磁盘加载会话快照并反序列化。
+
         Args:
-            request (SessionLoadRequest): Load request contract.
+            request (SessionLoadRequest): 包含 session_id 的标准请求契约。
         Returns:
-            SessionLoadResult: Load result contract.
+            SessionLoadResult: 包含 session_id 与反序列化快照的结果契约。
         Raises:
-            SessionContractError: Raised when load fails.
+            SessionContractError: 加载失败时抛出（含文件缺失、格式损坏等子类）。
         """
         try:
-            snapshot = self._store.load(request.session_id)
+            snapshot = self._session_store.load(request.session_id)
             return SessionLoadResult(session_id=snapshot.session_id, snapshot=snapshot)
-        except ValueError as exc:
-            contract_error = self._translate_store_error(exc)
-            raise contract_error from exc
+        except SessionContractError:
+            raise
+        except Exception as exc:
+            raise SessionContractError(f'会话加载失败: {exc}') from exc
 
     def create_state(self, request: SessionStateCreateRequest) -> AgentSessionState:
-        """Create runtime session state.
+        """基于首条提示词创建全新的运行态会话状态。
+
         Args:
-            request (SessionStateCreateRequest): State-create request.
+            request (SessionStateCreateRequest): 包含初始 prompt 的标准请求契约。
         Returns:
-            AgentSessionState: Created runtime state.
+            AgentSessionState: 已初始化的运行态会话状态对象。
         Raises:
-            SessionContractError: Raised when request is invalid.
+            SessionContractError: prompt 不合法时抛出（SessionValidationError 子类）。
         """
         try:
-            return self._store.create_state(request.prompt)
+            return self._session_state.build_new(request.prompt)
+        except SessionContractError:
+            raise
         except Exception as exc:
-            if isinstance(exc, ValueError):
-                contract_error = self._translate_store_error(exc)
-                raise contract_error from exc
-            raise SessionContractError(f'Failed to create session state: {exc}') from exc
+            raise SessionContractError(f'会话状态创建失败: {exc}') from exc
 
     def resume_state(self, request: SessionStateResumeRequest) -> AgentSessionState:
-        """Resume runtime session state.
-        Args:
-            request (SessionStateResumeRequest): State-resume request.
-        Returns:
-            AgentSessionState: Resumed runtime state.
-        Raises:
-            SessionContractError: Raised when request is invalid.
-        """
-        try:
-            return self._store.resume_state(request.messages, request.transcript)
-        except Exception as exc:
-            if isinstance(exc, ValueError):
-                contract_error = self._translate_store_error(exc)
-                raise contract_error from exc
-            raise SessionContractError(f'Failed to resume session state: {exc}') from exc
+        """从持久化消息与转录数据恢复运行态会话状态。
 
-    def save_session(self, snapshot: AgentSessionSnapshot) -> Path:
-        """Legacy API: save snapshot to disk.
         Args:
-            snapshot (AgentSessionSnapshot): Snapshot to persist.
+            request (SessionStateResumeRequest): 包含消息与转录序列的标准请求契约。
         Returns:
-            Path: Written snapshot path.
+            AgentSessionState: 恢复后的运行态会话状态对象。
         Raises:
-            ValueError: Raised when save fails.
+            SessionContractError: 数据格式不合法时抛出（SessionValidationError 子类）。
         """
         try:
-            result = self.save(SessionSaveRequest(snapshot=snapshot))
-            return Path(result.session_path)
-        except SessionContractError as exc:
-            raise ValueError(str(exc)) from exc
-
-    def load_session(self, session_id: str) -> AgentSessionSnapshot:
-        """Legacy API: load snapshot by session id.
-        Args:
-            session_id (str): Session identifier.
-        Returns:
-            AgentSessionSnapshot: Restored snapshot.
-        Raises:
-            ValueError: Raised when load fails.
-        """
-        try:
-            return self.load(SessionLoadRequest(session_id=session_id)).snapshot
-        except SessionContractError as exc:
-            raise ValueError(str(exc)) from exc
-
-    def create_session_state(self, prompt: str) -> AgentSessionState:
-        """Legacy API: create state for a new session.
-        Args:
-            prompt (str): Initial user prompt.
-        Returns:
-            AgentSessionState: Created runtime state.
-        Raises:
-            ValueError: Raised when creation fails.
-        """
-        try:
-            return self.create_state(SessionStateCreateRequest(prompt=prompt))
-        except SessionContractError as exc:
-            raise ValueError(str(exc)) from exc
-
-    def resume_session_state(
-        self,
-        messages: list[dict],
-        transcript: list[dict],
-    ) -> AgentSessionState:
-        """Legacy API: resume state from persisted payloads.
-        Args:
-            messages (list[dict]): Persisted messages.
-            transcript (list[dict]): Persisted transcript.
-        Returns:
-            AgentSessionState: Resumed runtime state.
-        Raises:
-            ValueError: Raised when resume fails.
-        """
-        try:
-            request = SessionStateResumeRequest(
-                messages=tuple(dict(item) for item in messages),
-                transcript=tuple(dict(item) for item in transcript),
+            return self._session_state.build_from_persisted(
+                request.messages, request.transcript
             )
-            return self.resume_state(request)
-        except SessionContractError as exc:
-            raise ValueError(str(exc)) from exc
-
-    @staticmethod
-    def _translate_store_error(error: ValueError) -> SessionContractError:
-        """Translate store ValueError into contract-level errors.
-        Args:
-            error (ValueError): Raw store error.
-        Returns:
-            SessionContractError: Normalized contract exception.
-        Raises:
-            None.
-        """
-        cause = error.__cause__
-        if isinstance(cause, SessionContractError):
-            return cause
-        return SessionContractError(str(error))
+        except SessionContractError:
+            raise
+        except Exception as exc:
+            raise SessionContractError(f'会话状态恢复失败: {exc}') from exc
 

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from core_contracts.interaction_contracts import EnvironmentLoadSummary
 from core_contracts.outcomes import AgentRunResult
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot, SessionLoadRequest
 from interaction.interaction_gateway import InteractionGateway
+from session import create_session_gateway
 from session.session_gateway import SessionGateway
 
 
@@ -28,7 +30,7 @@ class ChatLoop:
         4. 捕获 EOF / KeyboardInterrupt 或 exit 命令时渲染交互摘要后退出。
     """
 
-    session_manager_cls: type[SessionGateway] = SessionGateway  # 可注入的会话管理器类，用于按 ID 加载快照。
+    session_manager_cls: Callable[[Path | None], SessionGateway] = create_session_gateway  # 可注入的会话管理器装配器，用于按 ID 加载快照。
     interaction_gateway: InteractionGateway = field(default_factory=InteractionGateway)  # interaction 域门面，封装所有渲染、事件打印、输入读取与会话追踪能力。
     chat_exit_commands: frozenset[str] = frozenset({'/exit', '/quit'})  # 触发退出的 slash 命令集合（不经 agent 分发，直接由循环处理）。
 
@@ -310,6 +312,8 @@ class ChatLoop:
             ValueError: 当会话不存在或快照损坏时抛出。
         """
         session_manager = self.session_manager_cls(directory)
+        if hasattr(session_manager, 'load'):
+            return session_manager.load(SessionLoadRequest(session_id=session_id)).snapshot
         return session_manager.load_session(session_id)
 
     def _render_chat_result(self, result: AgentRunResult) -> None:

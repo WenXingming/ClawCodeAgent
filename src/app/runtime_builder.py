@@ -12,6 +12,7 @@ import inspect
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Callable
 
 from agent import AgentGateway as Agent
 from core_contracts.config import BudgetConfig
@@ -19,8 +20,9 @@ from core_contracts.model import ModelConfig
 from core_contracts.model import ModelPricing
 from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
-from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.session_contracts import AgentSessionSnapshot, SessionLoadRequest
 from openai_client import OpenAIClientGateway
+from session import create_session_gateway
 from session.session_gateway import SessionGateway
 
 
@@ -66,7 +68,7 @@ class RuntimeBuilder:
 
     openai_client_cls: type[OpenAIClientGateway] = OpenAIClientGateway  # type[OpenAIClientGateway]：可注入的 OpenAI 客户端类。
     agent_cls: type[Agent] = Agent  # type[Agent]：可注入的 Agent 类。
-    session_manager_cls: type[SessionGateway] = SessionGateway  # type[SessionGateway]：可注入的会话管理器类。
+    session_manager_cls: Callable[[Path | None], SessionGateway] = create_session_gateway  # Callable[[Path | None], SessionGateway]：可注入的会话管理器装配器。
 
     def build_agent_from_args(self, args: argparse.Namespace) -> tuple[Agent, SessionPaths]:
         """根据命令行参数构造新会话代理实例。
@@ -171,6 +173,8 @@ class RuntimeBuilder:
             ValueError: 当会话不存在或反序列化失败时抛出。
         """
         session_manager = self.session_manager_cls(directory)
+        if hasattr(session_manager, 'load'):
+            return session_manager.load(SessionLoadRequest(session_id=session_id)).snapshot
         return session_manager.load_session(session_id)
 
     # ── 私有辅助：按深度优先调用顺序排列 ────────────────────────────────────

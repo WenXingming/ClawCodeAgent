@@ -9,7 +9,7 @@ from __future__ import annotations
 from app.app_gateway import AppGateway
 from agent import AgentGateway as Agent
 from openai_client import OpenAIClientGateway
-from session.session_gateway import SessionGateway
+from session import SessionGateway
 
 
 def main(argv: list[str] | None = None) -> int:

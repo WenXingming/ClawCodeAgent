@@ -15,6 +15,7 @@ from core_contracts.outcomes import QueryServiceConfig, QueryTurnResult
 from core_contracts.primitives import JSONDict
 from core_contracts.outcomes import AgentRunResult
 from core_contracts.primitives import TokenUsage
+from core_contracts.session_contracts import SessionLoadRequest
 
 
 @dataclass
@@ -211,7 +212,12 @@ class QueryService:
         """
         if self._last_turn is None or not self._last_turn.session_id:
             return self.runtime_agent.run(prompt)
-        stored = self.runtime_agent.session_manager.load_session(self._last_turn.session_id)
+        if hasattr(self.runtime_agent.session_manager, 'load'):
+            stored = self.runtime_agent.session_manager.load(
+                SessionLoadRequest(session_id=self._last_turn.session_id)
+            ).snapshot
+        else:
+            stored = self.runtime_agent.session_manager.load_session(self._last_turn.session_id)
         return self.runtime_agent.resume(prompt, stored)
 
     def _record_turn(self, turn: QueryTurnResult) -> None:

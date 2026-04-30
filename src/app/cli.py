@@ -372,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
     from agent import AgentGateway as Agent
     from app.composition_root import AppCompositionRoot
     from openai_client import OpenAIClientGateway
-    from session.session_gateway import SessionGateway
+    from session import SessionGateway
 
     cli = AppCLI(
         app_runtime_facade=AppCompositionRoot.build_runtime_facade(
