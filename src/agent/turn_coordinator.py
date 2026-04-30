@@ -32,27 +32,56 @@ _MCP_MATERIALIZED_TOOL_LIMIT = 3
 
 @dataclass
 class TurnCoordinator:
-    """负责单次 agent 调用的主循环推进。"""
+    """负责单次 agent run/resume 的 turn loop 编排。
 
-    client: ModelClient  # 模型客户端。
-    model_config: ModelConfig  # 当前运行使用的模型配置（显式注入）。
-    workspace_scope: WorkspaceScope  # 工作区范围配置。
-    execution_policy: ExecutionPolicy  # 执行限制配置。
-    context_policy: ContextPolicy  # 上下文治理配置。
-    permissions: ToolPermissionPolicy  # 工具权限配置。
-    budget_config: BudgetConfig  # 预算配置。
-    session_paths: SessionPaths  # 会话路径配置。
-    session_gateway: SessionGateway  # 会话管理门面。
-    workspace_gateway: WorkspaceGateway  # 工作区领域门面。
-    context_manager: ContextGateway  # 上下文治理门面。
-    tool_gateway: ToolsGateway = field(default_factory=ToolsGateway)
+    核心工作流：
+    1. __post_init__ 通过 refresh_tool_registry() 构建初始工具注册表；
+    2. run() 创建 AgentRunState 并进入 _run_managed_invocation()；
+    3. _run_managed_invocation() 先 _prepare_prompt() 分流 slash，再调用 _execute_loop()；
+    4. _execute_loop() 驱动 model → tool → budget 多轮推进，直到停止条件触发。
+
+    注入的核心依赖：
+      - client: 模型调用协议实现；
+      - model_config: 当前运行使用的模型配置（由 AgentGateway 显式注入）；
+      - workspace_scope/execution_policy/context_policy/permissions/budget_config/session_paths: 静态策略配置；
+      - session_gateway: 会话快照存取门面；
+      - workspace_gateway: 插件/策略/搜索/worktree 能力门面；
+      - context_manager: token 预算与 compact 治理门面；
+      - tool_gateway: 工具注册、执行与 MCP 翻译门面；
+      - prompt_processor/result_factory: 由 AgentGateway 注入的本次 run 定制实现；
+      - child_agent_factory: 子代理构造工厂，由 AgentGateway 注入以避免循环依赖。
+    """
+
+    client: ModelClient  # ModelClient: 模型调用协议实现（OpenAI 兼容）。
+    model_config: ModelConfig  # ModelConfig: 当前运行使用的模型配置，含定价与推理参数（显式注入）。
+    workspace_scope: WorkspaceScope  # WorkspaceScope: 工作区路径与多目录扩展配置。
+    execution_policy: ExecutionPolicy  # ExecutionPolicy: 最大轮次、命令超时等执行限制。
+    context_policy: ContextPolicy  # ContextPolicy: 自动压缩/截断的 token 阈值配置。
+    permissions: ToolPermissionPolicy  # ToolPermissionPolicy: 文件写入、shell 执行等权限开关。
+    budget_config: BudgetConfig  # BudgetConfig: token 总量、成本上限等预算约束。
+    session_paths: SessionPaths  # SessionPaths: 会话快照目录与 scratchpad 根目录。
+    session_gateway: SessionGateway  # SessionGateway: 会话快照存取门面。
+    workspace_gateway: WorkspaceGateway  # WorkspaceGateway: 插件/策略/搜索/worktree 能力门面。
+    context_manager: ContextGateway  # ContextGateway: token 预算投影与 compact 治理门面。
+    tool_gateway: ToolsGateway = field(default_factory=ToolsGateway)  # ToolsGateway: 工具注册、执行与 MCP 翻译门面。
     delegation_service: DelegationService = field(default_factory=DelegationService)  # DelegationService: 当前 run/resume 树共享的子代理编排器。
     current_agent_id: str | None = None  # str | None: 当前 agent 对应的受管代理标识；根调用与 child 调用均会设置。
     progress_reporter: Callable[[JSONDict], None] | None = None  # Callable[[JSONDict], None] | None: 可选的实时进度上报回调。
-    prompt_processor: PromptProcessor | None = None
-    result_factory: ResultFactory | None = None
-    child_agent_factory: Callable[[str], Any] | None = None
-    tool_registry: dict[str, ToolDescriptor] = field(init=False)  # 可用工具集合。
+    prompt_processor: PromptProcessor | None = None  # PromptProcessor | None: slash 分流与 prompt 写入前的本地决策器；由 AgentGateway 注入。
+    result_factory: ResultFactory | None = None  # ResultFactory | None: 会话快照构造与 AgentRunResult 组装器；由 AgentGateway 注入。
+    child_agent_factory: Callable[[str], Any] | None = None  # Callable[[str], Any] | None: 子代理构造工厂；由 AgentGateway 注入以避免循环依赖。
+    tool_registry: dict[str, ToolDescriptor] = field(init=False)  # dict[str, ToolDescriptor]: 当前活跃的基础工具注册表，由 __post_init__ 构建。
+
+    def __post_init__(self) -> None:
+        """通过 refresh_tool_registry() 完成初始工具注册表的构建。
+        Args:
+            None: dataclass __post_init__ 不接收额外参数。
+        Returns:
+            None: 原地初始化 tool_registry 成员变量。
+        Raises:
+            Exception: 底层工具构建失败时向上透传。
+        """
+        self.refresh_tool_registry()
 
     def run(
         self,
@@ -137,16 +166,6 @@ class TurnCoordinator:
             self.current_agent_id = None
         return result
 
-    def __post_init__(self) -> None:
-        """初始化派生运行时对象与动态工具注册表。
-
-        Args:
-            None: 该方法不接收额外参数。
-        Returns:
-            None: 该方法原地补全实例的运行时依赖。
-        """
-        self.refresh_tool_registry()
-
     def tool_registry_view(self) -> dict[str, ToolDescriptor]:
         """返回当前基础工具注册表的浅拷贝。
         Args:
@@ -185,31 +204,67 @@ class TurnCoordinator:
         return self.tool_registry_view()
 
     def _require_prompt_processor(self) -> PromptProcessor:
-        """返回当前绑定的 prompt processor。"""
+        """返回当前绑定的 prompt processor。
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            PromptProcessor: 已注入的 prompt 处理器实例。
+        Raises:
+            RuntimeError: 当 prompt_processor 未注入时抛出。
+        """
         if self.prompt_processor is None:
             raise RuntimeError('TurnCoordinator requires a PromptProcessor')
         return self.prompt_processor
 
     def _require_result_factory(self) -> ResultFactory:
-        """返回当前绑定的结果构造器。"""
+        """返回当前绑定的结果构造器。
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            ResultFactory: 已注入的结果构造器实例。
+        Raises:
+            RuntimeError: 当 result_factory 未注入时抛出。
+        """
         if self.result_factory is None:
             raise RuntimeError('TurnCoordinator requires a ResultFactory')
         return self.result_factory
 
     def _require_child_agent_factory(self) -> Callable[[str], Any]:
-        """返回 child agent 构造器。"""
+        """返回 child agent 构造工厂。
+        Args:
+            None: 该方法不接收额外参数。
+        Returns:
+            Callable[[str], Any]: 已注入的子代理构造工厂。
+        Raises:
+            RuntimeError: 当 child_agent_factory 未注入时抛出。
+        """
         if self.child_agent_factory is None:
             raise RuntimeError('TurnCoordinator requires a child agent factory')
         return self.child_agent_factory
 
     def _emit_progress_event(self, event: JSONDict) -> None:
-        """向可选 reporter 发送一个实时事件。"""
+        """向可选 reporter 发送一个实时事件。
+        Args:
+            event (JSONDict): 待发送的事件载荷；内部会居应制作浅拷贝。
+        Returns:
+            None: progress_reporter 为 None 时静默返回。
+        Raises:
+            无。
+        """
         if self.progress_reporter is None:
             return
         self.progress_reporter(dict(event))
 
     def _record_event(self, run_state: AgentRunState, event: JSONDict) -> None:
-        """把事件写入持久化列表，并同步推送到实时 reporter。"""
+        """把事件写入持久化列表，并同步推送到实时 reporter。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+            event (JSONDict): 待写入的事件载荷。
+        Returns:
+            None: 原地更新 run_state.events 并广播事件。
+        Raises:
+            无。
+        """
         stored_event = dict(event)
         run_state.events.append(stored_event)
         self._emit_progress_event(stored_event)
@@ -219,7 +274,15 @@ class TurnCoordinator:
         run_state: AgentRunState,
         new_events: Iterable[JSONDict],
     ) -> None:
-        """批量写入并推送事件。"""
+        """批量写入并推送事件。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+            new_events (Iterable[JSONDict]): 待批量写入的事件序列。
+        Returns:
+            None: 逐个转存至 _record_event。
+        Raises:
+            无。
+        """
         for event in new_events:
             self._record_event(run_state, event)
 
@@ -227,7 +290,14 @@ class TurnCoordinator:
         self,
         tool_registry: dict[str, ToolDescriptor],
     ) -> dict[str, ToolDescriptor]:
-        """把动态工具描述符构建下沉到 ToolsGateway。"""
+        """把动态工具描述符构建下沉到 ToolsGateway。
+        Args:
+            tool_registry (dict[str, ToolDescriptor]): 待扩展的基础工具注册表。
+        Returns:
+            dict[str, ToolDescriptor]: 加入 delegate/search/mcp 动态工具后的注册表副本。
+        Raises:
+            Exception: 底层工具构建失败时向上透传。
+        """
         return self.tool_gateway.extend_runtime_registry(
             tool_registry,
             delegate_agent_handler=self._run_delegate_agent,
@@ -475,7 +545,20 @@ class TurnCoordinator:
         context,
         max_chars: int,
     ) -> str | tuple[str, JSONDict]:
-        """执行一次远端 MCP 工具调用并统一渲染结果。"""
+        """执行一次远端 MCP 工具调用并统一渲染结果。
+        Args:
+            tool_name (str): 远端工具名称。
+            server_name (str | None): 对应的 MCP 服务器名称。
+            capability_handle (str | None): 如果通过 capability 句柄调用，则为该句柄。
+            raw_tool_arguments (JSONDict): 原始工具参数字典。
+            context (Any): 当前工具执行上下文。
+            max_chars (int): 允许使用的输出字符数上限。
+        Returns:
+            str | tuple[str, JSONDict]: 渲染后的工具输出文本，以及 server/tool 维度的元数据。
+        Raises:
+            GatewayPermissionError: 当权限被拒绝时抛出。
+            GatewayValidationError: 当参数非法或 MCP 运行时调用失败时抛出。
+        """
         try:
             remote_tool = self.tool_gateway.mcp_resolve_tool(tool_name, server_name=server_name)
             self._ensure_mcp_tool_allowed(remote_tool, context)
@@ -512,7 +595,16 @@ class TurnCoordinator:
         arguments: JSONDict,
         context,
     ) -> str | tuple[str, JSONDict]:
-        """执行由 capability window 物化出的临时 MCP 工具。"""
+        """执行由 capability window 物化出的临时 MCP 工具。
+        Args:
+            capability_handle (str): 被物化的能力句柄。
+            arguments (JSONDict): 工具调用参数。
+            context (Any): 当前工具执行上下文。
+        Returns:
+            str | tuple[str, JSONDict]: 渲染后的工具输出，以及 server/tool 维度的元数据。
+        Raises:
+            GatewayValidationError: 当参数非法、能力句柄无效或调用失败时抛出。
+        """
         if not isinstance(arguments, dict):
             raise GatewayValidationError('materialized MCP tool arguments must be a JSON object')
 
@@ -538,7 +630,14 @@ class TurnCoordinator:
         self,
         run_state: AgentRunState,
     ) -> dict[str, ToolDescriptor]:
-        """构建当前轮次对模型和执行器可见的完整工具表。"""
+        """构建当前轮次对模型和执行器可见的完整工具表。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+        Returns:
+            dict[str, ToolDescriptor]: 基础工具 + 物化 MCP 工具的合并注册表。
+        Raises:
+            无。
+        """
         effective_registry = dict(self.tool_registry)
         effective_registry.update(self._build_materialized_mcp_tool_registry(run_state))
         run_state.set_effective_tool_registry(effective_registry)
@@ -548,7 +647,14 @@ class TurnCoordinator:
         self,
         run_state: AgentRunState,
     ) -> dict[str, ToolDescriptor]:
-        """根据当前会话的 capability window 构建临时物化工具表。"""
+        """根据当前会话的 capability window 构建临时物化工具表。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+        Returns:
+            dict[str, ToolDescriptor]: 用 capability handle 内敢的临时工具注册表。
+        Raises:
+            无（单个物化失败时不报错）。
+        """
         materialized_tools: dict[str, ToolDescriptor] = {}
         for capability_handle in run_state.materialized_mcp_capabilities():
             tool = self._build_materialized_mcp_tool(capability_handle)
@@ -558,7 +664,14 @@ class TurnCoordinator:
         return materialized_tools
 
     def _build_materialized_mcp_tool(self, capability_handle: str) -> ToolDescriptor | None:
-        """把单个 capability handle 物化为当前轮次可调用的临时工具。"""
+        """把单个 capability handle 物化为当前轮次可调用的临时工具。
+        Args:
+            capability_handle (str): 需要物化的能力句柄。
+        Returns:
+            ToolDescriptor | None: 物化成功时返回工具描述符；解析失败时返回 None。
+        Raises:
+            无（异常在内部被吃掉）。
+        """
         try:
             capability = self.tool_gateway.mcp_resolve_capability(capability_handle)
             tool_name = capability.get('tool_name')
@@ -588,7 +701,14 @@ class TurnCoordinator:
 
     @staticmethod
     def _materialized_mcp_tool_name(capability_handle: str) -> str:
-        """把 capability handle 转成稳定的临时工具名。"""
+        """把 capability handle 转成稳定的临时工具名。
+        Args:
+            capability_handle (str): 原始 capability 句柄。
+        Returns:
+            str: 以 'mcp_cap_' 为前缀的合法工具名。
+        Raises:
+            无。
+        """
         sanitized = [character if character.isalnum() else '_' for character in capability_handle]
         return 'mcp_cap_' + ''.join(sanitized).strip('_')
 
@@ -598,7 +718,16 @@ class TurnCoordinator:
         tool_call: ToolCall,
         tool_result: ToolExecutionResult,
     ) -> None:
-        """在工具执行完成后同步会话内的 capability shortlist 与物化窗口。"""
+        """在工具执行完成后同步会话内的 capability shortlist 与物化窗口。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+            tool_call (ToolCall): 刚完成的工具调用对象。
+            tool_result (ToolExecutionResult): 工具执行结果对象。
+        Returns:
+            None: 原地更新 run_state 的 mcp capability 窗口。
+        Raises:
+            无。
+        """
         if tool_call.name != 'mcp_search_capabilities' or not tool_result.ok:
             return
 
@@ -625,7 +754,16 @@ class TurnCoordinator:
 
     @staticmethod
     def _ensure_mcp_tool_allowed(remote_tool: Any, context) -> None:
-        """检查远端工具是否越过当前会话权限边界。"""
+        """检查远端工具是否越过当前会话权限边界。
+        Args:
+            remote_tool (Any): 已解析的 MCP 远端工具定义。
+            context (Any): 当前工具执行上下文，含权限配置。
+        Returns:
+            None: 检查通过时静默返回。
+        Raises:
+            GatewayPermissionError: 当文件写入权限被拒绝时抛出。
+            GatewayValidationError: 当工具载荷格式非法时抛出。
+        """
         if not isinstance(remote_tool, dict):
             raise GatewayValidationError('Resolved MCP tool payload is invalid')
         server_name = remote_tool.get('server_name')
@@ -1114,7 +1252,15 @@ class TurnCoordinator:
         prompt: str,
         run_state: AgentRunState,
     ) -> AgentRunResult | None:
-        """在 prompt 写入 session_state 前执行 prompt 分流。"""
+        """在 prompt 写入 session_state 前执行 slash 分流。
+        Args:
+            prompt (str): 当前用户输入。
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+        Returns:
+            AgentRunResult | None: slash 命令被本地处理时返回结果；否则返回 None。
+        Raises:
+            无。
+        """
         return self._require_prompt_processor().prepare(prompt=prompt, run_state=run_state)
 
     def _execute_loop(
@@ -1123,13 +1269,13 @@ class TurnCoordinator:
         run_state: AgentRunState,
     ) -> AgentRunResult:
         """run / resume 共用的 turn loop。
-
-        usage_delta  只统计本次执行的增量。
-        usage_total  = usage_baseline + usage_delta。
-        cost         = cost_baseline + estimate_cost_usd(usage_delta)。
-
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象；
+                usage_delta 只统计本次增量，usage_total = baseline + delta。
         Returns:
-            AgentRunResult: 达到停止条件后的最终运行结果。
+            AgentRunResult: 达到停止条件（max_turns / budget / 无工具调用）后的结果。
+        Raises:
+            Exception: 未被内部吸收的工具/模型异常会向上透传。
         """
         guard = RunLimits(
             budget=self.budget_config,
@@ -1295,9 +1441,13 @@ class TurnCoordinator:
         stop_reason: str,
     ) -> AgentRunResult:
         """预算闸门触发时的统一提前退出路径。
-
-        统一追加 budget_stop 事件并调用 _build_run_result，
-        消除六处重复的事件追加 + 结果构建模式。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+            stop_reason (str): 命中的预算限制标识。
+        Returns:
+            AgentRunResult: 设置了 stop_reason 并嵌入 budget_stop 事件的最终结果。
+        Raises:
+            无。
         """
         run_state.stop_reason = stop_reason
         self._record_event(run_state, {'type': 'budget_stop', 'reason': stop_reason, 'turn': run_state.turn_index})
@@ -1310,7 +1460,17 @@ class TurnCoordinator:
         openai_tools: list[JSONDict],
         guard: RunLimits,
     ) -> tuple[OneTurnResponse | None, str | None]:
-        """执行一次模型调用；必要时在 context-length 错误后进行 reactive compact 重试。"""
+        """执行一次模型调用；必要时在 context-length 错误后进行 reactive compact 重试。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+            openai_tools (list[JSONDict]): 本轮对模型可见的 OpenAI格式工具列表。
+            guard (RunLimits): 当前运行里的预算闸门实例。
+        Returns:
+            tuple[OneTurnResponse | None, str | None]: 模型响应与可能的 stop_reason；
+                stop_reason 非 None 表示需提前退出。
+        Raises:
+            无（内部已封装异常）。
+        """
         reactive_outcome = self.context_manager.complete_with_reactive_compact(
             run_state=run_state,
             budget_config=self.budget_config,
@@ -1328,7 +1488,16 @@ class TurnCoordinator:
         tool_call: ToolCall,
         tool_context,
     ) -> ToolExecutionResult:
-        """执行单个工具调用，必要时发射实时 stdout 或 stderr 事件。"""
+        """执行单个工具调用，必要时发射实时 stdout 或 stderr 事件。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+            tool_call (ToolCall): 待执行的工具调用对象。
+            tool_context (Any): 当前工具执行上下文，含权限配置与输出限制。
+        Returns:
+            ToolExecutionResult: 标准化的工具执行结果对象。
+        Raises:
+            无（异常在内部封装并写入 error_kind metadata）。
+        """
         def _emit_stream_update(update: ToolStreamUpdate) -> None:
             if self.progress_reporter is None or not update.chunk:
                 return
@@ -1451,6 +1620,13 @@ class TurnCoordinator:
         *,
         run_state: AgentRunState,
     ) -> AgentRunResult:
-        """统一构造最终运行结果并落盘会话快照。"""
+        """统一构造最终运行结果并落盘会话快照。
+        Args:
+            run_state (AgentRunState): 当前调用共享的动态运行态对象。
+        Returns:
+            AgentRunResult: 落盘后的标准化运行结果对象。
+        Raises:
+            无（落盘失败时封装到结果内）。
+        """
         return self._require_result_factory().build(run_state)
 

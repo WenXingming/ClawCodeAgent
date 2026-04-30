@@ -142,7 +142,14 @@ class SlashCommandDispatcher:
         return self._specs
 
     def get_command_completions(self, prefix: str) -> tuple[str, ...]:
-        """返回给定前缀可匹配的全部命令名与别名。"""
+        """返回给定前缀可匹配的全部命令名与别名。
+        Args:
+            prefix (str): 用户已输入的命令名前缀，为空时返回全部命令。
+        Returns:
+            tuple[str, ...]: 按命令定义顺序排列的匹配命令名列表。
+        Raises:
+            无。
+        """
         normalized_prefix = prefix.strip().lower()
         completions: list[str] = []
         for spec in self._specs:
@@ -162,7 +169,14 @@ class SlashCommandDispatcher:
         return self._spec_index.get(command_name.strip().lower())
 
     def resolve_slash_command(self, command_name: str) -> SlashCommandResolution:
-        """按精确名或唯一前缀解析 slash 命令。"""
+        """按精确名或唯一前缀解析 slash 命令。
+        Args:
+            command_name (str): 用户输入的命令名，可包含大小写与首尾空白。
+        Returns:
+            SlashCommandResolution: 解析结果，含 kind / spec / candidates 等字段。
+        Raises:
+            无。
+        """
         normalized_name = command_name.strip().lower()
         if not normalized_name:
             return SlashCommandResolution(
@@ -212,7 +226,15 @@ class SlashCommandDispatcher:
         command_name: str,
         candidates: tuple[str, ...],
     ) -> SlashCommandResult:
-        """为歧义前缀构造统一提示结果。"""
+        """为歧义前缀构造统一提示结果。
+        Args:
+            command_name (str): 用户输入的歧义命令名。
+            candidates (tuple[str, ...]): 匹配该前缀的候选命令名列表。
+        Returns:
+            SlashCommandResult: 包含歧义命令提示的本地处理结果。
+        Raises:
+            无。
+        """
         lines = [f'Ambiguous slash command: /{command_name}', 'Matches:']
         lines.extend(self._build_candidate_lines(candidates))
         lines.append('Type a longer prefix or input / to list all commands.')

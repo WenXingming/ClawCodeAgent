@@ -25,6 +25,11 @@ class StructuredOutputSpec:
     strict: bool = False  # bool：是否启用严格模式。
 
     def __post_init__(self) -> None:
+        """确保 schema 字段不为 None。
+
+        Returns:
+            None: 原地修正内部状态。
+        """
         if self.schema is None:
             object.__setattr__(self, 'schema', {})
 
@@ -71,6 +76,11 @@ class ModelConfig:
     pricing: 'ModelPricing' = None  # ModelPricing：模型计费配置。
 
     def __post_init__(self) -> None:
+        """确保 pricing 字段不为 None，默认填充 ModelPricing()。
+
+        Returns:
+            None: 原地修正内部状态。
+        """
         if self.pricing is None:
             object.__setattr__(self, 'pricing', ModelPricing())
 
