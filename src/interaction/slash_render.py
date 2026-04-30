@@ -48,7 +48,6 @@ class SlashCommandRenderer(TerminalRenderer):
             top_padding=top_padding,
             bottom_padding=bottom_padding,
         )
-        self._active_title = ''
 
     def render(
         self,
@@ -76,11 +75,7 @@ class SlashCommandRenderer(TerminalRenderer):
         body_lines = self._normalize_body_lines(output)
         content_lines = self._build_content_lines(title, body_lines, normalized_command, effective_metadata)
         wrapped_lines = self._wrap_content_lines(content_lines, stream=stream)
-        self._active_title = title
-        try:
-            self._render_block(wrapped_lines, stream=stream)
-        finally:
-            self._active_title = ''
+        self._render_block(wrapped_lines, stream=stream, active_title=title)
 
     def _resolve_title(self, command_name: str, metadata: Mapping[str, object]) -> str:
         """根据命令名与错误元数据决定面板标题。
@@ -273,20 +268,28 @@ class SlashCommandRenderer(TerminalRenderer):
             return trimmed_lines or ('',)
         return raw_lines
 
-    def _render_content_text(self, text: str, content_width: int, use_ansi: bool) -> str:
+    def _render_content_text(
+        self,
+        text: str,
+        content_width: int,
+        use_ansi: bool,
+        *,
+        active_title: str = '',
+    ) -> str:
         """对标题行应用渐变强调色，其余正文保持原样。
 
         Args:
             text (str): 当前正文行。
             content_width (int): 正文区域的目标宽度。
             use_ansi (bool): 是否启用 ANSI 着色。
+            active_title (str): 需要渐变色高亮的标题文本；空字符串表示无标题高亮。
         Returns:
             str: 已补齐宽度的单行文本；标题行包含渐变着色。
         Raises:
             无。
         """
         padded_text = self._pad_to_display_width(text, content_width)
-        if use_ansi and text == self._active_title:
+        if use_ansi and active_title and text == active_title:
             return self._colorize_gradient_line(padded_text)
         return padded_text
 

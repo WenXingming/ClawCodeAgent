@@ -56,58 +56,68 @@ class InteractionGateway:
     本类实现 core_contracts.interaction_contracts.SlashDispatcher 协议，可直接用作
     agent 的 slash_dispatcher，也可独立用于 ChatLoop 的渲染与输入职责。
 
-    注入的核心依赖：
-      - context_gateway: 向 /context 命令提供实时预算评估能力；
-        为 None 时 /context 命令优雅降级，不抛出异常。
-      - stream: 统一 CLI 输出流（渲染 + 事件打印）。
-      - stdin: 统一 CLI 输入流（TTY 检测 + prompt_toolkit 初始化）。
+    所有子组件通过构造函数依赖注入；装配逻辑由 interaction/__init__.py 中的
+    create_interaction_gateway 工厂函数统一负责。
     """
 
     def __init__(
         self,
-        context_gateway: ContextGateway | None = None,
         *,
+        context_gateway: ContextGateway | None = None,
+        dispatcher: SlashCommandDispatcher,
+        startup_renderer: StartupRenderer,
+        exit_renderer: ExitRenderer,
+        slash_renderer: SlashCommandRenderer,
+        event_printer: RuntimeEventPrinter,
+        autocomplete_prompt: SlashAutocompletePrompt,
         stream: TextIO | None = None,
         stdin: TextIO | None = None,
-        startup_lines: tuple[str, ...] | None = None,
-        startup_subtitle: str | None = None,
-        exit_title: str = 'Agent powering down. Goodbye!',
     ) -> None:
-        """初始化 interaction 门面并完成所有子组件的依赖注入。
+        """通过依赖注入初始化 interaction 门面。
+
+        所有子组件由外部工厂函数构造后注入；网关本身不负责 new 任何内部类。
 
         Args:
-            context_gateway (ContextGateway | None): Context 领域网关；提供 /context 命令
-                所需的 token 预算评估能力。为 None 时 /context 降级返回提示信息。
-            stream (TextIO | None): 统一 CLI 输出流（渲染、事件打印共用）；
-                为 None 时默认使用 sys.stdout。
-            stdin (TextIO | None): 统一 CLI 输入流；为 None 时默认使用 sys.stdin；
-                用于检测 TTY 环境以决定是否启用 prompt_toolkit 自动补全。
-            startup_lines (tuple[str, ...] | None): 自定义 ASCII-art 标题行；
-                为 None 时使用内置默认值。
-            startup_subtitle (str | None): 自定义副标题文本；为 None 时使用内置默认值。
-            exit_title (str): 退出提示框的首行标题文本。
+            context_gateway (ContextGateway | None): Context 领域网关；为 None 时
+                /context 命令降级返回提示信息。
+            dispatcher (SlashCommandDispatcher): 已装配命令规格的 slash 分发器。
+            startup_renderer (StartupRenderer): CLI 启动横幅渲染器。
+            exit_renderer (ExitRenderer): CLI 退出总结渲染器。
+            slash_renderer (SlashCommandRenderer): slash 命令结果面板渲染器。
+            event_printer (RuntimeEventPrinter): 运行期事件打印器，已绑定输出流。
+            autocomplete_prompt (SlashAutocompletePrompt): 带 slash 自动补全的输入读取器。
+            stream (TextIO | None): 统一 CLI 输出流；None 时默认 sys.stdout。
+            stdin (TextIO | None): 统一 CLI 输入流；None 时默认 sys.stdin。
         Returns:
             None: 构造函数仅建立门面内部状态，不执行任何 I/O 操作。
         """
         self._context_gateway = context_gateway
         # ContextGateway | None: /context 命令使用的预算评估入口；可选。
-        self._stream = stream or sys.stdout
-        # TextIO: 统一的 CLI 输出流，由下层所有渲染组件和事件打印器共用。
-        self._stdin = stdin or sys.stdin
-        # TextIO: 统一的 CLI 输入流，用于 TTY 检测和 prompt_toolkit 初始化。
 
-        self._dispatcher = self._build_dispatcher()
-        # SlashCommandDispatcher: slash 命令解析、索引与分发核心。
-        self._startup_renderer = self._build_startup_renderer(startup_lines, startup_subtitle)
-        # StartupRenderer: CLI 启动横幅渲染器（ASCII-art + 副标题 + 环境摘要）。
-        self._exit_renderer = self._build_exit_renderer(exit_title)
-        # ExitRenderer: CLI 退出总结渲染器（会话统计提示框）。
-        self._slash_renderer = self._build_slash_renderer()
-        # SlashCommandRenderer: slash 命令结果面板渲染器。
-        self._event_printer = self._build_event_printer()
-        # RuntimeEventPrinter: 运行期结构化事件打印器（含 TTY spinner 状态栏）。
-        self._autocomplete_prompt = self._build_autocomplete_prompt()
-        # SlashAutocompletePrompt: 带 slash 自动补全的交互式输入读取器。
+        self._dispatcher = dispatcher
+        # SlashCommandDispatcher: slash 命令解析、索引与分发核心（由外部工厂注入）。
+
+        self._startup_renderer = startup_renderer
+        # StartupRenderer: CLI 启动横幅渲染器（由外部工厂注入）。
+
+        self._exit_renderer = exit_renderer
+        # ExitRenderer: CLI 退出总结渲染器（由外部工厂注入）。
+
+        self._slash_renderer = slash_renderer
+        # SlashCommandRenderer: slash 命令结果面板渲染器（由外部工厂注入）。
+
+        self._event_printer = event_printer
+        # RuntimeEventPrinter: 运行期结构化事件打印器（由外部工厂注入）。
+
+        self._autocomplete_prompt = autocomplete_prompt
+        # SlashAutocompletePrompt: 带 slash 自动补全的交互式输入读取器（由外部工厂注入）。
+
+        self._stream = stream or sys.stdout
+        # TextIO: 统一的 CLI 输出流，供公开 API 方法作为 fallback 使用。
+
+        self._stdin = stdin or sys.stdin
+        # TextIO: 统一的 CLI 输入流，供公开 API 方法作为 fallback 使用。
+
         self._session_tracker: SessionInteractionTracker | None = None
         # SessionInteractionTracker | None: 当前会话统计追踪器；由 start_session_tracker() 初始化。
 
@@ -345,88 +355,4 @@ class InteractionGateway:
         if self._session_tracker is None:
             return SessionSummary()
         return self._session_tracker.to_summary()
-
-    # ─────────────────────────────────────────────────────────
-    # Private — 子组件工厂（由 __init__ 串行调用，深度优先排列）
-    # ─────────────────────────────────────────────────────────
-
-    def _build_dispatcher(self) -> SlashCommandDispatcher:
-        """构建 slash 命令分发器，注入可选的 context 网关。
-
-        Returns:
-            SlashCommandDispatcher: 已绑定当前 context_gateway（可为 None）的分发器实例。
-        """
-        return SlashCommandDispatcher(context_manager=self._context_gateway)
-
-    def _build_startup_renderer(
-        self,
-        lines: tuple[str, ...] | None,
-        subtitle: str | None,
-    ) -> StartupRenderer:
-        """构建启动横幅渲染器，应用自定义标题行与副标题。
-
-        Args:
-            lines (tuple[str, ...] | None): 自定义 ASCII-art 各行；None 时使用内置默认值。
-            subtitle (str | None): 自定义副标题文本；None 时使用内置默认值。
-        Returns:
-            StartupRenderer: 已应用自定义配置的启动横幅渲染器实例。
-        """
-        return StartupRenderer(lines=lines, subtitle=subtitle)
-
-    def _build_exit_renderer(self, title: str) -> ExitRenderer:
-        """构建退出摘要渲染器，应用指定的提示框标题。
-
-        Args:
-            title (str): 退出提示框的首行标题文本。
-        Returns:
-            ExitRenderer: 已应用指定标题的退出渲染器实例。
-        """
-        return ExitRenderer(title=title)
-
-    def _build_slash_renderer(self) -> SlashCommandRenderer:
-        """构建 slash 命令结果面板渲染器（默认配置）。
-
-        Returns:
-            SlashCommandRenderer: 默认配置的 slash 渲染器实例。
-        """
-        return SlashCommandRenderer()
-
-    def _build_event_printer(self) -> RuntimeEventPrinter:
-        """构建运行期事件打印器，绑定注入的统一输出流。
-
-        Returns:
-            RuntimeEventPrinter: 已绑定 self._stream 的事件打印器实例。
-        """
-        return RuntimeEventPrinter(stream=self._stream)
-
-    def _build_autocomplete_prompt(self) -> SlashAutocompletePrompt:
-        """构建带 slash 自动补全的交互式输入读取器。
-
-        输入流与输出流均取自构造时注入的 _stdin / _stream，以确保
-        TTY 检测行为与整体 I/O 配置一致。
-
-        Returns:
-            SlashAutocompletePrompt: 已载入当前命令目录的交互式输入读取器实例。
-        """
-        entries = self._build_autocomplete_entries()
-        return SlashAutocompletePrompt(
-            entries=entries,
-            stdin=self._stdin,
-            stdout=self._stream,
-        )
-
-    def _build_autocomplete_entries(self) -> tuple[SlashAutocompleteEntry, ...]:
-        """从当前分发器的规格列表中提取自动补全条目（展开所有别名）。
-
-        Returns:
-            tuple[SlashAutocompleteEntry, ...]: 每个命令的所有名称均展开为独立条目。
-        """
-        return tuple(
-            SlashAutocompleteEntry(name=name, description=spec.description)
-            for spec in self._dispatcher.get_slash_command_specs()
-            for name in spec.names
-        )
-
-
-__all__ = ['InteractionGateway']
 

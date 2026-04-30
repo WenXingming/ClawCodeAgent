@@ -154,16 +154,26 @@ class ExitRenderer(TerminalRenderer):
         rendered.append('\x1b[0m')
         return ''.join(rendered)
 
-    def _render_content_text(self, text: str, content_width: int, use_ansi: bool) -> str:
+    def _render_content_text(
+        self,
+        text: str,
+        content_width: int,
+        use_ansi: bool,
+        *,
+        active_title: str = '',
+    ) -> str:
         """渲染结束提示框正文中的单行文本。
 
         Args:
             text (str): 当前正文文本。
             content_width (int): 正文区域的最大宽度。
             use_ansi (bool): 是否启用 ANSI 着色。
+            active_title (str): 需要高亮着色的标题文本；退出渲染器忽略此参数，
+                改用构造时注入的 self._title。
         Returns:
             str: 已补齐宽度并按需着色后的单行正文文本。
         """
+        del active_title
         padded_text = self._pad_to_display_width(text, content_width)
         if use_ansi and text == self._title:
             return self._colorize_title(padded_text)
