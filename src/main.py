@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from app.app_gateway import AppGateway
 from agent import AgentGateway as Agent
-from openai_client import OpenAIClientGateway
+from client import ClientGateway
 from session import SessionGateway
 
 
@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     """执行主 CLI 入口并返回进程退出码。
 
     通过 AppGateway.run_cli() 把依赖注入点与控制面实现完全解耦。
-    测试可 patch OpenAIClientGateway、Agent 或 SessionGateway 来替换实际实现。
+    测试可 patch ClientGateway、Agent 或 SessionGateway 来替换实际实现。
 
     Args:
         argv (list[str] | None): 命令行参数列表；None 时由 argparse 回退到 sys.argv。
@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
         无（内部异常已在 AppGateway 层捕获）。
     """
     return AppGateway(
-        openai_client_cls=OpenAIClientGateway,
+        openai_client_cls=ClientGateway,
         agent_cls=Agent,
         session_manager_cls=SessionGateway,
     ).run_cli(argv)
