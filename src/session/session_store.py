@@ -90,8 +90,8 @@ class SessionStore:
             )
         return snapshot
 
-    # ── 私有辅助（深度优先顺序：_validate_id → _encode → _write_file
-    #                              ↘ _read_file → _decode → _parse_json → _file_path）
+    # ── 私有辅助（深度优先顺序：_validate_id → _encode → _write_file → _file_path
+    #                              ↘ _read_file → _decode → _parse_json）
 
     def _validate_id(self, session_id: str) -> str:
         """规范化并校验 session_id 的合法性与路径安全性。
@@ -150,6 +150,18 @@ class SessionStore:
             raise SessionPersistenceError(f'写入快照文件失败 {file_path}: {exc}') from exc
         return file_path
 
+    def _file_path(self, session_id: str) -> Path:
+        """计算指定会话 ID 对应的快照文件绝对路径。
+
+        Args:
+            session_id (str): 已校验的会话标识。
+        Returns:
+            Path: 快照文件的绝对路径（directory / session_id.json）。
+        Raises:
+            None
+        """
+        return self.directory / f'{session_id}.json'
+
     def _read_file(self, session_id: str) -> str:
         """从对应的快照文件读取 JSON 文本。
 
@@ -202,15 +214,3 @@ class SessionStore:
         if not isinstance(data, dict):
             raise SessionPersistenceError('快照文件格式错误：顶层结构必须为 JSON 对象')
         return data
-
-    def _file_path(self, session_id: str) -> Path:
-        """计算指定会话 ID 对应的快照文件绝对路径。
-
-        Args:
-            session_id (str): 已校验的会话标识。
-        Returns:
-            Path: 快照文件的绝对路径（directory / session_id.json）。
-        Raises:
-            None
-        """
-        return self.directory / f'{session_id}.json'

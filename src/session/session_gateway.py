@@ -2,15 +2,17 @@
 
 SessionGateway 是 session 领域的唯一对外入口，负责：
   1. 接收 core_contracts.session_contracts 中的标准请求 DTO
-    2. 将请求路由到 SessionStore（持久化链路）或 SessionStateRuntime（运行态链路）
+  2. 将请求路由到 SessionStore（持久化链路）或 SessionStateRuntime（运行态链路）
   3. 将内部 SessionContractError 子类原样透传，其他未预期异常翻译为 SessionContractError
 
 Gateway 本身不含任何业务运算——所有计算均委托给两个内部组件。
+依赖构造完全由外部完成，通常通过 session.__init__.create_session_gateway 工厂注入。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from core_contracts.session_contracts import (
     AgentSessionState,
@@ -22,8 +24,10 @@ from core_contracts.session_contracts import (
     SessionStateCreateRequest,
     SessionStateResumeRequest,
 )
-from .session_state import SessionStateRuntime
-from .session_store import SessionStore
+
+if TYPE_CHECKING:
+    from .session_state import SessionStateRuntime
+    from .session_store import SessionStore
 
 
 class SessionGateway:
@@ -35,28 +39,25 @@ class SessionGateway:
 
     def __init__(
         self,
-        session_store_directory: Path | None = None,
-        *,
-        session_store: SessionStore | None = None,
-        session_state: SessionStateRuntime | None = None,
+        session_store: SessionStore,
+        session_state: SessionStateRuntime,
     ) -> None:
-        """初始化 SessionGateway，优先走显式依赖注入。
+        """初始化 SessionGateway，强制要求显式依赖注入。
+
+        外部必须通过 create_session_gateway() 工厂或测试 Mock 提供两个内部组件；
+        Gateway 自身不承担任何依赖装配逻辑。
 
         Args:
-            session_store_directory (Path | None): 兼容模式下的快照目录。
-            session_store (SessionStore | None): 显式注入的会话持久化组件。
-            session_state (SessionStateRuntime | None): 显式注入的会话运行态组件。
+            session_store (SessionStore): 会话持久化组件，负责 ID 校验、文件 I/O 与编解码。
+            session_state (SessionStateRuntime): 会话运行态组件，负责状态创建与恢复。
         Returns:
             None
         Raises:
             None
         """
-        effective_store = session_store or SessionStore(directory=session_store_directory)
-        effective_state = session_state or SessionStateRuntime()
-
-        self._session_store = effective_store
+        self._session_store: SessionStore = session_store
         # SessionStore: 承载所有持久化职责（校验 / 路径 / I/O / 编解码）。
-        self._session_state = effective_state
+        self._session_state: SessionStateRuntime = session_state
         # SessionStateRuntime: 承载运行态状态创建与恢复职责。
 
     @property

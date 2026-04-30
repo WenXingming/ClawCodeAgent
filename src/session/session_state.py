@@ -10,6 +10,8 @@ AgentSessionState 的全部逻辑：
 
 from __future__ import annotations
 
+import copy
+
 from core_contracts.primitives import JSONDict
 from core_contracts.session_contracts import AgentSessionState, SessionValidationError
 
@@ -87,7 +89,7 @@ class SessionStateRuntime:
             items (tuple[JSONDict, ...]): 输入的 JSONDict 不可变序列。
             field_name (str): 字段名称，用于构造错误消息。
         Returns:
-            list[JSONDict]: 经过深度复制的字典列表（防止外部数据污染）。
+            list[JSONDict]: 经过深拷贝的字典列表（防止外部修改污染运行态状态）。
         Raises:
             SessionValidationError: 序列中存在非字典元素时抛出。
         """
@@ -98,5 +100,5 @@ class SessionStateRuntime:
                     f'{field_name}[{index}] 必须为字典，'
                     f'实际类型为 {type(item).__name__}'
                 )
-            result.append(dict(item))
+            result.append(copy.deepcopy(item))
         return result
