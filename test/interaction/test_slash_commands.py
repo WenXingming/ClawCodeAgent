@@ -14,6 +14,7 @@ from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, WorkspaceScope
 from core_contracts.interaction_contracts import SlashCommandContext
 from interaction import SlashCommandDispatcher
+from core_contracts.interaction_contracts import SlashCommandSpec
 from core_contracts.session_contracts import AgentSessionState
 from tools.tools_gateway import ToolsGateway
 
@@ -38,7 +39,50 @@ class SlashCommandModuleTests(unittest.TestCase):
     def setUp(self) -> None:
         """为每个测试用例创建独立的 slash 分发器实例（注入 mock context gateway）。"""
         self.dispatcher = SlashCommandDispatcher(context_manager=_make_mock_context_gateway())
+        self._load_default_specs(self.dispatcher)
         self.tool_gateway = ToolsGateway()
+
+    @staticmethod
+    def _load_default_specs(dispatcher: SlashCommandDispatcher) -> None:
+        """为分发器装配内置 slash 命令规格。"""
+        specs: tuple[SlashCommandSpec, ...] = (
+            SlashCommandSpec(
+                names=('help',),
+                description='Show supported local slash commands.',
+                handler=dispatcher._handle_help,
+            ),
+            SlashCommandSpec(
+                names=('context',),
+                description='Show local context status.',
+                handler=dispatcher._handle_context,
+            ),
+            SlashCommandSpec(
+                names=('status',),
+                description='Show current session status.',
+                handler=dispatcher._handle_status,
+            ),
+            SlashCommandSpec(
+                names=('permissions',),
+                description='Show current tool permissions.',
+                handler=dispatcher._handle_permissions,
+            ),
+            SlashCommandSpec(
+                names=('tools',),
+                description='List registered local tools.',
+                handler=dispatcher._handle_tools,
+            ),
+            SlashCommandSpec(
+                names=('clear',),
+                description='Fork a new cleared session snapshot.',
+                handler=dispatcher._handle_clear,
+            ),
+            SlashCommandSpec(
+                names=('exit', 'quit'),
+                description='Stop local interaction and return to caller.',
+                handler=dispatcher._handle_exit,
+            ),
+        )
+        dispatcher.load_specs(specs)
 
     def _make_context(self) -> SlashCommandContext:
         session_state = AgentSessionState()

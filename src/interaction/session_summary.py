@@ -59,6 +59,17 @@ class SessionInteractionTracker:
                 continue
             self.observe_tool_result(ok=bool(event.get('ok')))
 
+    def update_session_id(self, session_id: str | None) -> None:
+        """刷新最后一个已知的活动 session id。
+
+        Args:
+            session_id (str | None): 新观察到的会话 ID；为空时忽略。
+        Returns:
+            None: 该方法只在存在有效会话 ID 时更新内部状态。
+        """
+        if session_id:
+            self.session_id = session_id
+
     def observe_tool_result(self, *, ok: bool) -> None:
         """累计一次工具结果。
 
@@ -72,17 +83,6 @@ class SessionInteractionTracker:
             self.tool_successes += 1
             return
         self.tool_failures += 1
-
-    def update_session_id(self, session_id: str | None) -> None:
-        """刷新最后一个已知的活动 session id。
-
-        Args:
-            session_id (str | None): 新观察到的会话 ID；为空时忽略。
-        Returns:
-            None: 该方法只在存在有效会话 ID 时更新内部状态。
-        """
-        if session_id:
-            self.session_id = session_id
 
     def to_summary(self) -> SessionSummary:
         """将累计状态投影为可渲染的总结对象。

@@ -39,23 +39,46 @@ class SlashCommandDispatcher:
     /context 命令将优雅降级返回提示信息，不抛出异常。
     """
 
-    def __init__(self, context_manager: ContextGateway | None = None) -> None:
+    def __init__(
+        self,
+        context_manager: ContextGateway | None = None,
+        *,
+        specs: tuple[SlashCommandSpec, ...] = (),
+    ) -> None:
         """初始化 slash 命令分发器。
+
+        命令规格通过构造参数由外部注入，遵守开闭原则。
 
         Args:
             context_manager (ContextGateway | None): Context 领域网关，为 /context 命令
                 提供实时预算评估能力；为 None 时 /context 命令降级提示。
+            specs (tuple[SlashCommandSpec, ...]): 已注册的 slash 命令规格列表；
+                可由外部工厂在该对象创建后通过 load_specs() 二次装配。
         Returns:
             None: 构造函数只建立分发器内部状态。
         """
         self._context_manager = context_manager
         # ContextGateway | None: /context 命令使用的预算评估入口；可为 None（降级模式）。
 
-        self._specs = self._build_specs()
+        self._specs: tuple[SlashCommandSpec, ...] = specs
         # tuple[SlashCommandSpec, ...]: 当前分发器支持的全部命令规格，保持帮助展示顺序。
 
         self._spec_index = self._build_spec_index(self._specs)
         # dict[str, SlashCommandSpec]: 命令名到规格对象的快速查找索引。
+
+    def load_specs(self, specs: tuple[SlashCommandSpec, ...]) -> None:
+        """从外部加载已装配的 slash 命令规格并重建索引。
+
+        允许外部工厂在分发器构造后二次装配命令列表，将命令组装逻辑
+        从分发器中彻底抽离。
+
+        Args:
+            specs (tuple[SlashCommandSpec, ...]): 已装配的完整命令规格列表。
+        Returns:
+            None: 该方法只更新内部状态。
+        """
+        self._specs = specs
+        self._spec_index = self._build_spec_index(specs)
 
     def dispatch_slash_command(
         self,
@@ -249,21 +272,22 @@ class SlashCommandDispatcher:
             },
         )
 
-    def _build_specs(self) -> tuple[SlashCommandSpec, ...]:
-        """构建当前分发器支持的全部命令规格。
+    def _build_spec_index(
+        self,
+        specs: tuple[SlashCommandSpec, ...],
+    ) -> dict[str, SlashCommandSpec]:
+        """根据命令规格构建名称索引。
 
+        Args:
+            specs (tuple[SlashCommandSpec, ...]): 按展示顺序排列的命令规格列表。
         Returns:
-            tuple[SlashCommandSpec, ...]: 命令规格元组。
+            dict[str, SlashCommandSpec]: 命令名到规格对象的映射表。
         """
-        return (
-            SlashCommandSpec(names=('help',), description='Show supported local slash commands.', handler=self._handle_help),
-            SlashCommandSpec(names=('context',), description='Show local context status.', handler=self._handle_context),
-            SlashCommandSpec(names=('status',), description='Show current session status.', handler=self._handle_status),
-            SlashCommandSpec(names=('permissions',), description='Show current tool permissions.', handler=self._handle_permissions),
-            SlashCommandSpec(names=('tools',), description='List registered local tools.', handler=self._handle_tools),
-            SlashCommandSpec(names=('clear',), description='Fork a new cleared session snapshot.', handler=self._handle_clear),
-            SlashCommandSpec(names=('exit', 'quit'), description='Stop local interaction and return to caller.', handler=self._handle_exit),
-        )
+        index: dict[str, SlashCommandSpec] = {}
+        for spec in specs:
+            for name in spec.names:
+                index[name] = spec
+        return index
 
     def _handle_help(
         self,
@@ -516,23 +540,6 @@ class SlashCommandDispatcher:
             output='Exiting local session interaction.',
             metadata={'exit_requested': True},
         )
-
-    def _build_spec_index(
-        self,
-        specs: tuple[SlashCommandSpec, ...],
-    ) -> dict[str, SlashCommandSpec]:
-        """根据命令规格构建名称索引。
-
-        Args:
-            specs (tuple[SlashCommandSpec, ...]): 按展示顺序排列的命令规格列表。
-        Returns:
-            dict[str, SlashCommandSpec]: 命令名到规格对象的映射表。
-        """
-        index: dict[str, SlashCommandSpec] = {}
-        for spec in specs:
-            for name in spec.names:
-                index[name] = spec
-        return index
 
     def _build_help_lines(self) -> list[str]:
         """构建 slash 命令总览文本。"""
