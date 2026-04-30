@@ -57,6 +57,11 @@ from core_contracts.interaction_contracts import (
     SlashCommandResult,
     SlashCommandSpec,
 )
+from core_contracts.client_contracts import (
+    ClientContractError,
+    ClientExecutionError,
+    ClientRequest,
+)
 from core_contracts.planning_contracts import (
     PlanStep,
     PlanStepStatus,
@@ -135,6 +140,10 @@ __all__ = [
     'SlashCommandContext',
     'SlashCommandResult',
     'SlashCommandSpec',
+    # ── client ──
+    'ClientContractError',
+    'ClientExecutionError',
+    'ClientRequest',
     # ── planning ──
     'PlanStep',
     'PlanStepStatus',

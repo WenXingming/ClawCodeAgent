@@ -9,19 +9,12 @@ from core_contracts.errors import ModelConnectionError, ModelResponseError
 from core_contracts.model import ModelClient, ModelConfig
 from core_contracts.messaging import OneTurnResponse
 from core_contracts.primitives import TokenUsage
-from openai_client.openai_client import OpenAIClient
 
 
-class _FakeCompactClient(OpenAIClient):
+class _FakeCompactClient:
+    """ModelClient 协议的测试替替类，不依赖内部实现。"""
+
     def __init__(self, responses: list[OneTurnResponse | Exception]) -> None:
-        super().__init__(
-            ModelConfig(
-                model='fake-model',
-                base_url='http://127.0.0.1:1/v1',
-                api_key='fake-key',
-                temperature=0.0,
-            )
-        )
         self._responses = list(responses)
         self.calls: list[dict[str, object]] = []
 
