@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import heapq
 import math
 
 from core_contracts.rag import RagChunk, RagCollectionNotFoundError, RagIndexError
@@ -63,15 +64,14 @@ class VectorStore:
         if name not in self._store:
             raise RagCollectionNotFoundError(name)
         chunks, vectors = self._store[name]
-        if not chunks:
+        if not chunks or top_k <= 0:
             return []
 
-        scored = [
+        scored = (
             (chunk, self._cosine_similarity(query_vector, vec))
             for chunk, vec in zip(chunks, vectors)
-        ]
-        scored.sort(key=lambda item: item[1], reverse=True)
-        return scored[:top_k]
+        )
+        return heapq.nlargest(top_k, scored, key=lambda item: item[1])
 
     def drop(self, name: str) -> None:
         """删除指定集合及其全部数据。

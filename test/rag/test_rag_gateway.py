@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import heapq
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -140,6 +141,18 @@ class DocumentChunkerChunkTests(unittest.TestCase):
         # 应在换行符处切割，第一块以 A 结尾而不截断到最后
         self.assertTrue(all(c.content for c in chunks))
 
+    def test_chunk_prefers_sentence_break_point_when_available(self) -> None:
+        content = '第一句说明。第二句补充信息'
+        chunks = self.chunker.chunk(_make_doc(content=content), chunk_size=7, chunk_overlap=0)
+        self.assertGreaterEqual(len(chunks), 1)
+        self.assertTrue(chunks[0].content.endswith('。'))
+
+    def test_chunk_avoids_breaking_english_word_when_forward_boundary_exists(self) -> None:
+        content = 'important words and details'
+        chunks = self.chunker.chunk(_make_doc(content=content), chunk_size=7, chunk_overlap=0)
+        self.assertGreaterEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].content, 'important')
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VectorStore 测试
@@ -176,6 +189,21 @@ class VectorStoreUpsertSearchTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0][0].content, 'A')
         self.assertAlmostEqual(results[0][1], 1.0)
+
+    def test_search_returns_empty_when_top_k_not_positive(self) -> None:
+        self.store.upsert('col', [self.chunk], [self.vector])
+        self.assertEqual(self.store.search('col', [1.0, 0.0, 0.0], top_k=0), [])
+        self.assertEqual(self.store.search('col', [1.0, 0.0, 0.0], top_k=-1), [])
+
+    def test_search_uses_heapq_nlargest_for_top_k(self) -> None:
+        chunk_a = _make_chunk(position=0, content='A')
+        chunk_b = _make_chunk(position=1, content='B')
+        self.store.upsert('col', [chunk_a, chunk_b], [[1.0, 0.0], [0.0, 1.0]])
+        with patch('rag.vector_store.heapq.nlargest', wraps=heapq.nlargest) as spy_nlargest:
+            results = self.store.search('col', [1.0, 0.0], top_k=1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][0].content, 'A')
+        spy_nlargest.assert_called_once()
 
     def test_search_empty_collection_returns_empty(self) -> None:
         self.store.upsert('col', [], [])

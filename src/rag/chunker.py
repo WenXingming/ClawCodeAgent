@@ -12,6 +12,8 @@ from core_contracts.rag import RagChunk, RagDocument, RagIndexError
 class DocumentChunker:
     """将单篇文档按滑动窗口策略切分为多个文本分块。"""
 
+    _SENTENCE_BREAK_CHARS = frozenset({'.', '!', '?', '。', '！', '？', ';', '；', ':', '：'})
+
     def __init__(self) -> None:
         """初始化无状态切分器。"""
         pass
@@ -72,7 +74,7 @@ class DocumentChunker:
         while start < len(content):
             end = min(start + chunk_size, len(content))
             if end < len(content):
-                end = self._find_break_point(content, start, end)
+                end = self._find_break_point(content, start, end, chunk_size)
             stripped = content[start:end].strip()
             if stripped:
                 segments.append(stripped)
@@ -82,20 +84,130 @@ class DocumentChunker:
 
         return segments
 
-    def _find_break_point(self, content: str, start: int, end: int) -> int:
-        """在 [start, end] 窗口内寻找最靠近 end 的自然断点（换行符 > 空格 > 强制截断）。
+    def _find_break_point(self, content: str, start: int, end: int, chunk_size: int) -> int:
+        """在 [start, end] 窗口内寻找最靠近 end 的自然断点。
+
+        断点优先级：
+            1) 换行符
+            2) 句末标点（中英文 . ! ? ; :）
+            3) 任意空白符
+            4) 当前截断命中词中间时，优先向前找到最近词边界（允许轻微超出 chunk_size）
+            5) 回退到 end 强制截断
 
         Args:
             content (str): 被搜索的文本全文。
             start (int): 搜索窗口的起始位置（含）。
-            end (int): 搜索窗口的终止位置（含），也是找不到断点时的回退值。
+            end (int): 搜索窗口的终止位置（不含），也是找不到断点时的回退值。
+            chunk_size (int): 当前分块上限字符数，用于控制向前探测的最大距离。
         Returns:
             int: 最佳断点位置（断点后第一个字符的索引），找不到时返回 end。
         """
         newline_pos = content.rfind('\n', start, end)
         if newline_pos > start:
             return newline_pos + 1
-        space_pos = content.rfind(' ', start, end)
-        if space_pos > start:
-            return space_pos + 1
+
+        sentence_break = self._find_sentence_break_point(content, start, end)
+        if sentence_break is not None:
+            return sentence_break
+
+        whitespace_break = self._find_whitespace_break_point(content, start, end)
+        if whitespace_break is not None:
+            return whitespace_break
+
+        if self._is_mid_word_cut(content, end):
+            backward_word_break = self._find_backward_word_break_point(content, start, end)
+            if backward_word_break is not None:
+                return backward_word_break
+
+            forward_probe_span = max(8, chunk_size // 2)
+            forward_limit = min(len(content), end + forward_probe_span)
+            forward_word_break = self._find_forward_word_break_point(content, end, forward_limit)
+            if forward_word_break is not None:
+                return forward_word_break
+
         return end
+
+    def _find_sentence_break_point(self, content: str, start: int, end: int) -> int | None:
+        """在窗口内自右向左查找句末标点断点。
+
+        Args:
+            content (str): 被搜索的文本全文。
+            start (int): 搜索窗口起始索引（含）。
+            end (int): 搜索窗口终止索引（不含）。
+        Returns:
+            int | None: 命中时返回断点位置（标点后一个字符），否则返回 None。
+        """
+        for idx in range(end - 1, start - 1, -1):
+            if content[idx] in self._SENTENCE_BREAK_CHARS:
+                return idx + 1
+        return None
+
+    def _find_whitespace_break_point(self, content: str, start: int, end: int) -> int | None:
+        """在窗口内自右向左查找空白符断点。
+
+        Args:
+            content (str): 被搜索的文本全文。
+            start (int): 搜索窗口起始索引（含）。
+            end (int): 搜索窗口终止索引（不含）。
+        Returns:
+            int | None: 命中时返回断点位置（空白符后一个字符），否则返回 None。
+        """
+        for idx in range(end - 1, start - 1, -1):
+            if content[idx].isspace():
+                return idx + 1
+        return None
+
+    def _is_mid_word_cut(self, content: str, end: int) -> bool:
+        """判断当前 end 是否正落在词中间。
+
+        Args:
+            content (str): 被检查的文本全文。
+            end (int): 当前拟切分位置（不含）。
+        Returns:
+            bool: 若 end 左右字符都属于词字符则返回 True。
+        """
+        if end <= 0 or end >= len(content):
+            return False
+        return self._is_word_char(content[end - 1]) and self._is_word_char(content[end])
+
+    def _find_backward_word_break_point(self, content: str, start: int, end: int) -> int | None:
+        """在窗口内自右向左查找最近词边界。
+
+        Args:
+            content (str): 被搜索的文本全文。
+            start (int): 搜索窗口起始索引（含）。
+            end (int): 搜索窗口终止索引（不含）。
+        Returns:
+            int | None: 命中时返回边界后一个字符位置，否则返回 None。
+        """
+        for idx in range(end - 1, start - 1, -1):
+            if not self._is_word_char(content[idx]):
+                candidate = idx + 1
+                if candidate > start:
+                    return candidate
+        return None
+
+    def _find_forward_word_break_point(self, content: str, end: int, forward_limit: int) -> int | None:
+        """在 end 之后有限探测窗口内查找最近词边界。
+
+        Args:
+            content (str): 被搜索的文本全文。
+            end (int): 当前拟切分位置（不含）。
+            forward_limit (int): 向前探测的上边界（不含）。
+        Returns:
+            int | None: 命中时返回边界后一个字符位置，否则返回 None。
+        """
+        for idx in range(end, forward_limit):
+            if not self._is_word_char(content[idx]):
+                return idx + 1
+        return None
+
+    def _is_word_char(self, char: str) -> bool:
+        """判断单个字符是否属于词字符。
+
+        Args:
+            char (str): 待判定的单个字符。
+        Returns:
+            bool: 字母、数字或下划线返回 True，其它返回 False。
+        """
+        return char.isalnum() or char == '_'
