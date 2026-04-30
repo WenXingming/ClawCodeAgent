@@ -1,4 +1,11 @@
-"""SessionGateway pytest tests with strict dependency isolation."""
+﻿"""SessionGateway 单元测试。
+
+测试策略：
+- 通过显式注入，Mock SessionStore 和 SessionStateRuntime，
+  严格隔离所有外部依赖。
+- 覆盖四个标准契约方法（save / load / create_state / resume_state）的主流程与异常路径。
+- 覆盖 directory 属性委托。
+"""
 
 from __future__ import annotations
 
@@ -20,7 +27,9 @@ from core_contracts.primitives import TokenUsage
 from core_contracts.session_contracts import (
     AgentSessionSnapshot,
     AgentSessionState,
+    SessionContractError,
     SessionLoadRequest,
+    SessionNotFoundError,
     SessionPersistenceError,
     SessionSaveRequest,
     SessionStateCreateRequest,
@@ -30,20 +39,22 @@ from core_contracts.session_contracts import (
 from session.session_gateway import SessionGateway
 
 
-def _snapshot(session_id: str = 's-001') -> AgentSessionSnapshot:
-    """Build a minimal valid snapshot for gateway tests.
+# ── 测试固件工厂 ─────────────────────────────────────────────────────────────
+
+def _make_snapshot(session_id: str = 's-001') -> AgentSessionSnapshot:
+    """构造最小合法的 AgentSessionSnapshot 测试固件。
+
     Args:
-        session_id (str): Session identifier.
+        session_id (str): 会话标识。
     Returns:
-        AgentSessionSnapshot: Snapshot test fixture.
+        AgentSessionSnapshot: 填充了所有必填字段的快照对象。
     Raises:
         None
     """
-    cwd = Path.cwd()
     return AgentSessionSnapshot(
         session_id=session_id,
-        model_config=ModelConfig(model='demo-model'),
-        workspace_scope=WorkspaceScope(cwd=cwd),
+        model_config=ModelConfig(model='test-model'),
+        workspace_scope=WorkspaceScope(cwd=Path.cwd()),
         execution_policy=ExecutionPolicy(),
         context_policy=ContextPolicy(),
         permissions=ToolPermissionPolicy(),
@@ -54,146 +65,190 @@ def _snapshot(session_id: str = 's-001') -> AgentSessionSnapshot:
     )
 
 
-def test_save_contract_returns_save_result_with_path() -> None:
-    """Contract save API should return SessionSaveResult with stable fields.
+def _make_gateway_with_mocks() -> tuple[SessionGateway, MagicMock, MagicMock]:
+    """构造带有 Mock 内部组件的 SessionGateway。
+
+    通过显式注入替换 SessionStore 与 SessionStateRuntime 的真实实现。
+
     Args:
         None
     Returns:
-        None
+        tuple: (gateway, mock_serializer, mock_state_builder)
     Raises:
-        AssertionError: When save orchestration behavior regresses.
+        None
     """
-    repository = MagicMock()
-    codec = MagicMock()
-    state_factory = MagicMock()
-    store = MagicMock()
-
-    snap = _snapshot('save-01')
-    codec.encode.return_value = '{"session_id":"save-01"}'
-    repository.save_text.return_value = Path('D:/tmp/save-01.json')
-
-    gateway = SessionGateway(
-        repository=repository,
-        snapshot_codec=codec,
-        state_factory=state_factory,
-        store=store,
-    )
-
-    result = gateway.save(SessionSaveRequest(snapshot=snap))
-
-    assert result.session_id == 'save-01'
-    assert result.session_path.endswith('save-01.json')
-    codec.encode.assert_called_once_with(snap)
-    repository.save_text.assert_called_once_with('save-01', '{"session_id":"save-01"}')
+    mock_store = MagicMock()
+    mock_state = MagicMock()
+    mock_store.directory = Path('/tmp/sessions')
+    gateway = SessionGateway(session_store=mock_store, session_state=mock_state)
+    return gateway, mock_store, mock_state
 
 
-def test_load_contract_returns_snapshot() -> None:
-    """Contract load API should decode payload and return snapshot result.
-    Args:
-        None
-    Returns:
-        None
-    Raises:
-        AssertionError: When load orchestration behavior regresses.
-    """
-    repository = MagicMock()
-    repository._id_policy.normalize.return_value = 'load-01'
-    repository.load_text.return_value = '{"session_id":"load-01"}'
-    codec = MagicMock()
-    codec.decode.return_value = _snapshot('load-01')
+# ── directory 属性 ───────────────────────────────────────────────────────────
 
-    gateway = SessionGateway(repository=repository, snapshot_codec=codec, state_factory=MagicMock(), store=MagicMock())
+class TestDirectoryProperty:
+    """验证 directory 属性委托给 SessionStore。"""
 
-    result = gateway.load(SessionLoadRequest(session_id=' load-01 '))
-
-    assert result.session_id == 'load-01'
-    assert result.snapshot.session_id == 'load-01'
-    repository._id_policy.normalize.assert_called_once_with(' load-01 ')
-    repository.load_text.assert_called_once_with('load-01')
+    def test_directory_delegates_to_serializer(self) -> None:
+        """directory 属性应返回 serializer.directory 的值。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        mock_store.directory = Path('/tmp/sessions')
+        assert gateway.directory == Path('/tmp/sessions')
 
 
-def test_load_contract_raises_validation_error_on_id_mismatch() -> None:
-    """Contract load API should fail fast when payload id mismatches request id.
-    Args:
-        None
-    Returns:
-        None
-    Raises:
-        AssertionError: When mismatch validation behavior regresses.
-    """
-    repository = MagicMock()
-    repository._id_policy.normalize.return_value = 'load-02'
-    repository.load_text.return_value = '{"session_id":"other"}'
-    codec = MagicMock()
-    codec.decode.return_value = _snapshot('other')
+# ── save ─────────────────────────────────────────────────────────────────────
 
-    gateway = SessionGateway(repository=repository, snapshot_codec=codec, state_factory=MagicMock(), store=MagicMock())
+class TestSave:
+    """验证 save 方法的主流程与异常翻译。"""
 
-    with pytest.raises(SessionValidationError):
-        gateway.load(SessionLoadRequest(session_id='load-02'))
+    def test_save_returns_save_result_on_success(self) -> None:
+        """save 成功时应返回含 session_id 与 session_path 的 SessionSaveResult。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        snapshot = _make_snapshot('s-save-01')
+        mock_store.save.return_value = Path('/tmp/sessions/s-save-01.json')
 
+        result = gateway.save(SessionSaveRequest(snapshot=snapshot))
 
-def test_legacy_save_session_translates_contract_error_to_value_error() -> None:
-    """Legacy API should preserve ValueError contract for callers.
-    Args:
-        None
-    Returns:
-        None
-    Raises:
-        AssertionError: When legacy exception translation regresses.
-    """
-    repository = MagicMock()
-    repository.save_text.side_effect = SessionPersistenceError('write failed')
-    codec = MagicMock()
-    codec.encode.return_value = '{}'
+        assert result.session_id == 's-save-01'
+        assert Path(result.session_path) == Path('/tmp/sessions/s-save-01.json')
+        mock_store.save.assert_called_once_with(snapshot)
 
-    gateway = SessionGateway(repository=repository, snapshot_codec=codec, state_factory=MagicMock(), store=MagicMock())
+    def test_save_re_raises_session_validation_error_unchanged(self) -> None:
+        """save 应原样透传 SessionValidationError（属于 SessionContractError 子类）。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        mock_store.save.side_effect = SessionValidationError('bad id')
 
-    with pytest.raises(ValueError):
-        gateway.save_session(_snapshot('legacy-save'))
+        with pytest.raises(SessionValidationError, match='bad id'):
+            gateway.save(SessionSaveRequest(snapshot=_make_snapshot()))
 
+    def test_save_re_raises_session_persistence_error_unchanged(self) -> None:
+        """save 应原样透传 SessionPersistenceError。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        mock_store.save.side_effect = SessionPersistenceError('disk full')
 
-def test_legacy_load_session_translates_contract_error_to_value_error() -> None:
-    """Legacy API should preserve ValueError contract for not-found or parse errors.
-    Args:
-        None
-    Returns:
-        None
-    Raises:
-        AssertionError: When legacy exception translation regresses.
-    """
-    repository = MagicMock()
-    repository._id_policy.normalize.return_value = 'legacy-load'
-    repository.load_text.side_effect = SessionPersistenceError('broken')
+        with pytest.raises(SessionPersistenceError, match='disk full'):
+            gateway.save(SessionSaveRequest(snapshot=_make_snapshot()))
 
-    gateway = SessionGateway(repository=repository, snapshot_codec=MagicMock(), state_factory=MagicMock(), store=MagicMock())
+    def test_save_wraps_unexpected_exception_as_session_contract_error(self) -> None:
+        """save 应将未预期异常包装为 SessionContractError。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        mock_store.save.side_effect = RuntimeError('unexpected')
 
-    with pytest.raises(ValueError):
-        gateway.load_session('legacy-load')
+        with pytest.raises(SessionContractError, match='unexpected'):
+            gateway.save(SessionSaveRequest(snapshot=_make_snapshot()))
 
 
-def test_create_and_resume_state_delegate_to_state_factory() -> None:
-    """Gateway state APIs should delegate to SessionStateFactory.
-    Args:
-        None
-    Returns:
-        None
-    Raises:
-        AssertionError: When state factory delegation regresses.
-    """
-    factory = MagicMock()
-    state_obj = AgentSessionState.create('seed')
-    factory.create.return_value = state_obj
-    factory.resume.return_value = state_obj
+# ── load ─────────────────────────────────────────────────────────────────────
 
-    gateway = SessionGateway(repository=MagicMock(), snapshot_codec=MagicMock(), state_factory=factory, store=MagicMock())
+class TestLoad:
+    """验证 load 方法的主流程与异常翻译。"""
 
-    created = gateway.create_state(SessionStateCreateRequest(prompt='hello'))
-    resumed = gateway.resume_state(
-        SessionStateResumeRequest(messages=({'role': 'user', 'content': 'u'},), transcript=({'role': 'assistant', 'content': 'a'},))
-    )
+    def test_load_returns_load_result_on_success(self) -> None:
+        """load 成功时应返回含 session_id 与快照的 SessionLoadResult。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        snapshot = _make_snapshot('s-load-01')
+        mock_store.load.return_value = snapshot
 
-    assert created is state_obj
-    assert resumed is state_obj
-    factory.create.assert_called_once_with('hello')
-    factory.resume.assert_called_once()
+        result = gateway.load(SessionLoadRequest(session_id='s-load-01'))
+
+        assert result.session_id == 's-load-01'
+        assert result.snapshot is snapshot
+        mock_store.load.assert_called_once_with('s-load-01')
+
+    def test_load_re_raises_session_not_found_error(self) -> None:
+        """load 应原样透传 SessionNotFoundError。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        mock_store.load.side_effect = SessionNotFoundError('no file')
+
+        with pytest.raises(SessionNotFoundError, match='no file'):
+            gateway.load(SessionLoadRequest(session_id='missing'))
+
+    def test_load_re_raises_session_persistence_error(self) -> None:
+        """load 应原样透传 SessionPersistenceError。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        mock_store.load.side_effect = SessionPersistenceError('corrupt')
+
+        with pytest.raises(SessionPersistenceError, match='corrupt'):
+            gateway.load(SessionLoadRequest(session_id='corrupt-id'))
+
+    def test_load_wraps_unexpected_exception(self) -> None:
+        """load 应将未预期异常包装为 SessionContractError。"""
+        gateway, mock_store, _ = _make_gateway_with_mocks()
+        mock_store.load.side_effect = OSError('io error')
+
+        with pytest.raises(SessionContractError, match='io error'):
+            gateway.load(SessionLoadRequest(session_id='any'))
+
+
+# ── create_state ─────────────────────────────────────────────────────────────
+
+class TestCreateState:
+    """验证 create_state 方法的主流程与异常翻译。"""
+
+    def test_create_state_returns_agent_session_state(self) -> None:
+        """create_state 成功时应返回 AgentSessionState。"""
+        gateway, _, mock_builder = _make_gateway_with_mocks()
+        expected_state = MagicMock(spec=AgentSessionState)
+        mock_builder.build_new.return_value = expected_state
+
+        result = gateway.create_state(SessionStateCreateRequest(prompt='hello'))
+
+        assert result is expected_state
+        mock_builder.build_new.assert_called_once_with('hello')
+
+    def test_create_state_re_raises_session_validation_error(self) -> None:
+        """create_state 应原样透传 SessionValidationError。"""
+        gateway, _, mock_builder = _make_gateway_with_mocks()
+        mock_builder.build_new.side_effect = SessionValidationError('empty prompt')
+
+        with pytest.raises(SessionValidationError, match='empty prompt'):
+            gateway.create_state(SessionStateCreateRequest(prompt=''))
+
+    def test_create_state_wraps_unexpected_exception(self) -> None:
+        """create_state 应将未预期异常包装为 SessionContractError。"""
+        gateway, _, mock_builder = _make_gateway_with_mocks()
+        mock_builder.build_new.side_effect = RuntimeError('unexpected')
+
+        with pytest.raises(SessionContractError, match='unexpected'):
+            gateway.create_state(SessionStateCreateRequest(prompt='hi'))
+
+
+# ── resume_state ─────────────────────────────────────────────────────────────
+
+class TestResumeState:
+    """验证 resume_state 方法的主流程与异常翻译。"""
+
+    def test_resume_state_returns_agent_session_state(self) -> None:
+        """resume_state 成功时应返回 AgentSessionState。"""
+        gateway, _, mock_builder = _make_gateway_with_mocks()
+        expected_state = MagicMock(spec=AgentSessionState)
+        mock_builder.build_from_persisted.return_value = expected_state
+        messages: tuple = ({'role': 'user', 'content': 'hi'},)
+        transcript: tuple = ({'role': 'user', 'content': 'hi'},)
+
+        result = gateway.resume_state(
+            SessionStateResumeRequest(messages=messages, transcript=transcript)
+        )
+
+        assert result is expected_state
+        mock_builder.build_from_persisted.assert_called_once_with(messages, transcript)
+
+    def test_resume_state_re_raises_session_validation_error(self) -> None:
+        """resume_state 应原样透传 SessionValidationError。"""
+        gateway, _, mock_builder = _make_gateway_with_mocks()
+        mock_builder.build_from_persisted.side_effect = SessionValidationError('bad msg')
+
+        with pytest.raises(SessionValidationError, match='bad msg'):
+            gateway.resume_state(
+                SessionStateResumeRequest(messages=('bad',), transcript=())
+            )
+
+    def test_resume_state_wraps_unexpected_exception(self) -> None:
+        """resume_state 应将未预期异常包装为 SessionContractError。"""
+        gateway, _, mock_builder = _make_gateway_with_mocks()
+        mock_builder.build_from_persisted.side_effect = TypeError('bad type')
+
+        with pytest.raises(SessionContractError, match='bad type'):
+            gateway.resume_state(SessionStateResumeRequest(messages=(), transcript=()))
+
+

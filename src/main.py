@@ -9,7 +9,7 @@ from __future__ import annotations
 from app.app_gateway import AppGateway
 from agent import AgentGateway as Agent
 from openai_client import OpenAIClientGateway
-from session.session_gateway import SessionGateway
+from session import SessionGateway
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,12 +25,11 @@ def main(argv: list[str] | None = None) -> int:
     Raises:
         无（内部异常已在 AppGateway 层捕获）。
     """
-    return AppGateway.run_cli(
-        argv,
+    return AppGateway(
         openai_client_cls=OpenAIClientGateway,
         agent_cls=Agent,
         session_manager_cls=SessionGateway,
-    )
+    ).run_cli(argv)
 
 
 if __name__ == '__main__':

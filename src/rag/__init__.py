@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     from core_contracts.model import ModelClient, ModelConfig
     from core_contracts.rag_contracts import EmbeddingProvider
 
-__all__ = ['RagGateway', 'build_rag_gateway']
-
 
 def build_rag_gateway(
     *,
@@ -55,3 +53,5 @@ def build_rag_gateway(
         ),
     )
 
+
+__all__ = ['RagGateway', 'build_rag_gateway']

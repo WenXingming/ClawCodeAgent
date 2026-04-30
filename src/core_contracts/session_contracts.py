@@ -210,7 +210,7 @@ class AgentSessionSnapshot:
             scratchpad_directory=(_as_str(scratchpad_raw) if scratchpad_raw is not None else None),
             mcp_capability_shortlist=tuple(item for item in shortlist_raw if isinstance(item, dict)),
             materialized_mcp_capability_handles=tuple(
-                _as_str(item).strip() for item in handles_raw if _as_str(item).strip()
+                stripped for item in handles_raw if (stripped := _as_str(item).strip())
             ),
             schema_version=_as_int(_first_present(data, 'schema_version', 'schemaVersion', default=1), 1),
         )
