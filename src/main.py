@@ -25,12 +25,11 @@ def main(argv: list[str] | None = None) -> int:
     Raises:
         无（内部异常已在 AppGateway 层捕获）。
     """
-    return AppGateway.run_cli(
-        argv,
+    return AppGateway(
         openai_client_cls=OpenAIClientGateway,
         agent_cls=Agent,
         session_manager_cls=SessionGateway,
-    )
+    ).run_cli(argv)
 
 
 if __name__ == '__main__':

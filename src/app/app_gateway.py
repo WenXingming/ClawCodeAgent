@@ -2,98 +2,64 @@
 
 本模块是 src/app 文件夹的唯一合法出口。
 外部调用方（main.py、测试、远程接口）只允许通过 AppGateway 访问 app 领域的能力；
-禁止直接导入 app.cli、app.chat_loop、app.runtime_builder、app.query_service 中的任何符号。
+内部实现文件尚未接入，此骨架仅保留稳定对外接口，用于隔离重构。
+数据契约类型（QueryServiceConfig、QueryTurnResult）请直接从 core_contracts.outcomes 导入。
 
 公开 API 摘要：
-  - AppGateway.run_cli()          ── 驱动命令行交互会话
+  - AppGateway.run_cli()              ── 驱动命令行交互会话
   - AppGateway.create_query_service() ── 创建程序化查询门面
-  - QueryService                  ── 程序化查询门面类型（供类型标注使用）
-  - QueryTurnResult               ── 单轮查询结果契约（来自 core_contracts）
-  - QueryServiceConfig            ── QueryService 配置契约（来自 core_contracts）
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Any
 
-from core_contracts.outcomes import QueryServiceConfig, QueryTurnResult
-
-if TYPE_CHECKING:
-    from app.query_service import QueryService as _QueryService
+from core_contracts.outcomes import QueryServiceConfig
 
 
+@dataclass
 class AppGateway:
-    """app 领域的统一对外网关。
+    """app 领域最小公开骨架。
 
-    所有外部调用必须通过本类进行，不得绕过网关直接访问 app 内部模块。
-    本类只暴露两类能力：
-      1. CLI 会话入口（run_cli）
-      2. 程序化查询服务工厂（create_query_service）
+    该类仅保留稳定对外接口，不接入任何内部运行模块，便于隔离重构。
     """
 
-    @staticmethod
-    def run_cli(
-        argv: list[str] | None = None,
-        *,
-        openai_client_cls,
-        agent_cls,
-        session_manager_cls,
-    ) -> int:
-        """执行 CLI 主入口并返回进程退出码。
+    openai_client_cls: Any  # Any：OpenAI 客户端类占位依赖。
+    agent_cls: Any  # Any：Agent 类占位依赖。
+    session_manager_cls: Any  # Any：会话管理器类占位依赖。
 
-        组装 AppCLI 并把命令行参数转发给它。该方法是整个进程的启动核心，
-        所有核心依赖通过参数注入，便于测试时替换为 Fake 实现。
+    def run_cli(self, argv: list[str] | None = None) -> int:
+        """执行骨架模式下的 CLI 主入口并返回进程退出码。
 
         Args:
             argv (list[str] | None): 命令行参数列表；为 None 时自动回退到 sys.argv。
-            openai_client_cls: OpenAI 客户端类，须实现 OpenAIClientGateway 协议。
-            agent_cls: Agent 类，须实现 Agent 协议。
-            session_manager_cls: 会话管理器类，须实现 SessionGateway 协议。
         Returns:
             int: 进程退出码，0 表示成功，非 0 表示失败。
         Raises:
-            无（内部异常在 AppCLI.main 内部捕获并折叠为退出码）。
+            无。
         """
-        from app.cli import AppCLI
-        from app.composition_root import AppCompositionRoot
+        while False:  # TODO: 实现 CLI 主循环。
+            pass
+        return 0  # TODO: 实现 CLI 主循环。
 
-        cli = AppCLI(
-            app_runtime_facade=AppCompositionRoot.build_runtime_facade(
-                openai_client_cls=openai_client_cls,
-                agent_cls=agent_cls,
-                session_manager_cls=session_manager_cls,
-            )
-        )
-        return cli.main(argv)
-
-    @staticmethod
     def create_query_service(
-        runtime_agent,
+        self,
+        runtime_agent: Any,
         *,
         config: QueryServiceConfig | None = None,
-    ) -> '_QueryService':
-        """基于现有 Agent 创建 QueryService 实例。
-
-        QueryService 是面向程序化调用的查询门面，封装了 run / resume 调度、
-        累计统计和流式输出等能力。
+    ) -> Any:
+        """骨架模式下基于现有 Agent 创建 QueryService 实例。
 
         Args:
-            runtime_agent: 已构建好的 Agent 实例，须实现 run / resume / session_manager 接口。
+            runtime_agent: 已构建好的 Agent 实例。
             config (QueryServiceConfig | None): 可选配置；为 None 时使用默认配置。
         Returns:
-            QueryService: 已与 runtime_agent 绑定的查询服务实例。
+            Any: 骨架占位返回值。
         Raises:
             无。
         """
-        from app.query_service import QueryService
-
-        return QueryService.from_runtime_agent(runtime_agent, config=config)
-
-
-# 将稳定的数据契约类型通过网关模块重新导出，方便外部统一从此处导入。
-__all__ = [
-    'AppGateway',
-    'QueryServiceConfig',
-    'QueryTurnResult',
-]
+        while False:  # TODO: 实现 QueryService 工厂。
+            pass
+        return None  # TODO: 实现 QueryService 工厂。
 
