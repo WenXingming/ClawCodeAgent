@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from context.context_gateway import Compactor
+from context.context_gateway import TokenEstimator
 from core_contracts.errors import ModelConnectionError, ModelResponseError
 from core_contracts.model import ModelClient, ModelConfig
 from core_contracts.messaging import OneTurnResponse
@@ -35,7 +36,7 @@ class _FakeCompactClient:
 
 
 def _compactor(client: ModelClient | None = None) -> Compactor:
-    return Compactor(client or _FakeCompactClient([]))
+    return Compactor(client or _FakeCompactClient([]), token_estimator=TokenEstimator())
 
 
 class CompactThresholdTests(unittest.TestCase):
@@ -78,7 +79,7 @@ class CompactWorkflowTests(unittest.TestCase):
             OneTurnResponse(content='Summary', finish_reason='stop', usage=TokenUsage())
         ])
 
-        result = Compactor(client).compact(messages, preserve_messages=1)
+        result = Compactor(client, token_estimator=TokenEstimator()).compact(messages, preserve_messages=1)
 
         self.assertTrue(result.compacted)
         request_messages = client.calls[0]['messages']
@@ -98,7 +99,7 @@ class CompactWorkflowTests(unittest.TestCase):
             OneTurnResponse(content='A\n\n\nB\n', finish_reason='stop', usage=TokenUsage())
         ])
 
-        result = Compactor(client).compact(messages, preserve_messages=1)
+        result = Compactor(client, token_estimator=TokenEstimator()).compact(messages, preserve_messages=1)
 
         self.assertEqual(result.summary_text, 'A\n\nB')
         self.assertIn('A\n\nB', messages[2]['content'])
@@ -114,7 +115,7 @@ class CompactWorkflowTests(unittest.TestCase):
             OneTurnResponse(content='Goal: continue work', finish_reason='stop', usage=TokenUsage())
         ])
 
-        result = Compactor(client).compact(messages, preserve_messages=1)
+        result = Compactor(client, token_estimator=TokenEstimator()).compact(messages, preserve_messages=1)
 
         self.assertTrue(result.compacted)
         self.assertEqual(messages[0]['content'], 'rule')
@@ -146,7 +147,7 @@ class CompactConversationTests(unittest.TestCase):
             )
         ])
 
-        result = Compactor(client).compact(messages, preserve_messages=1)
+        result = Compactor(client, token_estimator=TokenEstimator()).compact(messages, preserve_messages=1)
 
         self.assertTrue(result.compacted)
         self.assertEqual(result.usage.input_tokens, 7)
@@ -164,7 +165,7 @@ class CompactConversationTests(unittest.TestCase):
             OneTurnResponse(content='  ', finish_reason='stop', usage=TokenUsage(input_tokens=2, output_tokens=1))
         ])
 
-        result = Compactor(client).compact(messages, preserve_messages=1)
+        result = Compactor(client, token_estimator=TokenEstimator()).compact(messages, preserve_messages=1)
 
         self.assertFalse(result.compacted)
         self.assertEqual(result.error, 'Compact model returned empty summary')
