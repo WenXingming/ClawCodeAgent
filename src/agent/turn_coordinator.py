@@ -13,7 +13,7 @@ from agent.run_limits import RunLimits
 from agent.run_state import AgentRunState
 from core_contracts.config import BudgetConfig
 from core_contracts.errors import GatewayError, GatewayPermissionError, GatewayValidationError
-from core_contracts.model import ModelClient
+from core_contracts.model import ModelClient, ModelConfig
 from core_contracts.messaging import OneTurnResponse, ToolCall, ToolExecutionResult
 from core_contracts.primitives import JSONDict
 from core_contracts.outcomes import AgentRunResult
@@ -35,13 +35,14 @@ class TurnCoordinator:
     """负责单次 agent 调用的主循环推进。"""
 
     client: ModelClient  # 模型客户端。
+    model_config: ModelConfig  # 当前运行使用的模型配置（显式注入）。
     workspace_scope: WorkspaceScope  # 工作区范围配置。
     execution_policy: ExecutionPolicy  # 执行限制配置。
     context_policy: ContextPolicy  # 上下文治理配置。
     permissions: ToolPermissionPolicy  # 工具权限配置。
     budget_config: BudgetConfig  # 预算配置。
     session_paths: SessionPaths  # 会话路径配置。
-    session_manager: SessionGateway  # 会话管理门面。
+    session_gateway: SessionGateway  # 会话管理门面。
     workspace_gateway: WorkspaceGateway  # 工作区领域门面。
     context_manager: ContextGateway  # 上下文治理门面。
     tool_gateway: ToolsGateway = field(default_factory=ToolsGateway)
@@ -793,7 +794,7 @@ class TurnCoordinator:
 
                     child_agent = self._require_child_agent_factory()(child_agent_id)
                     if task.resume_session_id:
-                        session_snapshot = self.session_manager.load_session(task.resume_session_id)
+                        session_snapshot = self.session_gateway.load_session(task.resume_session_id)
                         child_result = child_agent.resume(task.prompt, session_snapshot)
                     else:
                         child_result = child_agent.run(task.prompt)
@@ -1132,7 +1133,7 @@ class TurnCoordinator:
         """
         guard = RunLimits(
             budget=self.budget_config,
-            pricing=self.client.model_config.pricing,
+            pricing=self.model_config.pricing,
             cost_baseline=run_state.cost_baseline,
         )
         for turn_index in range(1, self.execution_policy.max_turns + 1):

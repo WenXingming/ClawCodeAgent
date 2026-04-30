@@ -19,13 +19,13 @@ from agent.turn_coordinator import TurnCoordinator
 from context.context_gateway import ContextGateway
 from core_contracts.config import BudgetConfig
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, ToolPermissionPolicy, WorkspaceScope
-from core_contracts.interaction import SlashDispatcher
-from core_contracts.model import ModelClient
+from core_contracts.interaction import EnvironmentLoadSummary, SlashDispatcher
+from core_contracts.model import ModelClient, ModelConfig
 from core_contracts.outcomes import AgentRunResult
 from core_contracts.primitives import JSONDict
 from core_contracts.session import AgentSessionSnapshot, AgentSessionState
 from core_contracts.tools import ToolDescriptor
-from interaction.interaction_gateway import EnvironmentLoadSummary, InteractionGateway
+from interaction.interaction_gateway import InteractionGateway
 from session.session_gateway import SessionGateway
 from tools.tools_gateway import ToolsGateway
 from workspace import WorkspaceGateway
@@ -48,8 +48,9 @@ class AgentGateway:
     context_policy: ContextPolicy  # ContextPolicy: 上下文治理策略。
     permissions: ToolPermissionPolicy  # ToolPermissionPolicy: 文件写入与 shell 权限控制。
     session_paths: SessionPaths  # SessionPaths: session 与 scratchpad 的持久化路径。
-    session_manager: SessionGateway  # SessionGateway: 会话快照存取门面。
+    session_gateway: SessionGateway  # SessionGateway: 会话快照存取门面。
     budget_config: BudgetConfig | None = None  # BudgetConfig | None: 预算阈值配置，可被工作区覆盖。
+    model_config: ModelConfig | None = None  # ModelConfig | None: 运行期固定模型配置（可显式注入）。
     tool_gateway: ToolsGateway = field(default_factory=ToolsGateway)  # ToolsGateway: 工具注册与执行门面。
     delegation_service: DelegationService = field(default_factory=DelegationService)  # DelegationService: 子代理委派与分组状态。
     current_agent_id: str | None = None  # str | None: 当前调用树中的受管代理 ID。
@@ -64,13 +65,14 @@ class AgentGateway:
         default=TurnCoordinator
     )  # Callable[..., TurnCoordinator]: TurnCoordinator 构造工厂。
     slash_dispatcher_factory: Callable[[ContextGateway], SlashDispatcher] = field(
-        default=lambda context_gateway: InteractionGateway.SlashCommandDispatcher(context_gateway)
-    )  # Callable[[ContextGateway], SlashDispatcher]: slash 分发器构造工厂。
+        default=lambda context_gateway: InteractionGateway(context_gateway=context_gateway)
+    )  # Callable[[ContextGateway], SlashDispatcher]: slash 分发器构造工厂；默认创建携带 context 的 InteractionGateway。
     _context_gateway: ContextGateway | None = field(default=None, init=False, repr=False)
     _workspace_gateway: WorkspaceGateway | None = field(default=None, init=False, repr=False)
     _result_factory: ResultFactory | None = field(default=None, init=False, repr=False)
     _prompt_processor: PromptProcessor | None = field(default=None, init=False, repr=False)
     _turn_coordinator: TurnCoordinator | None = field(default=None, init=False, repr=False)
+    _effective_model_config: ModelConfig | None = field(default=None, init=False, repr=False)
 
     def run(self, prompt: str) -> AgentRunResult:
         """执行一轮端到端任务（新会话）。
@@ -186,26 +188,29 @@ class AgentGateway:
         self._workspace_gateway = self.workspace_gateway_factory(self.workspace_scope.cwd)
         self.tool_gateway.bind_workspace(self.workspace_scope.cwd)
         self.budget_config = self._workspace_gateway.apply_budget_config(self.budget_config)
+        self._effective_model_config = self._resolve_model_config()
         self._context_gateway = self.context_gateway_factory(self.client)
         self._result_factory = ResultFactory(
             client=self.client,
+            model_config=self._effective_model_config,
             workspace_scope=self.workspace_scope,
             execution_policy=self.execution_policy,
             context_policy=self.context_policy,
             permissions=self.permissions,
             budget_config=self.budget_config,
             session_paths=self.session_paths,
-            session_gateway=self.session_manager,
+            session_gateway=self.session_gateway,
         )
         self._turn_coordinator = self.turn_coordinator_factory(
             client=self.client,
+            model_config=self._effective_model_config,
             workspace_scope=self.workspace_scope,
             execution_policy=self.execution_policy,
             context_policy=self.context_policy,
             permissions=self.permissions,
             budget_config=self.budget_config,
             session_paths=self.session_paths,
-            session_manager=self.session_manager,
+            session_gateway=self.session_gateway,
             workspace_gateway=self._workspace_gateway,
             context_manager=self._context_gateway,
             tool_gateway=self.tool_gateway,
@@ -219,7 +224,7 @@ class AgentGateway:
             context_policy=self.context_policy,
             permissions=self.permissions,
             budget_config=self.budget_config,
-            model_config=self.client.model_config,
+            model_config=self._effective_model_config,
             workspace_gateway=self._workspace_gateway,
             tool_registry_getter=self._turn_coordinator.tool_registry_view,
             result_factory=self._result_factory,
@@ -258,8 +263,9 @@ class AgentGateway:
             self.context_policy,
             self.permissions,
             self.session_paths,
-            self.session_manager,
+            self.session_gateway,
             self.budget_config,
+            model_config=self._effective_model_config,
             tool_gateway=self.tool_gateway,
             delegation_service=self._turn_coordinator.delegation_service,
             current_agent_id=child_agent_id,
@@ -270,3 +276,17 @@ class AgentGateway:
         )
         child_agent.progress_reporter = self.progress_reporter
         return child_agent
+
+    def _resolve_model_config(self) -> ModelConfig:
+        """解析当前运行应使用的模型配置。"""
+        if self.model_config is not None:
+            return self.model_config
+        fallback = getattr(self.client, 'model_config', None)
+        if isinstance(fallback, ModelConfig):
+            return fallback
+        raise ValueError('AgentGateway requires an injected model_config when client does not expose one')
+
+    @property
+    def session_manager(self) -> SessionGateway:
+        """兼容旧调用方：`session_manager` 映射到 `session_gateway`。"""
+        return self.session_gateway

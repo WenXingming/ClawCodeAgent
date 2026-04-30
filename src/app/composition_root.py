@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.chat_loop import ChatLoop
 from app.runtime_builder import RuntimeBuilder
 from app.runtime_facade import AppRuntimeFacade
-from interaction.interaction_gateway import ExitRenderer, SlashCommandRenderer, StartupRenderer
+from interaction.interaction_gateway import InteractionGateway
 
 
 class AppCompositionRoot:
@@ -26,9 +26,7 @@ class AppCompositionRoot:
         )
         chat_loop = ChatLoop(
             session_manager_cls=session_manager_cls,
-            startup_renderer=StartupRenderer(),
-            exit_renderer=ExitRenderer(),
-            slash_renderer=SlashCommandRenderer(),
+            interaction_gateway=InteractionGateway(),
             chat_exit_commands=frozenset({'/exit', '/quit'}),
         )
         return AppRuntimeFacade(runtime_builder=runtime_builder, chat_loop=chat_loop)

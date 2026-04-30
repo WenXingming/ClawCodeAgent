@@ -49,10 +49,13 @@ from core_contracts.context import (
 from core_contracts.outcomes import AgentRunResult, QueryServiceConfig, QueryTurnResult
 from core_contracts.interaction import (
     EnvironmentLoadSummary,
+    ParsedSlashCommand,
     SessionSummary,
     SlashAutocompleteEntry,
+    SlashCommandResolution,
     SlashCommandContext,
     SlashCommandResult,
+    SlashCommandSpec,
 )
 from core_contracts.planning import (
     PlanStep,
@@ -125,10 +128,13 @@ __all__ = [
     'QueryTurnResult',
     # ── interaction ──
     'EnvironmentLoadSummary',
+    'ParsedSlashCommand',
     'SessionSummary',
     'SlashAutocompleteEntry',
+    'SlashCommandResolution',
     'SlashCommandContext',
     'SlashCommandResult',
+    'SlashCommandSpec',
     # ── planning ──
     'PlanStep',
     'PlanStepStatus',

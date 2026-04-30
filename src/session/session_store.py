@@ -17,13 +17,15 @@ from pathlib import Path
 from core_contracts.session import AgentSessionSnapshot
 
 
+DEFAULT_AGENT_SESSION_DIR = (Path('.port_sessions') / 'agent').resolve()  # Path：默认的会话快照目录绝对路径。
+
+
 class AgentSessionStore:
     """负责代理会话快照的文件持久化与恢复。
 
     该类被运行时用作最薄的一层文件存储适配器：外部只需传入快照对象或 session_id，即可完成保存与恢复。类内私有方法专门负责路径计算与 session_id 规范化，避免调用方重复处理文件系统细节。
     """
 
-    DEFAULT_AGENT_SESSION_DIR = (Path('.port_sessions') / 'agent').resolve()  # Path：默认的会话快照目录绝对路径。
 
     def __init__(self, directory: Path | None = None) -> None:
         """初始化会话快照存储器。
@@ -33,7 +35,7 @@ class AgentSessionStore:
         Returns:
             None: 该方法初始化实例并解析最终目录路径。
         """
-        self.directory = (directory or self.DEFAULT_AGENT_SESSION_DIR).resolve()
+        self.directory = (directory or DEFAULT_AGENT_SESSION_DIR).resolve()
         # Path：当前实例实际使用的会话快照根目录。
 
     def save(self, session_snapshot: AgentSessionSnapshot) -> Path:

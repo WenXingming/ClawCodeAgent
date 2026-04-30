@@ -7,10 +7,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Iterator, Protocol, runtime_checkable
 
 from ._coercion import _as_bool, _as_dict, _as_float, _as_str, _first_present
 from .primitives import JSONDict, TokenUsage
+
+if TYPE_CHECKING:
+    from .messaging import OneTurnResponse, StreamEvent
 
 
 @dataclass(frozen=True)
@@ -182,8 +185,6 @@ class ModelPricing:
 @runtime_checkable
 class ModelClient(Protocol):
     """跨模块使用的模型调用最小接口协议。"""
-
-    model_config: ModelConfig  # ModelConfig：当前使用的模型配置。
 
     def complete(
         self,

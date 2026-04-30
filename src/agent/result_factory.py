@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from agent.run_state import AgentRunState
 from core_contracts.config import BudgetConfig
-from core_contracts.model import ModelClient
+from core_contracts.model import ModelClient, ModelConfig
 from core_contracts.config import ToolPermissionPolicy
 from core_contracts.outcomes import AgentRunResult
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
@@ -19,6 +19,7 @@ class ResultFactory:
     """集中构造 session 快照与 AgentRunResult。"""
 
     client: ModelClient
+    model_config: ModelConfig
     workspace_scope: WorkspaceScope
     execution_policy: ExecutionPolicy
     context_policy: ContextPolicy
@@ -31,11 +32,11 @@ class ResultFactory:
         """基于当前运行态落盘并返回标准结果对象。"""
         transcript = run_state.session_state.transcript()
         events_snapshot = tuple(dict(item) for item in run_state.events)
-        delta_cost = self.client.model_config.pricing.estimate_cost_usd(run_state.usage_delta)
+        delta_cost = self.model_config.pricing.estimate_cost_usd(run_state.usage_delta)
         total_cost_usd = run_state.cost_baseline + delta_cost
         session_snapshot = AgentSessionSnapshot(
             session_id=run_state.session_id,
-            model_config=self.client.model_config,
+            model_config=self.model_config,
             workspace_scope=self.workspace_scope,
             execution_policy=self.execution_policy,
             context_policy=self.context_policy,

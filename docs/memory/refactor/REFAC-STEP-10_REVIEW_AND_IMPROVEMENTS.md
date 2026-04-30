@@ -35,7 +35,7 @@
 **状态**: 符合
 
 所有公开 Facade 类都采用了精简设计：
-- SessionManager: 4 个公开方法 (save_session, load_session, create_session_state, restore_session_state)
+- SessionManager: 4 个公开方法 (save_session, load_session, create_session_state, resume_session_state)
 - PlanningService: 8 个公开方法 (分为 Plan API 和 Task API)
 - ContextManager: 2 个公开方法 (estimate_tokens, compact_history)
 - ToolGateway: 4 个公开方法 (execute_tool, stream_tool, validate_permissions, get_registry)
