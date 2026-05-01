@@ -214,6 +214,129 @@ class ContextGateway:
             events=tuple(events),
         )
 
+    def complete_with_reactive_compact(
+        self,
+        *,
+        run_state: ContextRunState,
+        budget_config: BudgetConfig,
+        context_policy: ContextPolicy,
+        openai_tools: list[JSONDict],
+        guard: PreModelBudgetGuard,
+    ) -> ReactiveCompactOutcome:
+        """发起模型调用并在 context length 错误时执行 reactive compact 重试。
+
+        重试策略：每轮逐步收紧 preserve_messages（最少保留 1 条），最多重试两轮。
+        若重试后预算守卫仍拒绝继续，则提前返回 stop_reason 而非再次调用模型。
+
+        Args:
+            run_state (ContextRunState): 当前 turn 的运行态协议对象（就地更新 token 统计）。
+            budget_config (BudgetConfig): 预算限制配置。
+            context_policy (ContextPolicy): 上下文治理策略（compact 保留消息数等）。
+            openai_tools (list[JSONDict]): 当前可见工具 schema 列表。
+            guard (PreModelBudgetGuard): pre-model 预算守卫，用于重试后的二次检查。
+        Returns:
+            ReactiveCompactOutcome: 模型响应（成功时）或 stop_reason（守卫拒绝时）及事件序列。
+        Raises:
+            RuntimeError: 当网关未配置模型客户端时抛出。
+        """
+        events: list[JSONDict] = []
+        session_state = run_state.session_state
+        turn_index = run_state.turn_index
+        current_usage = run_state.usage_delta
+        current_model_call_count = run_state.model_call_count
+        attempt = 0
+        current_error: Exception | None = None
+        client = self._require_client()
+        compactor = self._require_compactor()
+
+        while True:
+            try:
+                response = client.complete(
+                    messages=session_state.to_messages(),
+                    tools=openai_tools,
+                    output_schema=context_policy.output_schema,
+                )
+                current_model_call_count += 1
+                current_usage = current_usage + response.usage
+                run_state.usage_delta = current_usage
+                run_state.model_call_count = current_model_call_count
+                return ReactiveCompactOutcome(
+                    response=response,
+                    stop_reason=None,
+                    events=tuple(events),
+                )
+            except Exception as exc:
+                current_error = exc
+                if (
+                    not compactor.is_context_length_error(exc)
+                    or attempt >= _MAX_REACTIVE_COMPACT_RETRIES
+                ):
+                    break
+
+                attempt += 1
+                preserve_messages = max(
+                    1, context_policy.compact_preserve_messages - (attempt - 1)
+                )
+                compact_result = compactor.compact(
+                    session_state.messages,
+                    preserve_messages=preserve_messages,
+                )
+
+                if not compact_result.compacted:
+                    events.append(
+                        self._make_retry_event(
+                            turn_index, attempt, preserve_messages, str(exc),
+                            ok=False,
+                            error=compact_result.error or 'Reactive compact made no progress',
+                        )
+                    )
+                    break
+
+                current_model_call_count += 1
+                current_usage = current_usage + compact_result.usage
+                events.append(
+                    self._make_compact_event(turn_index, 'reactive', compact_result, attempt=attempt)
+                )
+                events.append(
+                    self._make_retry_event(
+                        turn_index, attempt, preserve_messages, str(exc),
+                        ok=True,
+                        tokens_removed=compact_result.tokens_removed,
+                        messages_replaced=compact_result.messages_replaced,
+                    )
+                )
+
+                snapshot = self.project_budget(
+                    session_state.to_messages(),
+                    tools=openai_tools,
+                    max_input_tokens=budget_config.max_input_tokens,
+                )
+                run_state.token_budget_snapshot = snapshot
+                stop_reason = guard.check_pre_model(
+                    turns_offset=run_state.turns_offset,
+                    turns_this_run=run_state.turns_this_run,
+                    model_call_count=current_model_call_count,
+                    snapshot=snapshot,
+                    usage_delta=current_usage,
+                )
+                if stop_reason is not None:
+                    run_state.usage_delta = current_usage
+                    run_state.model_call_count = current_model_call_count
+                    return ReactiveCompactOutcome(
+                        response=None,
+                        stop_reason=stop_reason,
+                        events=tuple(events),
+                    )
+
+        events.append(self._make_backend_error_event(turn_index, str(current_error)))
+        run_state.usage_delta = current_usage
+        run_state.model_call_count = current_model_call_count
+        return ReactiveCompactOutcome(
+            response=None,
+            stop_reason=None,
+            events=tuple(events),
+        )
+
     def _require_client(self) -> ModelClient:
         """返回注入的模型客户端；未配置时抛出显式错误。
 
@@ -417,126 +540,4 @@ class ContextGateway:
             event['messages_replaced'] = messages_replaced
         return event
 
-    def complete_with_reactive_compact(
-        self,
-        *,
-        run_state: ContextRunState,
-        budget_config: BudgetConfig,
-        context_policy: ContextPolicy,
-        openai_tools: list[JSONDict],
-        guard: PreModelBudgetGuard,
-    ) -> ReactiveCompactOutcome:
-        """发起模型调用并在 context length 错误时执行 reactive compact 重试。
-
-        重试策略：每轮逐步收紧 preserve_messages（最少保留 1 条），最多重试两轮。
-        若重试后预算守卫仍拒绝继续，则提前返回 stop_reason 而非再次调用模型。
-
-        Args:
-            run_state (ContextRunState): 当前 turn 的运行态协议对象（就地更新 token 统计）。
-            budget_config (BudgetConfig): 预算限制配置。
-            context_policy (ContextPolicy): 上下文治理策略（compact 保留消息数等）。
-            openai_tools (list[JSONDict]): 当前可见工具 schema 列表。
-            guard (PreModelBudgetGuard): pre-model 预算守卫，用于重试后的二次检查。
-        Returns:
-            ReactiveCompactOutcome: 模型响应（成功时）或 stop_reason（守卫拒绝时）及事件序列。
-        Raises:
-            RuntimeError: 当网关未配置模型客户端时抛出。
-        """
-        events: list[JSONDict] = []
-        session_state = run_state.session_state
-        turn_index = run_state.turn_index
-        current_usage = run_state.usage_delta
-        current_model_call_count = run_state.model_call_count
-        attempt = 0
-        current_error: Exception | None = None
-        client = self._require_client()
-        compactor = self._require_compactor()
-
-        while True:
-            try:
-                response = client.complete(
-                    messages=session_state.to_messages(),
-                    tools=openai_tools,
-                    output_schema=context_policy.output_schema,
-                )
-                current_model_call_count += 1
-                current_usage = current_usage + response.usage
-                run_state.usage_delta = current_usage
-                run_state.model_call_count = current_model_call_count
-                return ReactiveCompactOutcome(
-                    response=response,
-                    stop_reason=None,
-                    events=tuple(events),
-                )
-            except Exception as exc:
-                current_error = exc
-                if (
-                    not compactor.is_context_length_error(exc)
-                    or attempt >= _MAX_REACTIVE_COMPACT_RETRIES
-                ):
-                    break
-
-                attempt += 1
-                preserve_messages = max(
-                    1, context_policy.compact_preserve_messages - (attempt - 1)
-                )
-                compact_result = compactor.compact(
-                    session_state.messages,
-                    preserve_messages=preserve_messages,
-                )
-
-                if not compact_result.compacted:
-                    events.append(
-                        self._make_retry_event(
-                            turn_index, attempt, preserve_messages, str(exc),
-                            ok=False,
-                            error=compact_result.error or 'Reactive compact made no progress',
-                        )
-                    )
-                    break
-
-                current_model_call_count += 1
-                current_usage = current_usage + compact_result.usage
-                events.append(
-                    self._make_compact_event(turn_index, 'reactive', compact_result, attempt=attempt)
-                )
-                events.append(
-                    self._make_retry_event(
-                        turn_index, attempt, preserve_messages, str(exc),
-                        ok=True,
-                        tokens_removed=compact_result.tokens_removed,
-                        messages_replaced=compact_result.messages_replaced,
-                    )
-                )
-
-                snapshot = self.project_budget(
-                    session_state.to_messages(),
-                    tools=openai_tools,
-                    max_input_tokens=budget_config.max_input_tokens,
-                )
-                run_state.token_budget_snapshot = snapshot
-                stop_reason = guard.check_pre_model(
-                    turns_offset=run_state.turns_offset,
-                    turns_this_run=run_state.turns_this_run,
-                    model_call_count=current_model_call_count,
-                    snapshot=snapshot,
-                    usage_delta=current_usage,
-                )
-                if stop_reason is not None:
-                    run_state.usage_delta = current_usage
-                    run_state.model_call_count = current_model_call_count
-                    return ReactiveCompactOutcome(
-                        response=None,
-                        stop_reason=stop_reason,
-                        events=tuple(events),
-                    )
-
-        events.append(self._make_backend_error_event(turn_index, str(current_error)))
-        run_state.usage_delta = current_usage
-        run_state.model_call_count = current_model_call_count
-        return ReactiveCompactOutcome(
-            response=None,
-            stop_reason=None,
-            events=tuple(events),
-        )
 

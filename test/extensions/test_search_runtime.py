@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib import error
 
-from workspace import WorkspaceGateway
+from backups.workspace import WorkspaceGateway
 
 
 class _FakeHTTPResponse:

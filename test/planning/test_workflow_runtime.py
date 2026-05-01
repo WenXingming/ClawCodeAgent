@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from core_contracts import TaskStatus, WorkflowRunStatus
-from planning import PlanningGateway
+from backups.planning import PlanningGateway
 
 
 class WorkflowRuntimeTests(unittest.TestCase):

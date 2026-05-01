@@ -11,7 +11,7 @@ from core_contracts.config import BudgetConfig
 from core_contracts.tools_contracts import ToolDescriptor
 from tools import ToolsGatewayFactory
 from tools.local.bash_security import ShellSecurityPolicy
-from workspace import WorkspaceGateway
+from backups.workspace import WorkspaceGateway
 
 
 class WorkspacePolicyGatewayTests(unittest.TestCase):

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from workspace import WorkspaceGateway
+from backups.workspace import WorkspaceGateway
 
 
 class WorkspaceWorktreeGatewayTests(unittest.TestCase):

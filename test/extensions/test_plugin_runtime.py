@@ -12,7 +12,7 @@ from core_contracts.tools_contracts import ToolExecutionRequest, build_execution
 from tools import ToolsGatewayFactory
 from tools.local.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutor
-from workspace import WorkspaceGateway
+from backups.workspace import WorkspaceGateway
 
 
 class WorkspacePluginGatewayTests(unittest.TestCase):
