@@ -28,11 +28,16 @@ from core_contracts.config import (
     WorkspaceScope,
 )
 from core_contracts.tools_contracts import (
+    McpCapabilityQuery,
+    McpResourceQuery,
     ToolDescriptor,
     ToolExecutionContext,
+    ToolExecutionRequest,
     ToolHandler,
     ToolStreamHandler,
     ToolStreamUpdate,
+    ToolsExecutionError,
+    ToolsGatewayError,
     build_execution_context,
 )
 from core_contracts.session_contracts import AgentSessionSnapshot, AgentSessionState
@@ -109,11 +114,16 @@ __all__ = [
     'ToolPermissionPolicy',
     'WorkspaceScope',
     # ── tools ──
+    'McpCapabilityQuery',
+    'McpResourceQuery',
     'ToolDescriptor',
     'ToolExecutionContext',
+    'ToolExecutionRequest',
     'ToolHandler',
     'ToolStreamHandler',
     'ToolStreamUpdate',
+    'ToolsExecutionError',
+    'ToolsGatewayError',
     'build_execution_context',
     # ── session ──
     'AgentSessionSnapshot',

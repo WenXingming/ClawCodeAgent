@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from tools.bash_security import (
+from tools.local.bash_security import (
     SecurityBehavior,
     ShellSecurityPolicy,
 )
@@ -17,24 +17,24 @@ class BashSecurityTests(unittest.TestCase):
         self.policy = ShellSecurityPolicy()
 
     def test_split_command_supports_chained_segments(self) -> None:
-        parts = self.policy.split_command("echo a && echo b; echo c | findstr c")
+        parts = self.policy._split_command("echo a && echo b; echo c | findstr c")
         self.assertEqual(parts, ['echo a', 'echo b', 'echo c', 'findstr c'])
 
     def test_bash_command_is_safe_allows_simple_read_only_command(self) -> None:
-        result = self.policy.analyze_command('echo hello')
+        result = self.policy._analyze_command('echo hello')
         self.assertEqual(result.behavior, SecurityBehavior.ALLOW)
 
     def test_bash_command_is_safe_blocks_command_substitution(self) -> None:
-        result = self.policy.analyze_command('echo $(whoami)')
+        result = self.policy._analyze_command('echo $(whoami)')
         self.assertEqual(result.behavior, SecurityBehavior.DENY)
         self.assertIn('substitution', result.message.lower())
 
     def test_get_destructive_command_warning_detects_rm_rf(self) -> None:
-        warning = self.policy.get_destructive_command_warning('echo ok && rm -rf /tmp/a')
+        warning = self.policy._get_destructive_command_warning('echo ok && rm -rf /tmp/a')
         self.assertIsNotNone(warning)
 
     def test_is_command_read_only_recognizes_safe_chain(self) -> None:
-        self.assertTrue(self.policy.is_command_read_only('echo hi && dir'))
+        self.assertTrue(self.policy._is_command_read_only('echo hi && dir'))
 
     def test_check_shell_security_blocks_when_shell_disabled(self) -> None:
         allowed, reason = self.policy.check_shell_security(

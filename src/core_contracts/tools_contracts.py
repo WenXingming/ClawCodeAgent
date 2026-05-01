@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator, Mapping
+from typing import TYPE_CHECKING, Callable, Iterator, Mapping, Optional
 
 from core_contracts.config import ToolPermissionPolicy
+from core_contracts.errors import GatewayError, GatewayRuntimeError
 from core_contracts.messaging import ToolExecutionResult
 from core_contracts.primitives import JSONDict
 
@@ -95,4 +96,41 @@ def build_execution_context(
         safe_env=dict(safe_env or {}),
         tool_registry=tool_registry,
     )
+
+
+class ToolsGatewayError(GatewayError):
+    """tools 模块的基础统一异常。"""
+
+
+class ToolsExecutionError(GatewayRuntimeError):
+    """tools 模块执行期的统一运行时异常。"""
+
+
+@dataclass(frozen=True)
+class ToolExecutionRequest:
+    """标准化的工具执行请求契约。"""
+
+    tool_name: str
+    arguments: JSONDict
+    context: ToolExecutionContext
+    server_name: Optional[str] = None
+    max_chars: int = 12000
+
+
+@dataclass(frozen=True)
+class McpResourceQuery:
+    """MCP 资源查询请求契约。"""
+
+    query: Optional[str] = None
+    server_name: Optional[str] = None
+    limit: int = 100
+
+
+@dataclass(frozen=True)
+class McpCapabilityQuery:
+    """MCP 能力查询请求契约。"""
+
+    query: Optional[str] = None
+    server_name: Optional[str] = None
+    limit: int = 100
 

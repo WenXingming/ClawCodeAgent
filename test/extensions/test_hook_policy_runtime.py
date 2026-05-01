@@ -9,7 +9,8 @@ from pathlib import Path
 
 from core_contracts.config import BudgetConfig
 from core_contracts.tools_contracts import ToolDescriptor
-from tools.tools_gateway import ToolsGateway
+from tools import ToolsGatewayFactory
+from tools.local.bash_security import ShellSecurityPolicy
 from workspace import WorkspaceGateway
 
 
@@ -17,7 +18,7 @@ class WorkspacePolicyGatewayTests(unittest.TestCase):
     """验证策略 manifest 发现、合并与工具过滤。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolsGateway()
+        self.registry = ToolsGatewayFactory.create_default_registry(ShellSecurityPolicy())
 
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
         manifest_dir = workspace / '.claw' / 'policies'
@@ -67,7 +68,7 @@ class WorkspacePolicyGatewayTests(unittest.TestCase):
             )
 
             gateway = WorkspaceGateway.from_workspace(workspace)
-            merged = gateway.prepare_tool_registry(self.tool_gateway.default_registry())
+            merged = gateway.prepare_tool_registry(self.registry)
             applied_budget = gateway.apply_budget_config(BudgetConfig())
 
         self.assertNotIn('read_file', merged)
@@ -80,7 +81,7 @@ class WorkspacePolicyGatewayTests(unittest.TestCase):
         self.assertEqual(gateway.policy_count, 2)
 
     def test_filter_tool_registry_applies_deny_tools_and_prefixes(self) -> None:
-        registry = self.tool_gateway.default_registry()
+        registry = dict(self.registry)
         registry['workspace_banner'] = ToolDescriptor(
             name='workspace_banner',
             description='plugin virtual tool',
@@ -123,7 +124,7 @@ class WorkspacePolicyGatewayTests(unittest.TestCase):
                 },
             )
             gateway = WorkspaceGateway.from_workspace(workspace)
-            gateway.prepare_tool_registry(self.tool_gateway.default_registry())
+            gateway.prepare_tool_registry(self.registry)
 
         self.assertEqual(gateway.resolve_block('read_file')['source'], 'policy')
         self.assertEqual(gateway.resolve_block('workspace_banner')['reason'], 'deny_prefixes')
@@ -133,4 +134,3 @@ class WorkspacePolicyGatewayTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

@@ -16,7 +16,8 @@ from core_contracts.interaction_contracts import SlashCommandContext
 from interaction import SlashCommandDispatcher
 from core_contracts.interaction_contracts import SlashCommandSpec
 from core_contracts.session_contracts import AgentSessionState
-from tools.tools_gateway import ToolsGateway
+from tools import ToolsGatewayFactory
+from tools.local.bash_security import ShellSecurityPolicy
 
 
 def _make_mock_context_gateway() -> MagicMock:
@@ -40,7 +41,7 @@ class SlashCommandModuleTests(unittest.TestCase):
         """为每个测试用例创建独立的 slash 分发器实例（注入 mock context gateway）。"""
         self.dispatcher = SlashCommandDispatcher(context_manager=_make_mock_context_gateway())
         self._load_default_specs(self.dispatcher)
-        self.tool_gateway = ToolsGateway()
+        self.registry = ToolsGatewayFactory.create_default_registry(ShellSecurityPolicy())
 
     @staticmethod
     def _load_default_specs(dispatcher: SlashCommandDispatcher) -> None:
@@ -102,7 +103,7 @@ class SlashCommandModuleTests(unittest.TestCase):
             ),
             budget_config=BudgetConfig(),
             model_config=ModelConfig(model='demo-model'),
-            tool_registry=self.tool_gateway.default_registry(),
+            tool_registry=self.registry,
         )
 
     def test_parse_slash_command_extracts_name_and_arguments(self) -> None:

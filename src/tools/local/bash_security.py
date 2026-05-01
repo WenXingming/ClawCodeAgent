@@ -16,17 +16,17 @@ from enum import Enum
 class SecurityBehavior(Enum):
     """表示一次 shell 安全检查的高层结论。"""
 
-    ALLOW = 'allow'  # str: 明确允许执行。
-    DENY = 'deny'  # str: 明确拒绝执行。
-    PASSTHROUGH = 'passthrough'  # str: 需要结合上层权限继续判断。
+    ALLOW = 'allow'
+    DENY = 'deny'
+    PASSTHROUGH = 'passthrough'
 
 
 @dataclass(frozen=True)
 class SecurityResult:
     """表示一次 shell 安全检查的结构化结果。"""
 
-    behavior: SecurityBehavior  # SecurityBehavior: 当前命令的安全判定结果。
-    message: str  # str: 面向上层展示的解释信息。
+    behavior: SecurityBehavior
+    message: str
 
 
 @dataclass(frozen=True)
@@ -37,9 +37,11 @@ class ShellSecurityPolicy:
     对外仅暴露 check_shell_security 作为权限联合判断入口。
     """
 
+    # ── 属性定义 ──────────────────────────────────────────────────────
+
     control_char_re: re.Pattern[str] = field(
         default_factory=lambda: re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
-    )  # re.Pattern[str]: 匹配不可见控制字符的正则。
+    )
     substitution_patterns: tuple[tuple[re.Pattern[str], str], ...] = field(
         default_factory=lambda: (
             (re.compile(r'\$\('), '$() command substitution'),
@@ -48,7 +50,7 @@ class ShellSecurityPolicy:
             (re.compile(r'>\('), '>() process substitution'),
             (re.compile(r'\$\{'), '${} parameter expansion'),
         )
-    )  # tuple[tuple[re.Pattern[str], str], ...]: 命令替换模式与描述。
+    )
     destructive_patterns: tuple[tuple[re.Pattern[str], str], ...] = field(
         default_factory=lambda: (
             (re.compile(r'(^|[;&|]\s*)rm\s+-[a-zA-Z]*[rR][a-zA-Z]*[fF]?'), 'Potential data deletion via rm'),
@@ -62,7 +64,7 @@ class ShellSecurityPolicy:
             (re.compile(r'(^|[;&|]\s*)reboot\b'), 'Potential reboot command'),
             (re.compile(r'(^|[;&|]\s*):\s*>'), 'Potential file truncation with : > file'),
         )
-    )  # tuple[tuple[re.Pattern[str], str], ...]: 破坏性命令模式与告警。
+    )
     read_only_commands: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {
@@ -72,9 +74,9 @@ class ShellSecurityPolicy:
                 'hostname', 'date', 'time', 'git',
             }
         )
-    )  # frozenset[str]: 只读命令白名单。
+    )
 
-    # ── 主入口 ─────────────────────────────────────────────────────
+    # ── 公有主入口 ────────────────────────────────────────────────────
 
     def check_shell_security(
         self,
@@ -84,30 +86,34 @@ class ShellSecurityPolicy:
         allow_destructive: bool,
     ) -> tuple[bool, str]:
         """结合权限开关与命令风险判断是否允许执行。
+
         Args:
-            command (str): 待检查的原始命令字符串。
-            allow_shell (bool): 是否启用了 shell 命令权限。
-            allow_destructive (bool): 是否允许破坏性命令。
+            command: 待检查的原始命令字符串。
+            allow_shell: 是否启用了 shell 命令权限。
+            allow_destructive: 是否允许破坏性命令。
+
         Returns:
-            tuple[bool, str]: (是否允许, 拒绝原因) 元组；允许时原因为空串。
+            (是否允许, 拒绝原因) 元组；允许时原因为空串。
         """
         if not allow_shell:
             return False, 'Shell commands are disabled: allow_shell_commands=false'
 
-        result = self.analyze_command(command)
+        result = self._analyze_command(command)
         if result.behavior == SecurityBehavior.DENY and not allow_destructive:
             return False, result.message
 
         return True, ''
 
-    # ── 命令分析 ────────────────────────────────────────────────────
+    # ── 私有方法（深度优先调用链顺序） ──────────────────────────────────
 
-    def analyze_command(self, command: str) -> SecurityResult:
+    def _analyze_command(self, command: str) -> SecurityResult:
         """仅基于命令文本判断 shell 命令是否安全。
+
         Args:
-            command (str): 待分析的命令文本。
+            command: 待分析的命令文本。
+
         Returns:
-            SecurityResult: 安全检查的结构化结果。
+            安全检查的结构化结果。
         """
         stripped = command.strip()
         if not stripped:
@@ -120,56 +126,34 @@ class ShellSecurityPolicy:
         if substitution is not None:
             return SecurityResult(SecurityBehavior.DENY, f'Command contains {substitution}')
 
-        warning = self.get_destructive_command_warning(stripped)
+        warning = self._get_destructive_command_warning(stripped)
         if warning is not None:
             return SecurityResult(SecurityBehavior.DENY, warning)
 
         return SecurityResult(SecurityBehavior.ALLOW, 'Command passed security checks')
 
     def _contains_control_characters(self, command: str) -> bool:
-        """检查命令是否包含不可见控制字符。
-        Args:
-            command (str): 待检查的命令文本。
-        Returns:
-            bool: 存在控制字符时为 True。
-        """
+        """检查命令是否包含不可见控制字符。"""
         return bool(self.control_char_re.search(command))
 
     def _match_command_substitution(self, command: str) -> str | None:
-        """匹配可能隐藏附加执行行为的替换语法。
-        Args:
-            command (str): 待检查的命令文本。
-        Returns:
-            str | None: 匹配到的替换模式描述；无匹配时返回 None。
-        """
+        """匹配可能隐藏附加执行行为的替换语法。"""
         for pattern, description in self.substitution_patterns:
             if pattern.search(command):
                 return description
         return None
 
-    def get_destructive_command_warning(self, command: str) -> str | None:
-        """匹配命令中的破坏性特征并返回告警文本。
-        Args:
-            command (str): 待检查的命令文本。
-        Returns:
-            str | None: 匹配到的破坏性告警；无匹配时返回 None。
-        """
+    def _get_destructive_command_warning(self, command: str) -> str | None:
+        """匹配命令中的破坏性特征并返回告警文本。"""
         lowered = command.lower()
         for pattern, warning in self.destructive_patterns:
             if pattern.search(lowered):
                 return warning
         return None
 
-    # ── 只读判定 ────────────────────────────────────────────────────
-
-    def is_command_read_only(self, command: str) -> bool:
-        """粗略判断一条命令链是否处于只读命令子集。
-        Args:
-            command (str): 待判断的命令文本。
-        Returns:
-            bool: 全部段落在只读子集中时为 True。
-        """
-        segments = self.split_command(command)
+    def _is_command_read_only(self, command: str) -> bool:
+        """粗略判断一条命令链是否处于只读命令子集。"""
+        segments = self._split_command(command)
         if not segments:
             return True
 
@@ -187,13 +171,8 @@ class ShellSecurityPolicy:
                 return False
         return True
 
-    def split_command(self, command: str) -> list[str]:
-        """按链式操作符拆分命令，同时保留引号内文本。
-        Args:
-            command (str): 原始命令文本。
-        Returns:
-            list[str]: 按 ; | && || 拆分后的独立命令段列表。
-        """
+    def _split_command(self, command: str) -> list[str]:
+        """按链式操作符拆分命令，同时保留引号内文本。"""
         if not command:
             return []
 

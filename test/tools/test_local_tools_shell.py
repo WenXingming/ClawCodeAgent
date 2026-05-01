@@ -6,10 +6,15 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from core_contracts.config import ToolPermissionPolicy
-from core_contracts.config import ExecutionPolicy, WorkspaceScope
+from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
+from core_contracts.tools_contracts import ToolExecutionRequest, build_execution_context
+from tools import ToolsGatewayFactory
+from tools.local.bash_security import ShellSecurityPolicy
+from tools.executor import ToolExecutor
+from tools.mcp_adapter import McpOperationsAdapter
+from tools.registry_builder import DynamicRegistryBuilder
 from tools.tools_gateway import ToolsGateway
 
 
@@ -17,7 +22,12 @@ class LocalToolsShellTests(unittest.TestCase):
     """验证 bash 工具权限、安全与流式执行行为。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolsGateway()
+        self.registry = ToolsGatewayFactory.create_default_registry(ShellSecurityPolicy())
+        self.gateway = ToolsGateway(
+            local_executor=ToolExecutor(),
+            registry_builder=MagicMock(spec=DynamicRegistryBuilder),
+            mcp_adapter=MagicMock(spec=McpOperationsAdapter),
+        )
 
     def _build_context(
         self,
@@ -29,38 +39,37 @@ class LocalToolsShellTests(unittest.TestCase):
         command_timeout_seconds: float = 3.0,
         safe_env: dict[str, str] | None = None,
     ):
-        workspace_scope = WorkspaceScope(cwd=workspace)
-        execution_policy = ExecutionPolicy(
-            max_output_chars=max_output_chars,
-            command_timeout_seconds=command_timeout_seconds,
-        )
-        permissions = ToolPermissionPolicy(
-            allow_shell_commands=allow_shell_commands,
-            allow_destructive_shell_commands=allow_destructive_shell_commands,
-        )
-        registry = self.tool_gateway.default_registry()
-        context = self.tool_gateway.build_context(
-            workspace_scope,
-            execution_policy,
-            permissions,
-            tool_registry=registry,
+        return build_execution_context(
+            WorkspaceScope(cwd=workspace),
+            ExecutionPolicy(max_output_chars=max_output_chars, command_timeout_seconds=command_timeout_seconds),
+            ToolPermissionPolicy(
+                allow_shell_commands=allow_shell_commands,
+                allow_destructive_shell_commands=allow_destructive_shell_commands,
+            ),
+            tool_registry=self.registry,
             safe_env=safe_env,
         )
-        return registry, context
+
+    def _execute(self, tool_name: str, arguments: dict, context) -> object:
+        request = ToolExecutionRequest(tool_name=tool_name, arguments=arguments, context=context)
+        return self.gateway.execute_tool(request, self.registry)
+
+    def _execute_streaming(self, tool_name: str, arguments: dict, context) -> list:
+        request = ToolExecutionRequest(tool_name=tool_name, arguments=arguments, context=context)
+        return list(self.gateway.execute_tool_streaming(request, self.registry))
 
     def test_registry_contains_bash_tool(self) -> None:
-        registry = self.tool_gateway.default_registry()
-        self.assertIn('bash', registry)
+        self.assertIn('bash', self.registry)
 
     def test_bash_is_blocked_when_shell_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(
+            context = self._build_context(
                 workspace,
                 allow_shell_commands=False,
                 allow_destructive_shell_commands=False,
             )
-            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo hi'}, context)
+            result = self._execute('bash', {'command': 'echo hi'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'permission_denied')
@@ -68,12 +77,12 @@ class LocalToolsShellTests(unittest.TestCase):
     def test_bash_blocks_destructive_command_when_unsafe_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(
+            context = self._build_context(
                 workspace,
                 allow_shell_commands=True,
                 allow_destructive_shell_commands=False,
             )
-            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo ok && rm -rf /tmp/a'}, context)
+            result = self._execute('bash', {'command': 'echo ok && rm -rf /tmp/a'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'permission_denied')
@@ -81,12 +90,12 @@ class LocalToolsShellTests(unittest.TestCase):
     def test_bash_executes_safe_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(
+            context = self._build_context(
                 workspace,
                 allow_shell_commands=True,
                 allow_destructive_shell_commands=False,
             )
-            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo hello-shell'}, context)
+            result = self._execute('bash', {'command': 'echo hello-shell'}, context)
 
         self.assertTrue(result.ok)
         self.assertEqual(result.metadata.get('action'), 'bash')
@@ -96,19 +105,12 @@ class LocalToolsShellTests(unittest.TestCase):
     def test_bash_stream_output_can_be_replayed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(
+            context = self._build_context(
                 workspace,
                 allow_shell_commands=True,
                 allow_destructive_shell_commands=False,
             )
-            updates = list(
-                self.tool_gateway.execute_streaming(
-                    registry,
-                    'bash',
-                    {'command': 'echo alpha && echo beta'},
-                    context,
-                )
-            )
+            updates = self._execute_streaming('bash', {'command': 'echo alpha && echo beta'}, context)
 
         stdout_text = ''.join(update.chunk for update in updates if update.kind == 'stdout')
         result_updates = [update for update in updates if update.kind == 'result']
@@ -130,13 +132,13 @@ class LocalToolsShellTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(
+            context = self._build_context(
                 workspace,
                 allow_shell_commands=True,
                 allow_destructive_shell_commands=False,
                 command_timeout_seconds=0.01,
             )
-            result = self.tool_gateway.execute(registry, 'bash', {'command': 'sleep forever'}, context)
+            result = self._execute('bash', {'command': 'sleep forever'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'tool_execution_error')
@@ -150,13 +152,13 @@ class LocalToolsShellTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(
+            context = self._build_context(
                 workspace,
                 allow_shell_commands=True,
                 allow_destructive_shell_commands=False,
                 safe_env={'POLICY_FLAG': 'enabled'},
             )
-            result = self.tool_gateway.execute(registry, 'bash', {'command': 'echo hello'}, context)
+            result = self._execute('bash', {'command': 'echo hello'}, context)
 
         self.assertTrue(result.ok)
         self.assertEqual(mock_popen.call_args.kwargs['env']['POLICY_FLAG'], 'enabled')
@@ -164,4 +166,3 @@ class LocalToolsShellTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

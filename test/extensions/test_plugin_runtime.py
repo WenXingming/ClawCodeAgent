@@ -8,7 +8,10 @@ import unittest
 from pathlib import Path
 
 from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
-from tools.tools_gateway import ToolsGateway
+from core_contracts.tools_contracts import ToolExecutionRequest, build_execution_context
+from tools import ToolsGatewayFactory
+from tools.local.bash_security import ShellSecurityPolicy
+from tools.executor import ToolExecutor
 from workspace import WorkspaceGateway
 
 
@@ -16,7 +19,8 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
     """验证网关上的插件注册、摘要与 hook/block 能力。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolsGateway()
+        self.executor = ToolExecutor()
+        self.registry = ToolsGatewayFactory.create_default_registry(ShellSecurityPolicy())
 
     def _write_manifest(self, workspace: Path, filename: str, payload: dict[str, object]) -> None:
         manifest_dir = workspace / '.claw' / 'plugins'
@@ -27,7 +31,7 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
         )
 
     def _build_context(self, workspace: Path, registry: dict[str, object]):
-        return self.tool_gateway.build_context(
+        return build_execution_context(
             WorkspaceScope(cwd=workspace),
             ExecutionPolicy(),
             ToolPermissionPolicy(
@@ -36,6 +40,15 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
                 allow_destructive_shell_commands=False,
             ),
             tool_registry=registry,
+        )
+
+    def _execute(self, registry: dict, tool_name: str, arguments: dict, context) -> object:
+        request = ToolExecutionRequest(tool_name=tool_name, arguments=arguments, context=context)
+        return self.executor.execute(
+            tool_registry=registry,
+            name=request.tool_name,
+            arguments=request.arguments,
+            context=request.context,
         )
 
     def test_prepare_tool_registry_registers_alias_and_virtual_tools(self) -> None:
@@ -67,12 +80,11 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
             )
 
             gateway = WorkspaceGateway.from_workspace(workspace)
-            base_registry = self.tool_gateway.default_registry()
-            merged_registry = gateway.prepare_tool_registry(base_registry)
+            merged_registry = gateway.prepare_tool_registry(self.registry)
             context = self._build_context(workspace, merged_registry)
 
-            alias_result = self.tool_gateway.execute(merged_registry, 'read_readme', {}, context)
-            virtual_result = self.tool_gateway.execute(merged_registry, 'workspace_banner', {}, context)
+            alias_result = self._execute(merged_registry, 'read_readme', {}, context)
+            virtual_result = self._execute(merged_registry, 'workspace_banner', {}, context)
 
         self.assertIn('read_readme', merged_registry)
         self.assertIn('workspace_banner', merged_registry)
@@ -113,10 +125,9 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
             )
 
             gateway = WorkspaceGateway.from_workspace(workspace)
-            base_registry = self.tool_gateway.default_registry()
-            merged_registry = gateway.prepare_tool_registry(base_registry)
+            merged_registry = gateway.prepare_tool_registry(self.registry)
 
-        self.assertEqual(merged_registry['read_file'].description, base_registry['read_file'].description)
+        self.assertEqual(merged_registry['read_file'].description, self.registry['read_file'].description)
 
         summary = gateway.render_plugin_summary()
         self.assertIn('conflict-plugin', summary)
@@ -139,7 +150,7 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
             )
 
             gateway = WorkspaceGateway.from_workspace(workspace)
-            gateway.prepare_tool_registry(self.tool_gateway.default_registry())
+            gateway.prepare_tool_registry(self.registry)
 
         self.assertEqual(gateway.get_before_hooks('bash_exec')[0]['content'], 'plugin before')
         self.assertEqual(gateway.get_after_hooks('bash_exec')[0]['content'], 'plugin after')
@@ -149,4 +160,3 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

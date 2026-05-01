@@ -11,9 +11,15 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
-from core_contracts.config import ToolPermissionPolicy
-from core_contracts.config import ExecutionPolicy, WorkspaceScope
+from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
+from core_contracts.tools_contracts import ToolExecutionRequest, build_execution_context
+from tools import ToolsGatewayFactory
+from tools.local.bash_security import ShellSecurityPolicy
+from tools.executor import ToolExecutor
+from tools.mcp_adapter import McpOperationsAdapter
+from tools.registry_builder import DynamicRegistryBuilder
 from tools.tools_gateway import ToolsGateway
 
 
@@ -21,7 +27,12 @@ class LocalToolsTests(unittest.TestCase):
     """验证 ISSUE-004 工具层最小闭环。"""
 
     def setUp(self) -> None:
-        self.tool_gateway = ToolsGateway()
+        self.registry = ToolsGatewayFactory.create_default_registry(ShellSecurityPolicy())
+        self.gateway = ToolsGateway(
+            local_executor=ToolExecutor(),
+            registry_builder=MagicMock(spec=DynamicRegistryBuilder),
+            mcp_adapter=MagicMock(spec=McpOperationsAdapter),
+        )
 
     def _build_context(
         self,
@@ -31,33 +42,31 @@ class LocalToolsTests(unittest.TestCase):
         max_output_chars: int = 12000,
     ):
         """构造工具上下文。"""
-        workspace_scope = WorkspaceScope(cwd=workspace)
-        execution_policy = ExecutionPolicy(max_output_chars=max_output_chars)
-        permissions = ToolPermissionPolicy(allow_file_write=allow_file_write)
-        registry = self.tool_gateway.default_registry()
-        context = self.tool_gateway.build_context(
-            workspace_scope,
-            execution_policy,
-            permissions,
-            tool_registry=registry,
+        return build_execution_context(
+            WorkspaceScope(cwd=workspace),
+            ExecutionPolicy(max_output_chars=max_output_chars),
+            ToolPermissionPolicy(allow_file_write=allow_file_write),
+            tool_registry=self.registry,
         )
-        return registry, context
+
+    def _execute(self, tool_name: str, arguments: dict, context) -> object:
+        """通过网关执行一次工具调用。"""
+        request = ToolExecutionRequest(tool_name=tool_name, arguments=arguments, context=context)
+        return self.gateway.execute_tool(request, self.registry)
 
     def test_registry_contains_four_base_tools(self) -> None:
-        registry = self.tool_gateway.default_registry()
-        self.assertIn('list_dir', registry)
-        self.assertIn('read_file', registry)
-        self.assertIn('write_file', registry)
-        self.assertIn('edit_file', registry)
+        self.assertIn('list_dir', self.registry)
+        self.assertIn('read_file', self.registry)
+        self.assertIn('write_file', self.registry)
+        self.assertIn('edit_file', self.registry)
 
     def test_list_dir_returns_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
             (workspace / 'src').mkdir()
             (workspace / 'a.txt').write_text('hello', encoding='utf-8')
-
-            registry, context = self._build_context(workspace, allow_file_write=False)
-            result = self.tool_gateway.execute(registry, 'list_dir', {'path': '.'}, context)
+            context = self._build_context(workspace, allow_file_write=False)
+            result = self._execute('list_dir', {'path': '.'}, context)
 
         self.assertTrue(result.ok)
         self.assertIn('src/', result.content)
@@ -68,18 +77,8 @@ class LocalToolsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
             (workspace / 'demo.txt').write_text('line1\nline2\nline3\n', encoding='utf-8')
-
-            registry, context = self._build_context(workspace, allow_file_write=False)
-            result = self.tool_gateway.execute(
-                registry,
-                'read_file',
-                {
-                    'path': 'demo.txt',
-                    'start_line': 2,
-                    'end_line': 3,
-                },
-                context,
-            )
+            context = self._build_context(workspace, allow_file_write=False)
+            result = self._execute('read_file', {'path': 'demo.txt', 'start_line': 2, 'end_line': 3}, context)
 
         self.assertTrue(result.ok)
         self.assertEqual(result.content, 'line2\nline3\n')
@@ -89,13 +88,8 @@ class LocalToolsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
             (workspace / 'long.txt').write_text('x' * 200, encoding='utf-8')
-
-            registry, context = self._build_context(
-                workspace,
-                allow_file_write=False,
-                max_output_chars=40,
-            )
-            result = self.tool_gateway.execute(registry, 'read_file', {'path': 'long.txt'}, context)
+            context = self._build_context(workspace, allow_file_write=False, max_output_chars=40)
+            result = self._execute('read_file', {'path': 'long.txt'}, context)
 
         self.assertTrue(result.ok)
         self.assertIn('output truncated', result.content)
@@ -104,13 +98,8 @@ class LocalToolsTests(unittest.TestCase):
     def test_write_file_requires_permission(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(workspace, allow_file_write=False)
-            result = self.tool_gateway.execute(
-                registry,
-                'write_file',
-                {'path': 'a.txt', 'content': 'hello'},
-                context,
-            )
+            context = self._build_context(workspace, allow_file_write=False)
+            result = self._execute('write_file', {'path': 'a.txt', 'content': 'hello'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'permission_denied')
@@ -118,13 +107,8 @@ class LocalToolsTests(unittest.TestCase):
     def test_write_file_creates_parent_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(workspace, allow_file_write=True)
-            result = self.tool_gateway.execute(
-                registry,
-                'write_file',
-                {'path': 'nested/a.txt', 'content': 'hello'},
-                context,
-            )
+            context = self._build_context(workspace, allow_file_write=True)
+            result = self._execute('write_file', {'path': 'nested/a.txt', 'content': 'hello'}, context)
             target = workspace / 'nested' / 'a.txt'
             self.assertTrue(result.ok)
             self.assertTrue(target.exists())
@@ -136,14 +120,8 @@ class LocalToolsTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             target = workspace / 'demo.txt'
             target.write_text('foo foo foo', encoding='utf-8')
-
-            registry, context = self._build_context(workspace, allow_file_write=True)
-            result = self.tool_gateway.execute(
-                registry,
-                'edit_file',
-                {'path': 'demo.txt', 'old_text': 'foo', 'new_text': 'bar'},
-                context,
-            )
+            context = self._build_context(workspace, allow_file_write=True)
+            result = self._execute('edit_file', {'path': 'demo.txt', 'old_text': 'foo', 'new_text': 'bar'}, context)
             updated = target.read_text(encoding='utf-8')
 
         self.assertTrue(result.ok)
@@ -155,17 +133,10 @@ class LocalToolsTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             target = workspace / 'demo.txt'
             target.write_text('foo foo foo', encoding='utf-8')
-
-            registry, context = self._build_context(workspace, allow_file_write=True)
-            result = self.tool_gateway.execute(
-                registry,
+            context = self._build_context(workspace, allow_file_write=True)
+            result = self._execute(
                 'edit_file',
-                {
-                    'path': 'demo.txt',
-                    'old_text': 'foo',
-                    'new_text': 'bar',
-                    'replace_all': True,
-                },
+                {'path': 'demo.txt', 'old_text': 'foo', 'new_text': 'bar', 'replace_all': True},
                 context,
             )
             updated = target.read_text(encoding='utf-8')
@@ -179,14 +150,8 @@ class LocalToolsTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             target = workspace / 'demo.txt'
             target.write_text('hello', encoding='utf-8')
-
-            registry, context = self._build_context(workspace, allow_file_write=True)
-            result = self.tool_gateway.execute(
-                registry,
-                'edit_file',
-                {'path': 'demo.txt', 'old_text': 'missing', 'new_text': 'x'},
-                context,
-            )
+            context = self._build_context(workspace, allow_file_write=True)
+            result = self._execute('edit_file', {'path': 'demo.txt', 'old_text': 'missing', 'new_text': 'x'}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'tool_execution_error')
@@ -196,14 +161,8 @@ class LocalToolsTests(unittest.TestCase):
             workspace = Path(tmp_dir)
             outside = workspace.parent / 'outside.txt'
             outside.write_text('sensitive', encoding='utf-8')
-
-            registry, context = self._build_context(workspace, allow_file_write=False)
-            result = self.tool_gateway.execute(
-                registry,
-                'read_file',
-                {'path': str(outside)},
-                context,
-            )
+            context = self._build_context(workspace, allow_file_write=False)
+            result = self._execute('read_file', {'path': str(outside)}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'tool_execution_error')
@@ -212,8 +171,8 @@ class LocalToolsTests(unittest.TestCase):
     def test_unknown_tool_returns_structured_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace = Path(tmp_dir)
-            registry, context = self._build_context(workspace, allow_file_write=False)
-            result = self.tool_gateway.execute(registry, 'unknown_tool', {}, context)
+            context = self._build_context(workspace, allow_file_write=False)
+            result = self._execute('unknown_tool', {}, context)
 
         self.assertFalse(result.ok)
         self.assertEqual(result.metadata.get('error_kind'), 'unknown_tool')
@@ -221,4 +180,3 @@ class LocalToolsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
