@@ -133,11 +133,11 @@ class GatewaySlashDelegationTests(unittest.TestCase):
         from core_contracts.config import (
             BudgetConfig,
             ContextPolicy,
-            ToolPermissionPolicy,
             WorkspaceScope,
         )
         from core_contracts.model import ModelConfig
         from core_contracts.session_contracts import AgentSessionState
+        from core_contracts.tools_contracts import ToolPermissionPolicy, ToolRegistry
 
         session_state = AgentSessionState()
         session_state.append_user('hello')
@@ -151,7 +151,7 @@ class GatewaySlashDelegationTests(unittest.TestCase):
             permissions=ToolPermissionPolicy(),
             budget_config=BudgetConfig(),
             model_config=ModelConfig(model='test'),
-            tool_registry={},
+            tool_registry=ToolRegistry.from_tools(),
         )
 
         result = self.gw.dispatch_slash_command(context, '/help')
@@ -163,11 +163,11 @@ class GatewaySlashDelegationTests(unittest.TestCase):
         from core_contracts.config import (
             BudgetConfig,
             ContextPolicy,
-            ToolPermissionPolicy,
             WorkspaceScope,
         )
         from core_contracts.model import ModelConfig
         from core_contracts.session_contracts import AgentSessionState
+        from core_contracts.tools_contracts import ToolPermissionPolicy, ToolRegistry
 
         session_state = AgentSessionState()
         context = SlashCommandContext(
@@ -180,7 +180,7 @@ class GatewaySlashDelegationTests(unittest.TestCase):
             permissions=ToolPermissionPolicy(),
             budget_config=BudgetConfig(),
             model_config=ModelConfig(model='test'),
-            tool_registry={},
+            tool_registry=ToolRegistry.from_tools(),
         )
 
         result = self.gw.dispatch_slash_command(context, 'regular chat prompt')

@@ -209,47 +209,6 @@ class SessionPaths:
         )
 
 
-# ── 权限策略 ────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class ToolPermissionPolicy:
-    """运行时和工具执行使用的权限开关。"""
-
-    allow_file_write: bool = False  # bool：是否允许写文件。
-    allow_shell_commands: bool = False  # bool：是否允许执行 shell 命令。
-    allow_destructive_shell_commands: bool = False  # bool：是否允许破坏性 shell 命令。
-
-    def to_dict(self) -> JSONDict:
-        """把权限策略序列化为字典。
-
-        Returns:
-            JSONDict: 包含 allow_file_write、allow_shell_commands 和 allow_destructive_shell_commands 的字典。
-        """
-        return {
-            'allow_file_write': self.allow_file_write,
-            'allow_shell_commands': self.allow_shell_commands,
-            'allow_destructive_shell_commands': self.allow_destructive_shell_commands,
-        }
-
-    @classmethod
-    def from_dict(cls, payload: JSONDict | None) -> 'ToolPermissionPolicy':
-        """从 JSON 字典恢复权限策略配置。
-
-        Args:
-            payload (JSONDict | None): 待反序列化的原始字典，兼容 camelCase 字段名。
-        Returns:
-            ToolPermissionPolicy: 恢复后的权限策略对象。
-        """
-        data = _as_dict(payload)
-        return cls(
-            allow_file_write=_as_bool(_first_present(data, 'allow_file_write', 'allowFileWrite'), False),
-            allow_shell_commands=_as_bool(_first_present(data, 'allow_shell_commands', 'allowShellCommands'), False),
-            allow_destructive_shell_commands=_as_bool(
-                _first_present(data, 'allow_destructive_shell_commands', 'allowDestructiveShellCommands'), False
-            ),
-        )
-
-
 # ── 预算配置 ────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)

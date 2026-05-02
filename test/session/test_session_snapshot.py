@@ -8,10 +8,10 @@ from uuid import uuid4
 
 from core_contracts.config import BudgetConfig
 from core_contracts.model import ModelConfig
-from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, ExecutionPolicy, SessionPaths, WorkspaceScope
 from core_contracts.primitives import TokenUsage
 from core_contracts.session_contracts import AgentSessionSnapshot
+from core_contracts.tools_contracts import ToolPermissionPolicy
 
 
 _TEST_TMP_ROOT = (Path(__file__).resolve().parent / '.tmp').resolve()

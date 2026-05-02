@@ -7,17 +7,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterator, Mapping
+from typing import Callable, Iterator
 
-from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
 from core_contracts.errors import GatewayError, GatewayPermissionError, GatewayRuntimeError
 from core_contracts.messaging import ToolExecutionResult
 from core_contracts.primitives import JSONDict
 from core_contracts.tools_contracts import (
+    ToolPermissionPolicy,
     ToolDescriptor,
     ToolExecutionContext,
+    ToolRegistry,
     ToolStreamUpdate,
-    build_execution_context,
 )
 
 
@@ -48,11 +49,11 @@ class ToolExecutor:
         execution_policy: ExecutionPolicy,
         permissions: ToolPermissionPolicy,
         *,
-        tool_registry: Mapping[str, ToolDescriptor] | None = None,
+        tool_registry: ToolRegistry | None = None,
         safe_env: dict[str, str] | None = None,
     ) -> ToolExecutionContext:
         """根据运行时配置构造工具执行上下文。"""
-        return build_execution_context(
+        return ToolExecutionContext.build(
             workspace_scope,
             execution_policy,
             permissions,
@@ -62,7 +63,7 @@ class ToolExecutor:
 
     def execute(
         self,
-        tool_registry: Mapping[str, ToolDescriptor],
+        tool_registry: ToolRegistry,
         name: str,
         arguments: JSONDict,
         context: ToolExecutionContext,
@@ -83,7 +84,7 @@ class ToolExecutor:
 
     def execute_streaming(
         self,
-        tool_registry: Mapping[str, ToolDescriptor],
+        tool_registry: ToolRegistry,
         name: str,
         arguments: JSONDict,
         context: ToolExecutionContext,
@@ -113,7 +114,7 @@ class ToolExecutor:
 
     def execute_call(
         self,
-        tool_registry: Mapping[str, ToolDescriptor],
+        tool_registry: ToolRegistry,
         name: str,
         arguments: JSONDict,
         context: ToolExecutionContext,

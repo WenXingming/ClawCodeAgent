@@ -11,15 +11,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core_contracts.config import (
-    ExecutionPolicy,
-    ToolPermissionPolicy,
-    WorkspaceScope,
-)
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
 from core_contracts.messaging import ToolExecutionResult
 from core_contracts.tools_contracts import (
     ToolDescriptor,
     ToolExecutionContext,
+    ToolPermissionPolicy,
     ToolStreamUpdate,
 )
 from tools.executor import ToolExecutor, ToolExecutionError, ToolPermissionError

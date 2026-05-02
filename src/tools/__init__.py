@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.tools_contracts import ToolDescriptor, ToolRegistry
 from tools.local.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutor
 from tools.local.filesystem_tools import FileSystemToolProvider
@@ -37,19 +37,20 @@ class ToolsGatewayFactory:
             local_executor=ToolExecutor(),
             registry_builder=DynamicRegistryBuilder(workspace_gateway=workspace_gateway),
             mcp_adapter=McpOperationsAdapter(mcp_runtime=mcp_runtime),
+            tool_registry=ToolsGatewayFactory.create_default_registry(ShellSecurityPolicy()),
         )
 
     @staticmethod
-    def create_default_registry(shell_security_policy: ShellSecurityPolicy) -> dict[str, ToolDescriptor]:
+    def create_default_registry(shell_security_policy: ShellSecurityPolicy) -> ToolRegistry:
         """组装内置的本地基础工具注册表。
         Args:
             shell_security_policy (ShellSecurityPolicy): Shell 命令安全策略实例
         Returns:
-            dict[str, ToolDescriptor]: 包含基础工具的注册表字典
+            ToolRegistry: 包含基础工具的注册表对象
         """
         tools = list(FileSystemToolProvider().build_tools())
         tools.append(ShellToolProvider(shell_security_policy).build_tool())
-        return {tool.name: tool for tool in tools}
+        return ToolRegistry.from_tools(*tools)
 
 
 __all__ = [

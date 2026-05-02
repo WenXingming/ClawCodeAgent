@@ -7,8 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
-from core_contracts.tools_contracts import ToolExecutionRequest, build_execution_context
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
+from core_contracts.tools_contracts import ToolExecutionContext, ToolExecutionRequest, ToolPermissionPolicy
 from tools import ToolsGatewayFactory
 from tools.local.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutor
@@ -31,7 +31,7 @@ class WorkspacePluginGatewayTests(unittest.TestCase):
         )
 
     def _build_context(self, workspace: Path, registry: dict[str, object]):
-        return build_execution_context(
+        return ToolExecutionContext.build(
             WorkspaceScope(cwd=workspace),
             ExecutionPolicy(),
             ToolPermissionPolicy(

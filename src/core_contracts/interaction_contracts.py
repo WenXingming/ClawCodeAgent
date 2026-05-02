@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Literal, Mapping, Protocol
+from typing import Callable, Literal, Protocol
 
-from .config import BudgetConfig, ContextPolicy, ToolPermissionPolicy, WorkspaceScope
+from .config import BudgetConfig, ContextPolicy, WorkspaceScope
 from .model import ModelConfig
 from .primitives import JSONDict
 from .session_contracts import AgentSessionState
-from .tools_contracts import ToolDescriptor
+from .tools_contracts import ToolPermissionPolicy, ToolRegistry
 
 
 @dataclass(frozen=True)
@@ -107,7 +107,7 @@ class SlashCommandContext:
     permissions: ToolPermissionPolicy  # ToolPermissionPolicy：工具权限。
     budget_config: BudgetConfig  # BudgetConfig：预算配置。
     model_config: ModelConfig  # ModelConfig：模型配置。
-    tool_registry: Mapping[str, ToolDescriptor]  # Mapping[str, ToolDescriptor]：工具注册表。
+    tool_registry: ToolRegistry  # ToolRegistry：工具注册表。
     plugin_summary: str = ''  # str：插件加载摘要。
 
 

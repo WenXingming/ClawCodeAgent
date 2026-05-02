@@ -15,13 +15,13 @@ from .config import (
     ContextPolicy,
     ExecutionPolicy,
     SessionPaths,
-    ToolPermissionPolicy,
     WorkspaceScope,
 )
 from .messaging import ToolCall, ToolExecutionResult
 from .model import ModelConfig
 from .primitives import JSONDict, TokenUsage
 from .messaging import OneTurnResponse
+from .tools_contracts import ToolPermissionPolicy
 
 
 class SessionContractError(RuntimeError):

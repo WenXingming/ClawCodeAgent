@@ -9,13 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterator, Mapping
 
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
 from core_contracts.messaging import ToolExecutionResult
 from core_contracts.primitives import JSONDict
 from core_contracts.tools_contracts import (
     McpCapabilityQuery,
     McpResourceQuery,
-    ToolDescriptor,
+    ToolExecutionContext,
+    ToolPermissionPolicy,
     ToolExecutionRequest,
+    ToolRegistry,
     ToolStreamUpdate,
 )
 from tools.executor import ToolExecutor
@@ -23,61 +26,78 @@ from tools.mcp_adapter import McpOperationsAdapter
 from tools.registry_builder import DynamicRegistryBuilder
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolsGateway:
     """tools 领域唯一对外入口。"""
 
     local_executor: ToolExecutor
     registry_builder: DynamicRegistryBuilder
     mcp_adapter: McpOperationsAdapter
+    tool_registry: ToolRegistry
 
     def extend_runtime_registry(
         self,
-        base_registry: Mapping[str, ToolDescriptor],
         handlers: Mapping[str, Callable],
-    ) -> dict[str, ToolDescriptor]:
+    ) -> ToolRegistry:
         """基于当前运行状态补齐动态工具描述符。
 
         Args:
-            base_registry: 基础工具注册表。
             handlers: 用于绑定动态工具的处理函数映射。
 
         Returns:
             组合完成的最终工具注册表。
         """
-        return self.registry_builder.build_extended_registry(base_registry, handlers)
+        self.tool_registry = self.registry_builder.build_extended_registry(self.tool_registry, handlers)
+        return self.tool_registry
 
-    def execute_tool(self, request: ToolExecutionRequest, registry: Mapping[str, ToolDescriptor]) -> ToolExecutionResult:
+    def to_openai_tools(self) -> list[JSONDict]:
+        """返回当前工具注册表对应的 OpenAI 兼容 schema 列表。"""
+        return self.tool_registry.to_openai_tools()
+
+    def build_execution_context(
+        self,
+        workspace_scope: WorkspaceScope,
+        execution_policy: ExecutionPolicy,
+        permissions: ToolPermissionPolicy,
+        *,
+        safe_env: dict[str, str] | None = None,
+    ) -> ToolExecutionContext:
+        """按当前网关状态构造工具执行上下文。"""
+        return ToolExecutionContext.build(
+            workspace_scope,
+            execution_policy,
+            permissions,
+            tool_registry=self.tool_registry,
+            safe_env=safe_env,
+        )
+
+    def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResult:
         """执行标准的工具调用请求。
 
         Args:
             request: 标准请求契约。
-            registry: 工具注册表。
-
         Returns:
             标准化的工具执行结果。
         """
         return self.local_executor.execute(
-            tool_registry=registry,
+            tool_registry=self.tool_registry,
             name=request.tool_name,
             arguments=request.arguments,
             context=request.context,
         )
 
     def execute_tool_streaming(
-        self, request: ToolExecutionRequest, registry: Mapping[str, ToolDescriptor]
+        self, request: ToolExecutionRequest
     ) -> Iterator[ToolStreamUpdate]:
         """执行流式工具调用请求。
 
         Args:
             request: 标准请求契约。
-            registry: 工具注册表。
-
         Returns:
             流式事件更新序列。
         """
         yield from self.local_executor.execute_streaming(
-            tool_registry=registry,
+            tool_registry=self.tool_registry,
             name=request.tool_name,
             arguments=request.arguments,
             context=request.context,

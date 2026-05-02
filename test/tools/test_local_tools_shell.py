@@ -8,14 +8,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
-from core_contracts.tools_contracts import ToolExecutionRequest, build_execution_context
-from tools import ToolsGatewayFactory
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
+from core_contracts.tools_contracts import ToolExecutionContext, ToolExecutionRequest, ToolPermissionPolicy
+from tools import ToolsGateway, ToolsGatewayFactory
 from tools.local.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutor
 from tools.mcp_adapter import McpOperationsAdapter
 from tools.registry_builder import DynamicRegistryBuilder
-from tools.tools_gateway import ToolsGateway
 
 
 class LocalToolsShellTests(unittest.TestCase):
@@ -27,6 +26,7 @@ class LocalToolsShellTests(unittest.TestCase):
             local_executor=ToolExecutor(),
             registry_builder=MagicMock(spec=DynamicRegistryBuilder),
             mcp_adapter=MagicMock(spec=McpOperationsAdapter),
+            tool_registry=self.registry,
         )
 
     def _build_context(
@@ -39,7 +39,7 @@ class LocalToolsShellTests(unittest.TestCase):
         command_timeout_seconds: float = 3.0,
         safe_env: dict[str, str] | None = None,
     ):
-        return build_execution_context(
+        return ToolExecutionContext.build(
             WorkspaceScope(cwd=workspace),
             ExecutionPolicy(max_output_chars=max_output_chars, command_timeout_seconds=command_timeout_seconds),
             ToolPermissionPolicy(
@@ -52,11 +52,11 @@ class LocalToolsShellTests(unittest.TestCase):
 
     def _execute(self, tool_name: str, arguments: dict, context) -> object:
         request = ToolExecutionRequest(tool_name=tool_name, arguments=arguments, context=context)
-        return self.gateway.execute_tool(request, self.registry)
+        return self.gateway.execute_tool(request)
 
     def _execute_streaming(self, tool_name: str, arguments: dict, context) -> list:
         request = ToolExecutionRequest(tool_name=tool_name, arguments=arguments, context=context)
-        return list(self.gateway.execute_tool_streaming(request, self.registry))
+        return list(self.gateway.execute_tool_streaming(request))
 
     def test_registry_contains_bash_tool(self) -> None:
         self.assertIn('bash', self.registry)

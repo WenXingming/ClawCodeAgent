@@ -22,9 +22,8 @@ from core_contracts.interaction_contracts import (
     SlashCommandResult,
     SlashCommandSpec,
 )
-from core_contracts.primitives import JSONDict
 from core_contracts.session_contracts import AgentSessionState
-from core_contracts.tools_contracts import ToolDescriptor
+from core_contracts.tools_contracts import ToolRegistry
 
 
 class SlashCommandDispatcher:
@@ -339,7 +338,7 @@ class SlashCommandDispatcher:
                     'Provide a ContextGateway when creating InteractionGateway to enable this command.'
                 ),
             )
-        openai_tools = self._build_openai_tools(context.tool_registry)
+        openai_tools = ToolRegistry.from_mapping(context.tool_registry).to_openai_tools()
         snapshot = self._context_manager.project_budget(
             context.session_state.to_messages(),
             tools=openai_tools,
@@ -364,16 +363,6 @@ class SlashCommandDispatcher:
             command_name='context',
             output='\n'.join(lines),
         )
-
-    def _build_openai_tools(self, tool_registry: Mapping[str, ToolDescriptor]) -> list[JSONDict]:
-        """把本地工具注册表投影为 OpenAI 工具 schema 列表。
-
-        Args:
-            tool_registry (Mapping[str, ToolDescriptor]): 当前会话可见的本地工具注册表。
-        Returns:
-            list[JSONDict]: 供预算评估器计算 token 占用的工具 schema 列表。
-        """
-        return [tool.to_openai_tool() for tool in tool_registry.values()]
 
     def _render_optional_int(self, value: int | None) -> str:
         """把可选整数格式化为展示文本。

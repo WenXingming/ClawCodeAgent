@@ -19,7 +19,6 @@ from core_contracts.config import (
     ContextPolicy,
     ExecutionPolicy,
     SessionPaths,
-    ToolPermissionPolicy,
     WorkspaceScope,
 )
 from core_contracts.model import ModelConfig
@@ -36,6 +35,7 @@ from core_contracts.session_contracts import (
     SessionStateResumeRequest,
     SessionValidationError,
 )
+from core_contracts.tools_contracts import ToolPermissionPolicy
 from session.session_gateway import SessionGateway
 
 

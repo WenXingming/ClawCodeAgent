@@ -12,24 +12,22 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from core_contracts.config import (
-    ExecutionPolicy,
-    ToolPermissionPolicy,
-    WorkspaceScope,
-)
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
 from core_contracts.messaging import ToolExecutionResult
 from core_contracts.tools_contracts import (
     McpCapabilityQuery,
     McpResourceQuery,
+    ToolPermissionPolicy,
     ToolDescriptor,
     ToolExecutionContext,
     ToolExecutionRequest,
+    ToolRegistry,
     ToolStreamUpdate,
 )
+from tools import ToolsGateway
 from tools.executor import ToolExecutor
 from tools.mcp_adapter import McpOperationsAdapter
 from tools.registry_builder import DynamicRegistryBuilder
-from tools.tools_gateway import ToolsGateway
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
@@ -84,6 +82,7 @@ def gateway(mock_local_executor, mock_registry_builder, mock_mcp_adapter) -> Too
         local_executor=mock_local_executor,
         registry_builder=mock_registry_builder,
         mcp_adapter=mock_mcp_adapter,
+        tool_registry=ToolRegistry.from_tools(_make_descriptor('seed')),
     )
 
 
@@ -94,11 +93,15 @@ class TestExtendRuntimeRegistry:
     """验证 extend_runtime_registry 委托到 DynamicRegistryBuilder。"""
 
     def test_delegates_to_builder(self, gateway: ToolsGateway, mock_registry_builder: MagicMock) -> None:
-        base = {'a': _make_descriptor('a')}
+        base = ToolRegistry.from_tools(_make_descriptor('a'))
+        gateway.tool_registry = base
         handlers = {'workspace_search': _dummy_handler}
-        mock_registry_builder.build_extended_registry.return_value = {**base, 'ws': _make_descriptor('ws')}
+        mock_registry_builder.build_extended_registry.return_value = ToolRegistry.from_tools(
+            _make_descriptor('a'),
+            _make_descriptor('ws'),
+        )
 
-        result = gateway.extend_runtime_registry(base, handlers)
+        result = gateway.extend_runtime_registry(handlers)
 
         mock_registry_builder.build_extended_registry.assert_called_once_with(base, handlers)
         assert 'a' in result
@@ -117,11 +120,12 @@ class TestExecuteTool:
             arguments={'arg': 'val'},
             context=_make_context(),
         )
-        registry = {'test': _make_descriptor('test')}
+        registry = ToolRegistry.from_tools(_make_descriptor('test'))
+        gateway.tool_registry = registry
         expected = ToolExecutionResult(name='test', ok=True, content='done', metadata={})
         mock_local_executor.execute.return_value = expected
 
-        result = gateway.execute_tool(request, registry)
+        result = gateway.execute_tool(request)
 
         mock_local_executor.execute.assert_called_once_with(
             tool_registry=registry,
@@ -144,14 +148,15 @@ class TestExecuteToolStreaming:
             arguments={},
             context=_make_context(),
         )
-        registry = {'test': _make_descriptor('test')}
+        registry = ToolRegistry.from_tools(_make_descriptor('test'))
+        gateway.tool_registry = registry
         updates = [
             ToolStreamUpdate(kind='stdout', chunk='data'),
             ToolStreamUpdate(kind='result', result=ToolExecutionResult(name='test', ok=True, content='done', metadata={})),
         ]
         mock_local_executor.execute_streaming.return_value = iter(updates)
 
-        result = list(gateway.execute_tool_streaming(request, registry))
+        result = list(gateway.execute_tool_streaming(request))
 
         mock_local_executor.execute_streaming.assert_called_once_with(
             tool_registry=registry,
@@ -160,6 +165,16 @@ class TestExecuteToolStreaming:
             context=request.context,
         )
         assert len(result) == 2
+
+
+class TestOpenaiToolsProjection:
+    """验证 to_openai_tools 通过 ToolRegistry 暴露 schema。"""
+
+    def test_returns_registry_projection(self, gateway: ToolsGateway) -> None:
+        gateway.tool_registry = ToolRegistry.from_tools(_make_descriptor('demo'))
+        tools = gateway.to_openai_tools()
+        assert len(tools) == 1
+        assert tools[0]['function']['name'] == 'demo'
 
 
 # ── list_mcp_resources ──────────────────────────────────────────────────────

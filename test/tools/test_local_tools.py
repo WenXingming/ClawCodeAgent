@@ -13,14 +13,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from core_contracts.config import ExecutionPolicy, ToolPermissionPolicy, WorkspaceScope
-from core_contracts.tools_contracts import ToolExecutionRequest, build_execution_context
-from tools import ToolsGatewayFactory
+from core_contracts.config import ExecutionPolicy, WorkspaceScope
+from core_contracts.tools_contracts import ToolExecutionContext, ToolExecutionRequest, ToolPermissionPolicy, ToolRegistry
+from tools import ToolsGateway, ToolsGatewayFactory
 from tools.local.bash_security import ShellSecurityPolicy
 from tools.executor import ToolExecutor
 from tools.mcp_adapter import McpOperationsAdapter
 from tools.registry_builder import DynamicRegistryBuilder
-from tools.tools_gateway import ToolsGateway
 
 
 class LocalToolsTests(unittest.TestCase):
@@ -32,6 +31,7 @@ class LocalToolsTests(unittest.TestCase):
             local_executor=ToolExecutor(),
             registry_builder=MagicMock(spec=DynamicRegistryBuilder),
             mcp_adapter=MagicMock(spec=McpOperationsAdapter),
+            tool_registry=self.registry,
         )
 
     def _build_context(
@@ -42,7 +42,7 @@ class LocalToolsTests(unittest.TestCase):
         max_output_chars: int = 12000,
     ):
         """构造工具上下文。"""
-        return build_execution_context(
+        return ToolExecutionContext.build(
             WorkspaceScope(cwd=workspace),
             ExecutionPolicy(max_output_chars=max_output_chars),
             ToolPermissionPolicy(allow_file_write=allow_file_write),
@@ -52,7 +52,7 @@ class LocalToolsTests(unittest.TestCase):
     def _execute(self, tool_name: str, arguments: dict, context) -> object:
         """通过网关执行一次工具调用。"""
         request = ToolExecutionRequest(tool_name=tool_name, arguments=arguments, context=context)
-        return self.gateway.execute_tool(request, self.registry)
+        return self.gateway.execute_tool(request)
 
     def test_registry_contains_four_base_tools(self) -> None:
         self.assertIn('list_dir', self.registry)

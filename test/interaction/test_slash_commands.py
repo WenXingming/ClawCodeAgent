@@ -10,12 +10,12 @@ from unittest.mock import MagicMock
 from core_contracts.config import BudgetConfig
 from core_contracts.context_contracts import BudgetProjection
 from core_contracts.model import ModelConfig
-from core_contracts.config import ToolPermissionPolicy
 from core_contracts.config import ContextPolicy, WorkspaceScope
 from core_contracts.interaction_contracts import SlashCommandContext
 from interaction import SlashCommandDispatcher
 from core_contracts.interaction_contracts import SlashCommandSpec
 from core_contracts.session_contracts import AgentSessionState
+from core_contracts.tools_contracts import ToolPermissionPolicy
 from tools import ToolsGatewayFactory
 from tools.local.bash_security import ShellSecurityPolicy
 

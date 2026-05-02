@@ -24,7 +24,6 @@ from core_contracts.config import (
     ContextPolicy,
     ExecutionPolicy,
     SessionPaths,
-    ToolPermissionPolicy,
     WorkspaceScope,
 )
 from core_contracts.tools_contracts import (
@@ -34,11 +33,12 @@ from core_contracts.tools_contracts import (
     ToolExecutionContext,
     ToolExecutionRequest,
     ToolHandler,
+    ToolPermissionPolicy,
+    ToolRegistry,
     ToolStreamHandler,
     ToolStreamUpdate,
     ToolsExecutionError,
     ToolsGatewayError,
-    build_execution_context,
 )
 from core_contracts.session_contracts import AgentSessionSnapshot, AgentSessionState
 from core_contracts.context_contracts import (
@@ -107,11 +107,12 @@ __all__ = [
     'ToolExecutionContext',
     'ToolExecutionRequest',
     'ToolHandler',
+    'ToolPermissionPolicy',
+    'ToolRegistry',
     'ToolStreamHandler',
     'ToolStreamUpdate',
     'ToolsExecutionError',
     'ToolsGatewayError',
-    'build_execution_context',
     # ── session ──
     'AgentSessionSnapshot',
     'AgentSessionState',
